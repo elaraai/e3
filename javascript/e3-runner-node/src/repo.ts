@@ -1,5 +1,6 @@
 /**
- * Repository discovery and validation for E3 runner
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 import * as fs from 'fs';

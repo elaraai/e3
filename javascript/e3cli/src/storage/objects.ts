@@ -1,7 +1,6 @@
 /**
- * Object storage helpers for E3 repository
- *
- * Handles content-addressable storage in the objects/ directory.
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 import * as fs from 'fs/promises';

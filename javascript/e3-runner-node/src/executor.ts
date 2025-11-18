@@ -1,9 +1,10 @@
 /**
- * Task execution - compile and run IR
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 import * as path from 'path';
-import { type IR, IntegerType, EastIR } from '@elaraai/east';
+import { EastIR } from '@elaraai/east';
 import {
   loadCommit,
   loadIR,
@@ -117,7 +118,7 @@ export async function executeTask(
     console.log(`[${taskId.slice(0, 8)}] ✓ Complete`);
   } catch (error) {
     const endTime = Date.now();
-    const executionTimeUs = (endTime - startTime) * 1000;
+    const _executionTimeUs = (endTime - startTime) * 1000;
 
     console.error(`[${taskId.slice(0, 8)}] ✗ Error:`, error);
 

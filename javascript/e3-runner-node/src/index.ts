@@ -1,7 +1,6 @@
 /**
- * E3 Node.js Runner Library
- *
- * Core functionality for the Node.js task runner.
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 // TODO: Export runner API

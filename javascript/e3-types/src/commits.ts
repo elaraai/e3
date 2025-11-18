@@ -1,7 +1,6 @@
 /**
- * E3 Commit Type Definitions
- *
- * Defines the structure of commits in the E3 repository using East types.
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 import { VariantType, StructType, StringType, ArrayType, IntegerType, NullType, ValueTypeOf } from '@elaraai/east';

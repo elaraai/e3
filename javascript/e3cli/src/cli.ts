@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * E3 CLI - East Execution Engine Command-Line Interface
- *
- * Main entry point for the e3 command-line tool.
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 import { Command } from 'commander';

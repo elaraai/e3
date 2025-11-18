@@ -1,10 +1,6 @@
 /**
- * E3 Development Kit
- *
- * Platform definitions for the East Execution Engine, including:
- * - Standard East core functionality
- * - Cross-language `execute` platform function
- * - Type definitions for multi-runtime execution
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 // Re-export everything from East core

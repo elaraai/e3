@@ -29,18 +29,21 @@
   ],
   "license": "UNLICENSED",
   "dependencies": {
-    "@elaraai/east": "file:../../../East",
-    "@elaraai/e3dk": "file:../e3dk",
     "@elaraai/e3-types": "file:../e3-types",
+    "@elaraai/e3dk": "file:../e3dk",
+    "@elaraai/east": "file:../../../East",
+    "commander": "^12.0.0",
     "ink": "^5.0.1",
     "ink-spinner": "^5.0.0",
-    "react": "^18.3.1",
-    "commander": "^12.0.0"
+    "react": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.0",
-    "typescript": "^5.6.0",
-    "eslint": "^9.0.0"
+    "@typescript-eslint/eslint-plugin": "^8.47.0",
+    "@typescript-eslint/parser": "^8.47.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-headers": "^1.3.3",
+    "typescript": "^5.6.0"
   }
 }

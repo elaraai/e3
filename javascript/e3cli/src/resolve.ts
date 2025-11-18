@@ -1,5 +1,6 @@
 /**
- * Resolve references and hashes (git-like)
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 import * as fs from 'fs/promises';

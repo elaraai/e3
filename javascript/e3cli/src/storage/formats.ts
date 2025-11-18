@@ -1,21 +1,18 @@
 /**
- * File format support for E3
- *
- * Handles .json, .east, and .beast2 formats
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 import * as fs from 'fs/promises';
-import { createReadStream, createWriteStream } from 'fs';
+import { createWriteStream } from 'fs';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import {
   encodeBeast2For,
   decodeBeast2For,
-  decodeBeast2,
   parseFor,
   printFor,
   fromJSONFor,
-  toJSONFor,
   IRType,
   type IR,
 } from '@elaraai/east';

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * E3 Node.js Runner - Execute East tasks in the Node.js runtime
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
  */
 
 import { Command } from 'commander';
