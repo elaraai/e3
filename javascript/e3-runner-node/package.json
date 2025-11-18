@@ -1,0 +1,39 @@
+{
+  "name": "@elaraai/e3-runner-node",
+  "version": "0.0.1-alpha.0",
+  "description": "East Execution Engine Node.js Runner - Execute East tasks in the Node.js runtime",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "bin": {
+    "e3-runner-node": "./dist/src/runner.js"
+  },
+  "files": [
+    "dist/src",
+    "!dist/src/**/*.spec.*",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --enable-source-maps --test 'dist/src/**/*.spec.js'",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "dev": "npm run build && node --enable-source-maps dist/src/runner.js"
+  },
+  "keywords": [
+    "east",
+    "e3",
+    "runner",
+    "nodejs"
+  ],
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@elaraai/east": "file:../../East",
+    "@elaraai/e3dk": "file:../e3dk"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "eslint": "^9.0.0"
+  }
+}
