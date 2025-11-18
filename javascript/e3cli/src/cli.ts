@@ -7,6 +7,8 @@
  */
 
 import { Command } from 'commander';
+import { initRepository } from './commands/init.js';
+import { runTask } from './commands/run.js';
 
 const program = new Command();
 
@@ -16,8 +18,6 @@ program
   .version('0.0.1-alpha.0');
 
 // TODO: Add commands
-// - e3 init [path]
-// - e3 run <name> <ir> [args...]
 // - e3 get <name>
 // - e3 list
 // - e3 logs <name> [--follow]
@@ -27,8 +27,16 @@ program
 program
   .command('init [path]')
   .description('Initialize a new E3 repository')
-  .action((path) => {
-    console.log(`TODO: Initialize E3 repository at ${path || '.'}`);
+  .action(async (path) => {
+    await initRepository(path);
+  });
+
+program
+  .command('run <name> <ir>')
+  .description('Submit a task for execution')
+  .option('-r, --runtime <runtime>', 'Runtime to use (node, python, julia)', 'node')
+  .action(async (name, ir, options) => {
+    await runTask(name, ir, options.runtime);
   });
 
 program.parse();

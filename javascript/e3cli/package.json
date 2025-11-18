@@ -1,6 +1,7 @@
 {
   "name": "@elaraai/e3cli",
   "version": "0.0.1-alpha.0",
+  "type": "module",
   "description": "East Execution Engine CLI - Command-line tool for managing E3 repositories and tasks",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -31,6 +32,7 @@
     "@elaraai/east": "file:../../../East",
     "@elaraai/e3dk": "file:../e3dk",
     "ink": "^5.0.1",
+    "ink-spinner": "^5.0.0",
     "react": "^18.3.1",
     "commander": "^12.0.0"
   },
