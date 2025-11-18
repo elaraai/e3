@@ -2,7 +2,6 @@
  * e3 status command - Get task status
  */
 
-import React from 'react';
 import { render } from 'ink';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -74,6 +73,7 @@ export async function getTaskStatus(taskName: string): Promise<void> {
             `Task ID: ${taskId}`,
             `Status: Error`,
             `Error: ${commit.value.error_message}`,
+            ...(commit.value.error_stack.map(loc => `  at ${loc}`)),
             `Commit: ${commitHash}`,
           ]}
         />
