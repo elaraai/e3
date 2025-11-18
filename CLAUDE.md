@@ -1,8 +1,18 @@
 # Overview
 
+## Structure
+
+ - javascript/e3cli - CLI tool (like git)
+ - javascript/e3-runner-node - task execution runner for NodeJS runtime
+ - javascript/e3dk - E3 development kit, TypeScript library containing platform functions including `execute`
+ - julia/E3Runner - task execution runner for Julia runtime
+ - python/e3_runner - task execution runner for Python runtime
+ - design - design documentation
+
 ## References
 
 See README.md for the project goals.
+See USAGE.md for how to use e3.
 See design/*.md for the design.
 See ../East for the main East repository.
 
