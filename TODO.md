@@ -49,23 +49,23 @@
 
 ### NodeJS Runner (`e3-runner-node`)
 
-- [ ] **3. Accept CLI argument for repository path**
-  - [ ] Add `--repo <path>` argument (defaults to `E3_REPO` env or `~/.e3`)
-  - [ ] Validate repository exists
+- [x] **3. Accept CLI argument for repository path**
+  - [x] Add `--repo <path>` argument (defaults to `E3_REPO` env or `~/.e3`)
+  - [x] Validate repository exists
 
-- [ ] **4. Task queue management with inotify**
-  - [ ] Maintain global `Set<string>` of enqueued task_ids
-  - [ ] Set up inotify watcher on `queue/node/` directory
-  - [ ] On inotify event: add task_id to set
-  - [ ] On startup: read existing files in `queue/node/`, add to set
-  - [ ] Main loop: iterate over set, launch tasks asynchronously
-  - [ ] Remove from set when task claimed
+- [x] **4. Task queue management with inotify**
+  - [x] Maintain global `Array<string>` of enqueued task_ids
+  - [x] Set up inotify watcher on `queue/node/` directory
+  - [x] On inotify event: add task_id to set
+  - [x] On startup: read existing files in `queue/node/`, add to set
+  - [x] Main loop: iterate over array, claim tasks atomically, launch tasks asynchronously
+  - [x] Remove from array when task claimed
 
-- [ ] **Task claiming (atomic)**
-  - [ ] Read `queue/node/<task_id>` (contains commit_hash)
-  - [ ] Atomically claim by renaming to `queue/node/<task_id>.<worker_id>`
-  - [ ] If rename fails (already claimed), skip
-  - [ ] Delete claim file when task completes
+- [x] **Task claiming (atomic)**
+  - [x] Read `queue/node/<task_id>` (contains commit_hash)
+  - [x] Atomically claim by renaming to `queue/node/<task_id>.<worker_id>`
+  - [x] If rename fails (already claimed), skip
+  - [x] Delete claim file when task completes
 
 - [ ] **5. Task execution**
   - [ ] Load commit from `objects/<commit_hash>.beast2`
@@ -128,8 +128,8 @@
 
 ## Future Phases
 
-- **Phase 2**: Add logging infrastructure (task-addressable log files)
-- **Phase 3**: Add memoization (check `tasks/<task_id>` before executing)
+- **Phase 2**: Add memoization (check `tasks/<task_id>` before executing / submitting tasks)
+- **Phase 3**: Add logging infrastructure (task-addressable log files)
 - **Phase 4**: Add Python and Julia runners
 - **Phase 5**: Add `execute` platform function for cross-runtime subtasks
 - **Phase 6**: Add CLI commands for logs, history, gc, etc.

@@ -9,6 +9,7 @@ The registry provides content-addressable storage for IR, arguments, results, an
 - Execution history (commit DAG as East values)
 - Task state tracking (tasks/ directory)
 - Task queue (queue/julia/, queue/node/, queue/python/)
+- Task claims (claims/julia/, claims/node/, claims/python/)
 - Streaming logs (logs/)
 
 ## Directory Structure
@@ -29,13 +30,20 @@ $E3_REPO/                         # Repository root (e.g., ~/.e3 or ./my-project
 │   ├── node/
 │   │   └── 456789...xyz
 │   └── python/
+├── claims/                       # Tasks claimed by workers (in-progress execution)
+│   ├── julia/
+│   │   └── abc123...def.worker_id  # Claimed task (renamed from queue/)
+│   ├── node/
+│   │   └── 456789...xyz.worker_id
+│   └── python/
 ├── refs/
 │   └── tasks/                    # Named task references
 │       ├── pipeline              # Points to task_id for named task
 │       └── optimization
-└── tasks/                        # Task state: task_id → latest commit hash
-    ├── abc123...def              # Contains SHA256 of latest commit for task
-    └── 456789...xyz
+├── tasks/                        # Task state: task_id → latest commit hash
+│   ├── abc123...def              # Contains SHA256 of latest commit for task
+│   └── 456789...xyz
+└── tmp/                          # Temporary files for atomic operations
 ```
 
 ## Task Identity
@@ -77,6 +85,118 @@ The task_id is used for:
 1. **Log files**: `logs/<task_id>.log` - pre-allocated before execution, streamable
 2. **Memoization lookup**: `refs/results/<task_id>` - points to execution commit if cached
 3. **Fast cache checking**: Check if `refs/results/<task_id>` exists before executing
+
+## Task Queue and Claiming
+
+### Queue Management
+
+Workers watch the `queue/<runtime>/` directory using inotify to detect new tasks. The workflow is:
+
+1. **Task submission**: CLI writes `queue/<runtime>/<task_id>` containing the commit hash
+2. **Worker discovery**: Workers watch `queue/<runtime>/` with inotify
+3. **Atomic claiming**: Workers atomically claim tasks by renaming to `claims/<runtime>/<task_id>.<worker_id>`
+4. **Execution**: Worker executes the claimed task
+5. **Release**: Worker deletes `claims/<runtime>/<task_id>.<worker_id>` when done
+
+### Atomic Task Claiming
+
+To support multiple concurrent workers, tasks are claimed atomically using filesystem rename:
+
+```python
+def claim_task(task_id: str, runtime: str, worker_id: str) -> bool:
+    """
+    Atomically claim a task for execution.
+
+    Args:
+        task_id: Task identifier
+        runtime: Runtime ("python", "julia", "node")
+        worker_id: Unique worker identifier (e.g., random hex string)
+
+    Returns:
+        True if claimed successfully, False if already claimed
+    """
+    queue_file = REPO / "queue" / runtime / task_id
+    claim_file = REPO / "claims" / runtime / f"{task_id}.{worker_id}"
+
+    try:
+        # Atomic rename from queue to claims
+        queue_file.rename(claim_file)
+        return True  # Successfully claimed
+    except FileNotFoundError:
+        # File doesn't exist - already claimed by another worker
+        return False
+
+def release_claim(task_id: str, runtime: str, worker_id: str):
+    """Release a claimed task after execution."""
+    claim_file = REPO / "claims" / runtime / f"{task_id}.{worker_id}"
+    claim_file.unlink(missing_ok=True)
+```
+
+**Key properties:**
+- **Atomic**: `rename()` is atomic on POSIX filesystems within the same filesystem
+- **Lock-free**: No need for distributed locks or coordination
+- **Safe**: Multiple workers can try to claim the same task; exactly one succeeds
+- **Clean separation**: `queue/` contains pending tasks, `claims/` contains in-progress tasks
+- **Observable**: Easy to monitor queue depth and active workers
+
+### Worker Initialization
+
+Workers must set up inotify **before** reading the directory to avoid race conditions:
+
+```python
+def start_worker(runtime: str):
+    """Start worker with proper inotify setup."""
+    queue_dir = REPO / "queue" / runtime
+    worker_id = generate_worker_id()  # Random hex string
+    pending_tasks = []
+
+    # 1. Set up inotify watcher FIRST
+    watcher = inotify.add_watch(queue_dir, inotify.IN_CREATE)
+
+    # 2. THEN read existing files
+    for task_file in queue_dir.iterdir():
+        task_id = task_file.name
+        if task_id not in pending_tasks:
+            pending_tasks.append(task_id)
+
+    # 3. Process tasks
+    while True:
+        # Try to claim next task
+        if pending_tasks:
+            task_id = pending_tasks.pop(0)
+            if claim_task(task_id, runtime, worker_id):
+                execute_task(task_id, worker_id)
+                release_claim(task_id, runtime, worker_id)
+
+        # Wait for new tasks from inotify
+        for event in watcher.read(timeout=100):
+            task_id = event.name
+            if task_id not in pending_tasks:
+                pending_tasks.append(task_id)
+```
+
+**Why this order matters:**
+1. If we read the directory first, a task could be added between reading and setting up inotify
+2. By setting up inotify first, we catch all new tasks
+3. Duplicate task IDs are filtered (using array deduplication with `not in` check)
+
+### Stale Claim Detection
+
+If a worker crashes, its claim files remain in `claims/`. These can be detected and cleaned up:
+
+```python
+def find_stale_claims(runtime: str, timeout_seconds: int = 3600) -> list[str]:
+    """Find claim files older than timeout (worker likely crashed)."""
+    claims_dir = REPO / "claims" / runtime
+    stale = []
+
+    for claim_file in claims_dir.iterdir():
+        age = time.time() - claim_file.stat().st_mtime
+        if age > timeout_seconds:
+            stale.append(claim_file)
+
+    return stale
+```
 
 ## Content-Addressable Storage
 

@@ -9,8 +9,8 @@ import * as path from 'path';
 import { getRepository } from '../repo.js';
 import { storeObject, computeTaskId } from '../storage/objects.js';
 import { createNewTaskCommit } from '../storage/commits.js';
-import { loadIR, irToBeast2 } from '../storage/formats.js';
-import { Success, Error, Info } from '../ui/index.js';
+import { loadIR, irToBeast2, loadValue, valueToBeast2 } from '../storage/formats.js';
+import { Success, Error as ErrorMessage, Info } from '../ui/index.js';
 
 /**
  * Submit a task for execution
@@ -18,6 +18,7 @@ import { Success, Error, Info } from '../ui/index.js';
 export async function runTask(
   taskName: string,
   irPath: string,
+  argPaths: string[] = [],
   runtime: string = 'node'
 ): Promise<void> {
   const repoPath = getRepository();
@@ -25,7 +26,11 @@ export async function runTask(
   render(
     <Info
       message={`Submitting task '${taskName}'`}
-      details={[`IR: ${irPath}`, `Runtime: ${runtime}`]}
+      details={[
+        `IR: ${irPath}`,
+        `Arguments: ${argPaths.length}`,
+        `Runtime: ${runtime}`,
+      ]}
     />
   );
 
@@ -39,8 +44,29 @@ export async function runTask(
     // 3. Store IR and get hash
     const irHash = await storeObject(repoPath, irBeast2, '.beast2');
 
-    // 4. For zero-argument tasks, args are empty
+    // 4. Load and store arguments
     const argsHashes: string[] = [];
+
+    // Get parameter types from IR
+    if (ir.type !== 'Function') {
+      throw new Error('IR must be a Function');
+    }
+
+    const paramTypes = ir.value.parameters.map((p: any) => p.value.type);
+
+    if (argPaths.length !== paramTypes.length) {
+      throw new Error(
+        `Expected ${paramTypes.length} arguments, got ${argPaths.length}`
+      );
+    }
+
+    // Load each argument using its corresponding parameter type
+    for (let i = 0; i < argPaths.length; i++) {
+      const argValue = await loadValue(argPaths[i], paramTypes[i]);
+      const argBeast2 = valueToBeast2(argValue, paramTypes[i]);
+      const argHash = await storeObject(repoPath, argBeast2, '.beast2');
+      argsHashes.push(argHash);
+    }
 
     // 5. Compute task ID
     const taskId = computeTaskId(irHash, argsHashes, runtime);
@@ -66,20 +92,30 @@ export async function runTask(
     const queuePath = path.join(repoPath, 'queue', runtime, taskId);
     await fs.writeFile(queuePath, commitHash);
 
+    const details = [
+      `Task ID: ${taskId}`,
+      `Commit: ${commitHash}`,
+      `IR Hash: ${irHash}`,
+    ];
+
+    if (argsHashes.length > 0) {
+      details.push(`Argument Hashes:`);
+      argsHashes.forEach((hash, i) => {
+        details.push(`  [${i}]: ${hash}`);
+      });
+    }
+
+    details.push(``);
+    details.push(`Run a ${runtime} worker to execute it.`);
+
     render(
       <Success
         message={`Task '${taskName}' queued successfully`}
-        details={[
-          `Task ID: ${taskId}`,
-          `Commit: ${commitHash}`,
-          `IR Hash: ${irHash}`,
-          ``,
-          `Run a ${runtime} worker to execute it.`,
-        ]}
+        details={details}
       />
     );
   } catch (error) {
-    render(<Error message={`Failed to submit task: ${error}`} />);
+    render(<ErrorMessage message={`Failed to submit task: ${error}`} />);
     process.exit(1);
   }
 }

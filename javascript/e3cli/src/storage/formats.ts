@@ -11,6 +11,7 @@ import { pipeline } from 'stream/promises';
 import {
   encodeBeast2For,
   decodeBeast2For,
+  decodeBeast2,
   parseFor,
   printFor,
   fromJSONFor,
@@ -103,4 +104,35 @@ export function parseEast(text: string, type: any): any {
   }
 
   return result.value;
+}
+
+/**
+ * Load a value from any format (.json, .east, or .beast2)
+ */
+export async function loadValue(filePath: string, type: any): Promise<any> {
+  const ext = filePath.slice(filePath.lastIndexOf('.'));
+
+  if (ext === '.json') {
+    const content = await fs.readFile(filePath, 'utf-8');
+    const jsonValue = JSON.parse(content);
+    const fromJSON = fromJSONFor(type);
+    return fromJSON(jsonValue);
+  } else if (ext === '.east') {
+    const content = await fs.readFile(filePath, 'utf-8');
+    return parseEast(content, type);
+  } else if (ext === '.beast2') {
+    const data = await fs.readFile(filePath);
+    const decoder = decodeBeast2For(type);
+    return decoder(data);
+  } else {
+    throw new Error(`Unsupported file format: ${ext} (expected .json, .east, or .beast2)`);
+  }
+}
+
+/**
+ * Encode a value to Beast2 format
+ */
+export function valueToBeast2(value: any, type: any): Uint8Array {
+  const encoder = encodeBeast2For(type);
+  return encoder(value);
 }

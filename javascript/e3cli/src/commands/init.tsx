@@ -35,6 +35,11 @@ export async function initRepository(repoPath?: string): Promise<void> {
     fs.mkdirSync(path.join(e3Dir, 'queue', 'python'), { recursive: true });
     fs.mkdirSync(path.join(e3Dir, 'queue', 'julia'), { recursive: true });
 
+    // Create claims directories for each runtime
+    fs.mkdirSync(path.join(e3Dir, 'claims', 'node'), { recursive: true });
+    fs.mkdirSync(path.join(e3Dir, 'claims', 'python'), { recursive: true });
+    fs.mkdirSync(path.join(e3Dir, 'claims', 'julia'), { recursive: true });
+
     // Create refs directory for named task references
     fs.mkdirSync(path.join(e3Dir, 'refs', 'tasks'), { recursive: true });
 
@@ -53,6 +58,10 @@ export async function initRepository(repoPath?: string): Promise<void> {
           `  node/           # Node.js task queue`,
           `  python/         # Python task queue`,
           `  julia/          # Julia task queue`,
+          `claims/`,
+          `  node/           # Node.js claimed tasks`,
+          `  python/         # Python claimed tasks`,
+          `  julia/          # Julia claimed tasks`,
           `refs/`,
           `  tasks/          # Named task references`,
           `tasks/            # Task state (task_id -> commit)`,
