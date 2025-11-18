@@ -13,26 +13,37 @@ import { loadIR, irToBeast2, loadValue, valueToBeast2 } from '../storage/formats
 import { Success, Error as ErrorMessage, Info } from '../ui/index.js';
 
 /**
- * Submit a task for execution
+ * Details about a submitted task
  */
-export async function runTask(
+export interface SubmittedTask {
+  taskId: string;
+  taskName: string;
+  commitHash: string;
+  irHash: string;
+  argHashes: string[];
+  runtime: string;
+}
+
+/**
+ * Result of submitting a task
+ */
+export interface RunTaskResult {
+  success: boolean;
+  task?: SubmittedTask;
+  error?: Error;
+}
+
+/**
+ * Core logic for submitting a task for execution
+ * This function is decoupled from CLI/UI concerns and can be used programmatically
+ */
+export async function runTaskCore(
   taskName: string,
   irPath: string,
   argPaths: string[] = [],
   runtime: string = 'node'
-): Promise<void> {
+): Promise<RunTaskResult> {
   const repoPath = getRepository();
-
-  render(
-    <Info
-      message={`Submitting task '${taskName}'`}
-      details={[
-        `IR: ${irPath}`,
-        `Arguments: ${argPaths.length}`,
-        `Runtime: ${runtime}`,
-      ]}
-    />
-  );
 
   try {
     // 1. Load IR from file (supports .json, .east, .beast2)
@@ -92,30 +103,74 @@ export async function runTask(
     const queuePath = path.join(repoPath, 'queue', runtime, taskId);
     await fs.writeFile(queuePath, commitHash);
 
-    const details = [
-      `Task ID: ${taskId}`,
-      `Commit: ${commitHash}`,
-      `IR Hash: ${irHash}`,
-    ];
-
-    if (argsHashes.length > 0) {
-      details.push(`Argument Hashes:`);
-      argsHashes.forEach((hash, i) => {
-        details.push(`  [${i}]: ${hash}`);
-      });
-    }
-
-    details.push(``);
-    details.push(`Run a ${runtime} worker to execute it.`);
-
-    render(
-      <Success
-        message={`Task '${taskName}' queued successfully`}
-        details={details}
-      />
-    );
+    return {
+      success: true,
+      task: {
+        taskId,
+        taskName,
+        commitHash,
+        irHash,
+        argHashes: argsHashes,
+        runtime,
+      },
+    };
   } catch (error) {
-    render(<ErrorMessage message={`Failed to submit task: ${error}`} />);
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
+ * CLI handler for the run command
+ * This function handles the UI/presentation layer
+ */
+export async function runTask(
+  taskName: string,
+  irPath: string,
+  argPaths: string[] = [],
+  runtime: string = 'node'
+): Promise<void> {
+  render(
+    <Info
+      message={`Submitting task '${taskName}'`}
+      details={[
+        `IR: ${irPath}`,
+        `Arguments: ${argPaths.length}`,
+        `Runtime: ${runtime}`,
+      ]}
+    />
+  );
+
+  const result = await runTaskCore(taskName, irPath, argPaths, runtime);
+
+  if (!result.success) {
+    render(<ErrorMessage message={`Failed to submit task: ${result.error?.message}`} />);
     process.exit(1);
   }
+
+  const task = result.task!;
+  const details = [
+    `Task ID: ${task.taskId}`,
+    `Commit: ${task.commitHash}`,
+    `IR Hash: ${task.irHash}`,
+  ];
+
+  if (task.argHashes.length > 0) {
+    details.push(`Argument Hashes:`);
+    task.argHashes.forEach((hash, i) => {
+      details.push(`  [${i}]: ${hash}`);
+    });
+  }
+
+  details.push(``);
+  details.push(`Run a ${task.runtime} worker to execute it.`);
+
+  render(
+    <Success
+      message={`Task '${task.taskName}' queued successfully`}
+      details={details}
+    />
+  );
 }

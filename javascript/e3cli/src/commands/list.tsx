@@ -10,9 +10,28 @@ import { getRepository } from '../repo.js';
 import { Error as ErrorMessage } from '../ui/index.js';
 
 /**
- * List all task refs
+ * A task reference with its name and ID
  */
-export async function listTasks(): Promise<void> {
+export interface TaskRef {
+  name: string;
+  taskId: string;
+}
+
+/**
+ * Result of listing tasks
+ */
+export interface ListTasksResult {
+  success: boolean;
+  tasks?: TaskRef[];
+  error?: Error;
+  noTasksFound?: boolean;
+}
+
+/**
+ * Core logic for listing all task refs
+ * This function is decoupled from CLI/UI concerns and can be used programmatically
+ */
+export async function listTasksCore(): Promise<ListTasksResult> {
   const repoPath = getRepository();
 
   try {
@@ -22,12 +41,15 @@ export async function listTasks(): Promise<void> {
       const files = await fs.readdir(refsDir);
 
       if (files.length === 0) {
-        console.log('No tasks found');
-        return;
+        return {
+          success: true,
+          tasks: [],
+          noTasksFound: true,
+        };
       }
 
       // Read task IDs for each ref
-      const tasks: Array<{ name: string; taskId: string }> = [];
+      const tasks: TaskRef[] = [];
 
       for (const name of files) {
         const refPath = path.join(refsDir, name);
@@ -42,28 +64,59 @@ export async function listTasks(): Promise<void> {
       // Sort by name
       tasks.sort((a, b) => a.name.localeCompare(b.name));
 
-      // Display
-      render(
-        <Box flexDirection="column">
-          {tasks.map(({ name, taskId }) => (
-            <Box key={name}>
-              <Text color="cyan" bold>
-                {name}
-              </Text>
-              <Text dimColor> → {taskId.slice(0, 12)}</Text>
-            </Box>
-          ))}
-        </Box>
-      );
+      return {
+        success: true,
+        tasks,
+        noTasksFound: tasks.length === 0,
+      };
     } catch (error: any) {
       if (error.code === 'ENOENT') {
-        console.log('No tasks found');
+        // refs/tasks directory doesn't exist - this is normal for a new repo
+        return {
+          success: true,
+          tasks: [],
+          noTasksFound: true,
+        };
       } else {
         throw error;
       }
     }
   } catch (error: any) {
-    render(<ErrorMessage message={`Failed to list tasks: ${error.message}`} />);
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
+ * CLI handler for the list command
+ * This function handles the UI/presentation layer
+ */
+export async function listTasks(): Promise<void> {
+  const result = await listTasksCore();
+
+  if (!result.success) {
+    render(<ErrorMessage message={`Failed to list tasks: ${result.error?.message}`} />);
     process.exit(1);
   }
+
+  if (result.noTasksFound || !result.tasks || result.tasks.length === 0) {
+    console.log('No tasks found');
+    return;
+  }
+
+  // Display
+  render(
+    <Box flexDirection="column">
+      {result.tasks.map(({ name, taskId }) => (
+        <Box key={name}>
+          <Text color="cyan" bold>
+            {name}
+          </Text>
+          <Text dimColor> → {taskId.slice(0, 12)}</Text>
+        </Box>
+      ))}
+    </Box>
+  );
 }

@@ -12,12 +12,43 @@ import { Error as ErrorMessage, Info } from '../ui/index.js';
 import { decodeBeast2For, decodeBeast2, printFor, toJSONFor, IntegerType, IRType } from '@elaraai/east';
 
 /**
- * Get output of a completed task or retrieve any object by hash
+ * Output format type
  */
-export async function getTaskOutput(
+export type OutputFormat = 'east' | 'json' | 'beast2';
+
+/**
+ * Task output retrieval result
+ */
+export interface GetTaskOutputResult {
+  success: boolean;
+  data?: string | Buffer;
+  format?: OutputFormat;
+  taskStatus?: 'pending' | 'done' | 'error' | 'failed' | 'unknown';
+  error?: Error;
+  notFound?: boolean;
+  notCompleted?: boolean;
+}
+
+/**
+ * Object retrieval result
+ */
+export interface GetObjectResult {
+  success: boolean;
+  data?: string | Buffer;
+  format?: OutputFormat;
+  hash?: string;
+  error?: Error;
+  decodeError?: boolean;
+}
+
+/**
+ * Core logic for retrieving task output or object by hash
+ * This function is decoupled from CLI/UI concerns and can be used programmatically
+ */
+export async function getTaskOutputCore(
   refOrHash: string,
-  format: 'east' | 'json' | 'beast2' = 'east'
-): Promise<void> {
+  format: OutputFormat = 'east'
+): Promise<GetTaskOutputResult> {
   const repoPath = getRepository();
 
   try {
@@ -26,8 +57,19 @@ export async function getTaskOutput(
 
     if (isHash) {
       // Try to get object directly by hash
-      await getObjectByHash(repoPath, refOrHash, format);
-      return;
+      const objResult = await getObjectByHashCore(repoPath, refOrHash, format);
+      if (!objResult.success) {
+        return {
+          success: false,
+          error: objResult.error,
+          notFound: objResult.error?.message.includes('not found'),
+        };
+      }
+      return {
+        success: true,
+        data: objResult.data,
+        format: objResult.format,
+      };
     }
 
     // Otherwise, resolve as task ref and get result
@@ -40,19 +82,20 @@ export async function getTaskOutput(
 
     // 3. Check if task is done
     if (!commitText.startsWith('.task_done')) {
-      render(
-        <ErrorMessage
-          message={`Task '${refOrHash}' has not completed yet`}
-          details={[
-            commitText.startsWith('.new_task')
-              ? 'Status: Pending'
-              : commitText.startsWith('.task_error') || commitText.startsWith('.task_fail')
-              ? 'Status: Failed'
-              : 'Status: Unknown',
-          ]}
-        />
-      );
-      process.exit(1);
+      const taskStatus = commitText.startsWith('.new_task')
+        ? 'pending'
+        : commitText.startsWith('.task_error')
+        ? 'error'
+        : commitText.startsWith('.task_fail')
+        ? 'failed'
+        : 'unknown';
+
+      return {
+        success: false,
+        notCompleted: true,
+        taskStatus,
+        error: new Error(`Task '${refOrHash}' has not completed yet`),
+      };
     }
 
     // 4. Extract result hash from commit
@@ -67,86 +110,170 @@ export async function getTaskOutput(
     const resultPath = await findResultFile(repoPath, resultHash);
     const resultData = await fs.readFile(resultPath);
 
-    // 7. Output raw beast2 if requested
+    // 7. Return raw beast2 if requested
     if (format === 'beast2') {
-      process.stdout.write(resultData);
-      return;
+      return {
+        success: true,
+        data: resultData,
+        format: 'beast2',
+        taskStatus: 'done',
+      };
     }
 
     // 8. Decode result (beast2 is self-describing)
     const { type: resultType, value: result } = decodeBeast2(resultData);
 
-    // 9. Output result
+    // 9. Format result
+    let outputData: string;
     if (format === 'east') {
       const printer = printFor(resultType);
-      const output = printer(result);
-      console.log(output);
+      outputData = printer(result);
     } else {
       // JSON format - use toJSONFor to properly serialize
       const toJSON = toJSONFor(resultType);
       const jsonResult = toJSON(result);
-      console.log(JSON.stringify(jsonResult, null, 2));
+      outputData = JSON.stringify(jsonResult, null, 2);
     }
+
+    return {
+      success: true,
+      data: outputData,
+      format,
+      taskStatus: 'done',
+    };
   } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      render(<ErrorMessage message={`Task '${refOrHash}' not found`} />);
-    } else {
-      render(<ErrorMessage message={`Failed to get output: ${error.message}`} />);
-    }
-    process.exit(1);
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+      notFound: error.code === 'ENOENT',
+    };
   }
 }
 
 /**
- * Get any object by hash
+ * Core logic for getting any object by hash
  */
-async function getObjectByHash(
+export async function getObjectByHashCore(
   repoPath: string,
   hashOrPartial: string,
-  format: 'east' | 'json' | 'beast2'
-): Promise<void> {
-  // Resolve partial hash to full hash
-  const hash = await resolveObjectHash(repoPath, hashOrPartial);
-
-  // Load object
-  const objectPath = await findObjectFile(repoPath, hash);
-  const objectData = await fs.readFile(objectPath);
-
-  // Check extension to determine how to handle it
-  if (objectPath.endsWith('.east')) {
-    if (format === 'beast2') {
-      // .east file but beast2 requested - just output as-is (text)
-      process.stdout.write(objectData);
-    } else {
-      // Already text, just print
-      console.log(objectData.toString('utf-8'));
-    }
-    return;
-  }
-
-  // Beast2 format - output raw binary if requested
-  if (format === 'beast2') {
-    process.stdout.write(objectData);
-    return;
-  }
-
-  // Decode beast2 (self-describing format)
+  format: OutputFormat
+): Promise<GetObjectResult> {
   try {
-    const { type: objectType, value } = decodeBeast2(objectData);
+    // Resolve partial hash to full hash
+    const hash = await resolveObjectHash(repoPath, hashOrPartial);
 
-    if (format === 'east') {
-      const printer = printFor(objectType);
-      console.log(printer(value));
-    } else {
-      // JSON format - use toJSONFor to properly serialize
-      const toJSON = toJSONFor(objectType);
-      const jsonResult = toJSON(value);
-      console.log(JSON.stringify(jsonResult, null, 2));
+    // Load object
+    const objectPath = await findObjectFile(repoPath, hash);
+    const objectData = await fs.readFile(objectPath);
+
+    // Check extension to determine how to handle it
+    if (objectPath.endsWith('.east')) {
+      if (format === 'beast2') {
+        // .east file but beast2 requested - return as-is (text)
+        return {
+          success: true,
+          data: objectData,
+          format: 'beast2',
+          hash,
+        };
+      } else {
+        // Already text, return as string
+        return {
+          success: true,
+          data: objectData.toString('utf-8'),
+          format: 'east',
+          hash,
+        };
+      }
+    }
+
+    // Beast2 format - return raw binary if requested
+    if (format === 'beast2') {
+      return {
+        success: true,
+        data: objectData,
+        format: 'beast2',
+        hash,
+      };
+    }
+
+    // Decode beast2 (self-describing format)
+    try {
+      const { type: objectType, value } = decodeBeast2(objectData);
+
+      let outputData: string;
+      if (format === 'east') {
+        const printer = printFor(objectType);
+        outputData = printer(value);
+      } else {
+        // JSON format - use toJSONFor to properly serialize
+        const toJSON = toJSONFor(objectType);
+        const jsonResult = toJSON(value);
+        outputData = JSON.stringify(jsonResult, null, 2);
+      }
+
+      return {
+        success: true,
+        data: outputData,
+        format,
+        hash,
+      };
+    } catch (error: any) {
+      // Failed to decode
+      return {
+        success: false,
+        decodeError: true,
+        hash,
+        error: new Error(`Failed to decode beast2: ${error.message}`),
+      };
     }
   } catch (error: any) {
-    // Failed to decode - show error
-    console.log(`<failed to decode beast2: ${error.message}>`);
-    console.log(`Hash: ${hash}`);
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
+ * CLI handler for the get command
+ * This function handles the UI/presentation layer
+ */
+export async function getTaskOutput(
+  refOrHash: string,
+  format: OutputFormat = 'east'
+): Promise<void> {
+  const result = await getTaskOutputCore(refOrHash, format);
+
+  if (!result.success) {
+    if (result.notCompleted) {
+      render(
+        <ErrorMessage
+          message={`Task '${refOrHash}' has not completed yet`}
+          details={[
+            result.taskStatus === 'pending'
+              ? 'Status: Pending'
+              : result.taskStatus === 'error'
+              ? 'Status: Error'
+              : result.taskStatus === 'failed'
+              ? 'Status: Failed'
+              : 'Status: Unknown',
+          ]}
+        />
+      );
+    } else if (result.notFound) {
+      render(<ErrorMessage message={`Task '${refOrHash}' not found`} />);
+    } else {
+      render(<ErrorMessage message={`Failed to get output: ${result.error?.message}`} />);
+    }
+    process.exit(1);
+  }
+
+  // Output the data
+  if (result.data instanceof Buffer) {
+    process.stdout.write(result.data);
+  } else if (result.data) {
+    console.log(result.data);
   }
 }
 

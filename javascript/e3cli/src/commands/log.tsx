@@ -13,19 +13,34 @@ import { parseFor, decodeBeast2For } from '@elaraai/east';
 import { CommitType, type Commit } from '@elaraai/e3-types';
 
 /**
- * Show commit history for a task
+ * Commit history entry
  */
-export async function showLog(refOrHash: string): Promise<void> {
+export interface CommitHistoryEntry {
+  hash: string;
+  commit: Commit;
+}
+
+/**
+ * Result of getting commit history
+ */
+export interface GetCommitHistoryResult {
+  success: boolean;
+  history?: CommitHistoryEntry[];
+  error?: Error;
+}
+
+/**
+ * Core logic for retrieving commit history
+ * This function is decoupled from CLI/UI concerns and can be used programmatically
+ */
+export async function getCommitHistoryCore(refOrHash: string): Promise<GetCommitHistoryResult> {
   const repoPath = getRepository();
 
   try {
     // Resolve to initial commit
     let commitHash: string | null = await resolveToCommit(repoPath, refOrHash);
 
-    const commits: Array<{
-      hash: string;
-      commit: Commit;
-    }> = [];
+    const commits: CommitHistoryEntry[] = [];
 
     // Walk commit chain backwards
     while (commitHash) {
@@ -44,85 +59,107 @@ export async function showLog(refOrHash: string): Promise<void> {
       }
     }
 
-    // Display commits
-    render(
-      <Box flexDirection="column">
-        {commits.map((item, i) => (
-          <Box key={i} flexDirection="column" marginBottom={1}>
-            <Box>
-              <Text color="yellow" bold>
-                commit {item.hash.slice(0, 12)}
-              </Text>
-            </Box>
-
-            {item.commit.type === 'new_task' && (
-              <Box flexDirection="column" marginLeft={2}>
-                <Text>
-                  <Text color="green">Type:</Text> Task submission
-                </Text>
-                <Text>
-                  <Text color="green">Task ID:</Text> {item.commit.value.task_id.slice(0, 12)}
-                </Text>
-                <Text>
-                  <Text color="green">IR:</Text> {item.commit.value.ir.slice(0, 12)}
-                </Text>
-                <Text>
-                  <Text color="green">Args:</Text> [{item.commit.value.args.length} arguments]
-                </Text>
-                <Text>
-                  <Text color="green">Runtime:</Text> {item.commit.value.runtime}
-                </Text>
-                <Text>
-                  <Text color="green">Timestamp:</Text> {item.commit.value.timestamp}
-                </Text>
-              </Box>
-            )}
-
-            {item.commit.type === 'task_done' && (
-              <Box flexDirection="column" marginLeft={2}>
-                <Text>
-                  <Text color="green">Type:</Text> Task completed
-                </Text>
-                <Text>
-                  <Text color="green">Result:</Text> {item.commit.value.result.slice(0, 12)}
-                </Text>
-                <Text>
-                  <Text color="green">Runtime:</Text> {item.commit.value.runtime}
-                </Text>
-                <Text>
-                  <Text color="green">Execution time:</Text>{' '}
-                  {(Number(item.commit.value.execution_time_us) / 1000).toFixed(2)}ms
-                </Text>
-                <Text>
-                  <Text color="green">Timestamp:</Text> {item.commit.value.timestamp}
-                </Text>
-              </Box>
-            )}
-
-            {(item.commit.type === 'task_error' || item.commit.type === 'task_fail') && (
-              <Box flexDirection="column" marginLeft={2}>
-                <Text>
-                  <Text color="red">Type:</Text> Task failed
-                </Text>
-                <Text>
-                  <Text color="red">Error:</Text> {item.commit.value.error_message}
-                </Text>
-                <Text>
-                  <Text color="green">Runtime:</Text> {item.commit.value.runtime}
-                </Text>
-                <Text>
-                  <Text color="green">Timestamp:</Text> {item.commit.value.timestamp}
-                </Text>
-              </Box>
-            )}
-          </Box>
-        ))}
-      </Box>
-    );
+    return {
+      success: true,
+      history: commits,
+    };
   } catch (error: any) {
-    render(<ErrorMessage message={`Failed to show log: ${error.message}`} />);
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/**
+ * CLI handler for the log command
+ * This function handles the UI/presentation layer
+ */
+export async function showLog(refOrHash: string): Promise<void> {
+  const result = await getCommitHistoryCore(refOrHash);
+
+  if (!result.success) {
+    render(<ErrorMessage message={`Failed to show log: ${result.error?.message}`} />);
     process.exit(1);
   }
+
+  const commits = result.history!;
+
+  // Display commits
+  render(
+    <Box flexDirection="column">
+      {commits.map((item, i) => (
+        <Box key={i} flexDirection="column" marginBottom={1}>
+          <Box>
+            <Text color="yellow" bold>
+              commit {item.hash.slice(0, 12)}
+            </Text>
+          </Box>
+
+          {item.commit.type === 'new_task' && (
+            <Box flexDirection="column" marginLeft={2}>
+              <Text>
+                <Text color="green">Type:</Text> Task submission
+              </Text>
+              <Text>
+                <Text color="green">Task ID:</Text> {item.commit.value.task_id.slice(0, 12)}
+              </Text>
+              <Text>
+                <Text color="green">IR:</Text> {item.commit.value.ir.slice(0, 12)}
+              </Text>
+              <Text>
+                <Text color="green">Args:</Text> [{item.commit.value.args.length} arguments]
+              </Text>
+              <Text>
+                <Text color="green">Runtime:</Text> {item.commit.value.runtime}
+              </Text>
+              <Text>
+                <Text color="green">Timestamp:</Text> {item.commit.value.timestamp}
+              </Text>
+            </Box>
+          )}
+
+          {item.commit.type === 'task_done' && (
+            <Box flexDirection="column" marginLeft={2}>
+              <Text>
+                <Text color="green">Type:</Text> Task completed
+              </Text>
+              <Text>
+                <Text color="green">Result:</Text> {item.commit.value.result.slice(0, 12)}
+              </Text>
+              <Text>
+                <Text color="green">Runtime:</Text> {item.commit.value.runtime}
+              </Text>
+              <Text>
+                <Text color="green">Execution time:</Text>{' '}
+                {(Number(item.commit.value.execution_time_us) / 1000).toFixed(2)}ms
+              </Text>
+              <Text>
+                <Text color="green">Timestamp:</Text> {item.commit.value.timestamp}
+              </Text>
+            </Box>
+          )}
+
+          {(item.commit.type === 'task_error' || item.commit.type === 'task_fail') && (
+            <Box flexDirection="column" marginLeft={2}>
+              <Text>
+                <Text color="red">Type:</Text> Task failed
+              </Text>
+              <Text>
+                <Text color="red">Error:</Text> {item.commit.value.error_message}
+              </Text>
+              <Text>
+                <Text color="green">Runtime:</Text> {item.commit.value.runtime}
+              </Text>
+              <Text>
+                <Text color="green">Timestamp:</Text> {item.commit.value.timestamp}
+              </Text>
+            </Box>
+          )}
+        </Box>
+      ))}
+    </Box>
+  );
 }
 
 /**

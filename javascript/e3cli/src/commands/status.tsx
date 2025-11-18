@@ -2,18 +2,49 @@
  * e3 status command - Get task status
  */
 
+import React from 'react';
 import { render } from 'ink';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getRepository } from '../repo.js';
 import { Success, Error as ErrorMessage, Info } from '../ui/index.js';
 import { parseFor } from '@elaraai/east';
-import { CommitType } from '@elaraai/e3-types';
+import { CommitType, type Commit } from '@elaraai/e3-types';
 
 /**
- * Get status of a named task
+ * Task status type
  */
-export async function getTaskStatus(taskName: string): Promise<void> {
+export type TaskStatus = 'pending' | 'done' | 'error' | 'failed' | 'unknown';
+
+/**
+ * Task status information
+ */
+export interface TaskStatusInfo {
+  taskId: string;
+  taskName: string;
+  status: TaskStatus;
+  commitHash: string;
+  commit: Commit;
+  executionTimeMs?: number;
+  errorMessage?: string;
+  errorStack?: string[];
+}
+
+/**
+ * Result of getting task status
+ */
+export interface GetTaskStatusResult {
+  success: boolean;
+  statusInfo?: TaskStatusInfo;
+  error?: Error;
+  notFound?: boolean;
+}
+
+/**
+ * Core logic for getting task status
+ * This function is decoupled from CLI/UI concerns and can be used programmatically
+ */
+export async function getTaskStatusCore(taskName: string): Promise<GetTaskStatusResult> {
   const repoPath = getRepository();
 
   try {
@@ -39,72 +70,135 @@ export async function getTaskStatus(taskName: string): Promise<void> {
 
     const commit = parseResult.value;
 
-    // Check commit type and display status
+    // Determine status and extract relevant info
+    let status: TaskStatus;
+    let executionTimeMs: number | undefined;
+    let errorMessage: string | undefined;
+    let errorStack: string[] | undefined;
+
     if (commit.type === 'new_task') {
+      status = 'pending';
+    } else if (commit.type === 'task_done') {
+      status = 'done';
+      const executionTimeUs = Number(commit.value.execution_time_us);
+      executionTimeMs = executionTimeUs / 1000;
+    } else if (commit.type === 'task_error') {
+      status = 'error';
+      errorMessage = commit.value.error_message;
+      errorStack = commit.value.error_stack;
+    } else if (commit.type === 'task_fail') {
+      status = 'failed';
+      errorMessage = commit.value.error_message;
+    } else {
+      status = 'unknown';
+    }
+
+    return {
+      success: true,
+      statusInfo: {
+        taskId,
+        taskName,
+        status,
+        commitHash,
+        commit,
+        executionTimeMs,
+        errorMessage,
+        errorStack,
+      },
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+      notFound: error.code === 'ENOENT',
+    };
+  }
+}
+
+/**
+ * CLI handler for the status command
+ * This function handles the UI/presentation layer
+ */
+export async function getTaskStatus(taskName: string): Promise<void> {
+  const result = await getTaskStatusCore(taskName);
+
+  if (!result.success) {
+    if (result.notFound) {
+      render(<ErrorMessage message={`Task '${taskName}' not found`} />);
+    } else {
+      render(<ErrorMessage message={`Failed to get status: ${result.error?.message}`} />);
+    }
+    process.exit(1);
+  }
+
+  const info = result.statusInfo!;
+
+  // Display status based on type
+  switch (info.status) {
+    case 'pending':
       render(
         <Info
-          message={`Task '${taskName}' is pending`}
+          message={`Task '${info.taskName}' is pending`}
           details={[
-            `Task ID: ${taskId}`,
+            `Task ID: ${info.taskId}`,
             `Status: Queued for execution`,
           ]}
         />
       );
-    } else if (commit.type === 'task_done') {
-      const executionTimeUs = Number(commit.value.execution_time_us);
-      const executionTimeMs = (executionTimeUs / 1000).toFixed(2);
+      break;
 
+    case 'done':
       render(
         <Success
-          message={`Task '${taskName}' completed successfully`}
+          message={`Task '${info.taskName}' completed successfully`}
           details={[
-            `Task ID: ${taskId}`,
+            `Task ID: ${info.taskId}`,
             `Status: Completed`,
-            `Execution time: ${executionTimeMs}ms`,
-            `Commit: ${commitHash}`,
+            `Execution time: ${info.executionTimeMs?.toFixed(2)}ms`,
+            `Commit: ${info.commitHash}`,
           ]}
         />
       );
-    } else if (commit.type === 'task_error') {
+      break;
+
+    case 'error':
       render(
         <ErrorMessage
-          message={`Task '${taskName}' failed with error`}
+          message={`Task '${info.taskName}' failed with error`}
           details={[
-            `Task ID: ${taskId}`,
+            `Task ID: ${info.taskId}`,
             `Status: Error`,
-            `Error: ${commit.value.error_message}`,
-            ...(commit.value.error_stack.map(loc => `  at ${loc}`)),
-            `Commit: ${commitHash}`,
+            `Error: ${info.errorMessage}`,
+            ...(info.errorStack?.map(loc => `  at ${loc}`) || []),
+            `Commit: ${info.commitHash}`,
           ]}
         />
       );
-    } else if (commit.type === 'task_fail') {
+      break;
+
+    case 'failed':
       render(
         <ErrorMessage
-          message={`Task '${taskName}' failed`}
+          message={`Task '${info.taskName}' failed`}
           details={[
-            `Task ID: ${taskId}`,
+            `Task ID: ${info.taskId}`,
             `Status: Failed`,
-            `Error: ${commit.value.error_message}`,
-            `Commit: ${commitHash}`,
+            `Error: ${info.errorMessage}`,
+            `Commit: ${info.commitHash}`,
           ]}
         />
       );
-    } else {
+      break;
+
+    case 'unknown':
+    default:
       render(
         <Info
-          message={`Task '${taskName}' status unknown`}
-          details={[`Task ID: ${taskId}`, `Commit: ${commitHash}`]}
+          message={`Task '${info.taskName}' status unknown`}
+          details={[`Task ID: ${info.taskId}`, `Commit: ${info.commitHash}`]}
         />
       );
-    }
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      render(<ErrorMessage message={`Task '${taskName}' not found`} />);
-    } else {
-      render(<ErrorMessage message={`Failed to get status: ${error.message}`} />);
-    }
-    process.exit(1);
+      break;
   }
 }
 
