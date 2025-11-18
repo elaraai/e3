@@ -37,8 +37,8 @@ export async function executeTask(
     // 2. Load and decode commit
     const commit = await loadCommit(repoPath, commitHash);
 
-    if (commit.tag !== 'new_task') {
-      throw new Error(`Expected new_task commit, got ${commit.tag}`);
+    if (commit.type !== 'new_task') {
+      throw new Error(`Expected new_task commit, got ${commit.type}`);
     }
 
     const { ir: irHash, args: argsHashes } = commit.value;

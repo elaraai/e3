@@ -9,6 +9,7 @@ import * as path from 'path';
 import { getRepository } from '../repo.js';
 import { Success, Error as ErrorMessage, Info } from '../ui/index.js';
 import { parseFor } from '@elaraai/east';
+import { CommitType } from '@elaraai/e3-types';
 
 /**
  * Get status of a named task
@@ -29,8 +30,18 @@ export async function getTaskStatus(taskName: string): Promise<void> {
     const commitPath = await findCommitFile(repoPath, commitHash);
     const commitText = (await fs.readFile(commitPath, 'utf-8')).trim();
 
-    // Parse commit type
-    if (commitText.startsWith('.new_task')) {
+    // Parse commit using East parser
+    const parser = parseFor(CommitType);
+    const parseResult = parser(commitText);
+
+    if (!parseResult.success) {
+      throw new Error(`Failed to parse commit: ${parseResult.error}`);
+    }
+
+    const commit = parseResult.value;
+
+    // Check commit type and display status
+    if (commit.type === 'new_task') {
       render(
         <Info
           message={`Task '${taskName}' is pending`}
@@ -40,10 +51,8 @@ export async function getTaskStatus(taskName: string): Promise<void> {
           ]}
         />
       );
-    } else if (commitText.startsWith('.task_done')) {
-      // Extract execution time
-      const timeMatch = commitText.match(/execution_time_us=(\d+)/);
-      const executionTimeUs = timeMatch ? parseInt(timeMatch[1], 10) : 0;
+    } else if (commit.type === 'task_done') {
+      const executionTimeUs = Number(commit.value.execution_time_us);
       const executionTimeMs = (executionTimeUs / 1000).toFixed(2);
 
       render(
@@ -57,24 +66,26 @@ export async function getTaskStatus(taskName: string): Promise<void> {
           ]}
         />
       );
-    } else if (commitText.startsWith('.task_error')) {
+    } else if (commit.type === 'task_error') {
       render(
         <ErrorMessage
           message={`Task '${taskName}' failed with error`}
           details={[
             `Task ID: ${taskId}`,
             `Status: Error`,
+            `Error: ${commit.value.error_message}`,
             `Commit: ${commitHash}`,
           ]}
         />
       );
-    } else if (commitText.startsWith('.task_fail')) {
+    } else if (commit.type === 'task_fail') {
       render(
         <ErrorMessage
           message={`Task '${taskName}' failed`}
           details={[
             `Task ID: ${taskId}`,
             `Status: Failed`,
+            `Error: ${commit.value.error_message}`,
             `Commit: ${commitHash}`,
           ]}
         />

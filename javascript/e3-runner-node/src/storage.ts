@@ -7,64 +7,17 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import {
   decodeBeast2For,
-  decodeBeast2,
   encodeBeast2For,
   parseFor,
   printFor,
+  variant,
   IRType,
   type IR,
 } from '@elaraai/east';
+import { CommitType, type Commit } from '@elaraai/e3-types';
+import { EastTypeValue } from '../../../../East/dist/src/type_of_type.js';
 
-/**
- * Commit type definitions
- */
-export interface NewTaskCommit {
-  tag: 'new_task';
-  value: {
-    task_id: string;
-    ir: string;
-    args: string[];
-    runtime: string;
-    parent: string | null;
-    timestamp: string;
-  };
-}
-
-export interface TaskDoneCommit {
-  tag: 'task_done';
-  value: {
-    parent: string;
-    result: string;
-    runtime: string;
-    execution_time_us: number;
-    timestamp: string;
-  };
-}
-
-export interface TaskErrorCommit {
-  tag: 'task_error';
-  value: {
-    parent: string;
-    error_message: string;
-    error_stack: string[];
-    runtime: string;
-    execution_time_us: number;
-    timestamp: string;
-  };
-}
-
-export interface TaskFailCommit {
-  tag: 'task_fail';
-  value: {
-    parent: string;
-    error_message: string;
-    runtime: string;
-    execution_time_us: number;
-    timestamp: string;
-  };
-}
-
-export type Commit = NewTaskCommit | TaskDoneCommit | TaskErrorCommit | TaskFailCommit;
+// Commit types are now imported from @elaraai/e3-types
 
 /**
  * Load an object from content-addressable storage
@@ -91,60 +44,28 @@ export async function loadCommit(
   // Commits can be stored as .east or .beast2
   // Try .east first (for debugging), then .beast2
 
+  // TODO we should probably standardize on one format
+
   try {
     const data = await loadObject(repoPath, commitHash, '.east');
     const text = new TextDecoder().decode(data);
 
-    // For now, manually parse the .east commit format
-    // Format: .new_task (task_id="...", ir="...", args=[], runtime="...", parent=null, timestamp="...")
-    const trimmed = text.trim();
+    // Parse .east format using East's parser
+    const parser = parseFor(CommitType);
+    const result = parser(text);
 
-    if (trimmed.startsWith('.new_task')) {
-      // Extract the struct content
-      const match = trimmed.match(/^\.new_task\s*\(([\s\S]+)\)$/);
-      if (!match) {
-        throw new Error('Invalid .new_task commit format');
-      }
-
-      // Parse the fields (simple regex-based parser for now)
-      const fields = match[1];
-      const taskIdMatch = fields.match(/task_id="([^"]+)"/);
-      const irMatch = fields.match(/ir="([^"]+)"/);
-      const argsMatch = fields.match(/args=\[([^\]]*)\]/);
-      const runtimeMatch = fields.match(/runtime="([^"]+)"/);
-      const parentMatch = fields.match(/parent=(null|"[^"]+")/);
-      const timestampMatch = fields.match(/timestamp="?([^",)]+)"?/);
-
-      if (!taskIdMatch || !irMatch || !argsMatch || !runtimeMatch) {
-        throw new Error('Missing required fields in .new_task commit');
-      }
-
-      // Parse args array
-      const argsStr = argsMatch[1].trim();
-      const args = argsStr ? argsStr.split(',').map(s => s.trim().replace(/"/g, '')) : [];
-
-      return {
-        tag: 'new_task',
-        value: {
-          task_id: taskIdMatch[1],
-          ir: irMatch[1],
-          args,
-          runtime: runtimeMatch[1],
-          parent: parentMatch![1] === 'null' ? null : parentMatch![1].replace(/"/g, ''),
-          timestamp: timestampMatch![1],
-        },
-      } as Commit;
+    if (!result.success) {
+      throw new Error(`Failed to parse .east commit: ${result.error}`);
     }
 
-    throw new Error('Unsupported commit type (only .new_task supported)');
+    return result.value;
   } catch (eastError) {
     try {
       const data = await loadObject(repoPath, commitHash, '.beast2');
 
-      // Decode Beast2 format
-      // TODO: Use proper CommitType
-      const decoder = decodeBeast2For(IRType as any);
-      return decoder(data) as Commit;
+      // Decode Beast2 format using CommitType
+      const decoder = decodeBeast2For(CommitType);
+      return decoder(data);
     } catch (beast2Error) {
       throw new Error(`Failed to load commit: ${eastError} / ${beast2Error}`);
     }
@@ -169,7 +90,7 @@ export async function loadIR(
 export async function loadArg(
   repoPath: string,
   argHash: string,
-  argType: any
+  argType: EastTypeValue
 ): Promise<any> {
   const data = await loadObject(repoPath, argHash, '.beast2');
   const decoder = decodeBeast2For(argType);
@@ -230,7 +151,7 @@ export async function storeObject(
 export async function storeResult(
   repoPath: string,
   result: any,
-  resultType: any
+  resultType: EastTypeValue
 ): Promise<string> {
   // Encode result as Beast2
   const encoder = encodeBeast2For(resultType);
@@ -251,9 +172,16 @@ export async function createTaskDoneCommit(
 ): Promise<string> {
   const timestamp = new Date().toISOString();
 
-  // Format commit as .east
-  const commitText = `.task_done (parent="${parentCommitHash}", result="${resultHash}", runtime="${runtime}", execution_time_us=${executionTimeUs}, timestamp="${timestamp}")`;
+  const commit: Commit = variant('task_done', {
+    parent: parentCommitHash,
+    result: resultHash,
+    runtime,
+    execution_time_us: BigInt(executionTimeUs),
+    timestamp,
+  });
 
+  const printer = printFor(CommitType);
+  const commitText = printer(commit);
   const commitData = new TextEncoder().encode(commitText);
 
   return await storeObject(repoPath, commitData, '.east');

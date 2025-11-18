@@ -31,6 +31,7 @@
   "dependencies": {
     "@elaraai/east": "file:../../../East",
     "@elaraai/e3dk": "file:../e3dk",
+    "@elaraai/e3-types": "file:../e3-types",
     "ink": "^5.0.1",
     "ink-spinner": "^5.0.0",
     "react": "^18.3.1",

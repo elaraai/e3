@@ -9,6 +9,8 @@ import * as path from 'path';
 import { getRepository } from '../repo.js';
 import { resolveToCommit } from '../resolve.js';
 import { Error as ErrorMessage } from '../ui/index.js';
+import { parseFor, decodeBeast2For } from '@elaraai/east';
+import { CommitType, type Commit } from '@elaraai/e3-types';
 
 /**
  * Show commit history for a task
@@ -18,98 +20,98 @@ export async function showLog(refOrHash: string): Promise<void> {
 
   try {
     // Resolve to initial commit
-    let commitHash = await resolveToCommit(repoPath, refOrHash);
+    let commitHash: string | null = await resolveToCommit(repoPath, refOrHash);
 
     const commits: Array<{
       hash: string;
-      type: string;
-      data: Record<string, any>;
+      commit: Commit;
     }> = [];
 
     // Walk commit chain backwards
     while (commitHash) {
-      const commitPath = await findCommitFile(repoPath, commitHash);
-      const commitText = (await fs.readFile(commitPath, 'utf-8')).trim();
-
-      const parsed = parseCommit(commitText);
+      const commit = await loadCommit(repoPath, commitHash);
       commits.push({
         hash: commitHash,
-        type: parsed.type,
-        data: parsed.data,
+        commit,
       });
 
-      // Get parent
-      commitHash = parsed.data.parent || null;
+      // Get parent from commit
+      if (commit.type === 'new_task') {
+        const parent = commit.value.parent;
+        commitHash = parent.type === 'Some' ? parent.value : null;
+      } else {
+        commitHash = commit.value.parent;
+      }
     }
 
     // Display commits
     render(
       <Box flexDirection="column">
-        {commits.map((commit, i) => (
+        {commits.map((item, i) => (
           <Box key={i} flexDirection="column" marginBottom={1}>
             <Box>
               <Text color="yellow" bold>
-                commit {commit.hash.slice(0, 12)}
+                commit {item.hash.slice(0, 12)}
               </Text>
             </Box>
 
-            {commit.type === 'new_task' && (
+            {item.commit.type === 'new_task' && (
               <Box flexDirection="column" marginLeft={2}>
                 <Text>
                   <Text color="green">Type:</Text> Task submission
                 </Text>
                 <Text>
-                  <Text color="green">Task ID:</Text> {commit.data.task_id?.slice(0, 12)}
+                  <Text color="green">Task ID:</Text> {item.commit.value.task_id.slice(0, 12)}
                 </Text>
                 <Text>
-                  <Text color="green">IR:</Text> {commit.data.ir?.slice(0, 12)}
+                  <Text color="green">IR:</Text> {item.commit.value.ir.slice(0, 12)}
                 </Text>
                 <Text>
-                  <Text color="green">Args:</Text> [{commit.data.args?.length || 0} arguments]
+                  <Text color="green">Args:</Text> [{item.commit.value.args.length} arguments]
                 </Text>
                 <Text>
-                  <Text color="green">Runtime:</Text> {commit.data.runtime}
+                  <Text color="green">Runtime:</Text> {item.commit.value.runtime}
                 </Text>
                 <Text>
-                  <Text color="green">Timestamp:</Text> {commit.data.timestamp}
+                  <Text color="green">Timestamp:</Text> {item.commit.value.timestamp}
                 </Text>
               </Box>
             )}
 
-            {commit.type === 'task_done' && (
+            {item.commit.type === 'task_done' && (
               <Box flexDirection="column" marginLeft={2}>
                 <Text>
                   <Text color="green">Type:</Text> Task completed
                 </Text>
                 <Text>
-                  <Text color="green">Result:</Text> {commit.data.result?.slice(0, 12)}
+                  <Text color="green">Result:</Text> {item.commit.value.result.slice(0, 12)}
                 </Text>
                 <Text>
-                  <Text color="green">Runtime:</Text> {commit.data.runtime}
+                  <Text color="green">Runtime:</Text> {item.commit.value.runtime}
                 </Text>
                 <Text>
                   <Text color="green">Execution time:</Text>{' '}
-                  {((commit.data.execution_time_us || 0) / 1000).toFixed(2)}ms
+                  {(Number(item.commit.value.execution_time_us) / 1000).toFixed(2)}ms
                 </Text>
                 <Text>
-                  <Text color="green">Timestamp:</Text> {commit.data.timestamp}
+                  <Text color="green">Timestamp:</Text> {item.commit.value.timestamp}
                 </Text>
               </Box>
             )}
 
-            {(commit.type === 'task_error' || commit.type === 'task_fail') && (
+            {(item.commit.type === 'task_error' || item.commit.type === 'task_fail') && (
               <Box flexDirection="column" marginLeft={2}>
                 <Text>
                   <Text color="red">Type:</Text> Task failed
                 </Text>
                 <Text>
-                  <Text color="red">Error:</Text> {commit.data.error_message}
+                  <Text color="red">Error:</Text> {item.commit.value.error_message}
                 </Text>
                 <Text>
-                  <Text color="green">Runtime:</Text> {commit.data.runtime}
+                  <Text color="green">Runtime:</Text> {item.commit.value.runtime}
                 </Text>
                 <Text>
-                  <Text color="green">Timestamp:</Text> {commit.data.timestamp}
+                  <Text color="green">Timestamp:</Text> {item.commit.value.timestamp}
                 </Text>
               </Box>
             )}
@@ -124,51 +126,32 @@ export async function showLog(refOrHash: string): Promise<void> {
 }
 
 /**
- * Parse commit text
+ * Load and decode a commit
  */
-function parseCommit(text: string): { type: string; data: Record<string, any> } {
-  const trimmed = text.trim();
+async function loadCommit(repoPath: string, commitHash: string): Promise<Commit> {
+  // Try .east first (for debugging), then .beast2
+  try {
+    const commitPath = await findCommitFile(repoPath, commitHash);
+    const data = await fs.readFile(commitPath);
 
-  // Extract type
-  const typeMatch = trimmed.match(/^\.(\w+)\s*\(/);
-  if (!typeMatch) {
-    throw new Error('Invalid commit format');
-  }
+    if (commitPath.endsWith('.east')) {
+      const text = new TextDecoder().decode(data);
+      const parser = parseFor(CommitType);
+      const result = parser(text);
 
-  const type = typeMatch[1];
+      if (!result.success) {
+        throw new Error(`Failed to parse .east commit: ${result.error}`);
+      }
 
-  // Extract fields (simple regex-based parsing)
-  const data: Record<string, any> = {};
-
-  // Extract all field="value" pairs
-  const stringFields = trimmed.matchAll(/(\w+)="([^"]+)"/g);
-  for (const match of stringFields) {
-    data[match[1]] = match[2];
-  }
-
-  // Extract numeric fields
-  const numFields = trimmed.matchAll(/(\w+)=(\d+)/g);
-  for (const match of numFields) {
-    if (!data[match[1]]) {
-      // Don't override string fields
-      data[match[1]] = parseInt(match[2], 10);
+      return result.value;
+    } else {
+      // .beast2 format
+      const decoder = decodeBeast2For(CommitType);
+      return decoder(data);
     }
+  } catch (error: any) {
+    throw new Error(`Failed to load commit ${commitHash}: ${error.message}`);
   }
-
-  // Extract null fields
-  const nullFields = trimmed.matchAll(/(\w+)=null/g);
-  for (const match of nullFields) {
-    data[match[1]] = null;
-  }
-
-  // Extract array fields
-  const argsMatch = trimmed.match(/args=\[([^\]]*)\]/);
-  if (argsMatch) {
-    const argsStr = argsMatch[1].trim();
-    data.args = argsStr ? argsStr.split(',').map(s => s.trim().replace(/"/g, '')) : [];
-  }
-
-  return { type, data };
 }
 
 /**

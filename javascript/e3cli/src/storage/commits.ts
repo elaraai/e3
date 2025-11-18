@@ -5,85 +5,15 @@
  */
 
 import { storeObject } from './objects.js';
+import { printFor, variant } from '@elaraai/east';
+import { CommitType, type Commit } from '@elaraai/e3-types';
 
 /**
- * Commit types as East variant values
- */
-
-export interface NewTaskCommit {
-  tag: 'new_task';
-  value: {
-    task_id: string;
-    ir: string;
-    args: string[];
-    runtime: string;
-    parent: string | null;
-    timestamp: string; // ISO 8601 UTC
-  };
-}
-
-export interface TaskDoneCommit {
-  tag: 'task_done';
-  value: {
-    parent: string;
-    result: string;
-    runtime: string;
-    execution_time_us: number;
-    timestamp: string;
-  };
-}
-
-export interface TaskErrorCommit {
-  tag: 'task_error';
-  value: {
-    parent: string;
-    error_message: string;
-    error_stack: string[];
-    runtime: string;
-    execution_time_us: number;
-    timestamp: string;
-  };
-}
-
-export interface TaskFailCommit {
-  tag: 'task_fail';
-  value: {
-    parent: string;
-    error_message: string;
-    runtime: string;
-    execution_time_us: number;
-    timestamp: string;
-  };
-}
-
-export type Commit =
-  | NewTaskCommit
-  | TaskDoneCommit
-  | TaskErrorCommit
-  | TaskFailCommit;
-
-/**
- * Format a commit as .east format
+ * Format a commit as .east format using printFor
  */
 function formatCommit(commit: Commit): string {
-  // Format as East variant syntax
-  const formatValue = (v: any): string => {
-    if (v === null) return 'null';
-    if (typeof v === 'string') return `"${v}"`;
-    if (typeof v === 'number') return String(v);
-    if (Array.isArray(v)) {
-      return `[${v.map(formatValue).join(', ')}]`;
-    }
-    if (typeof v === 'object') {
-      const entries = Object.entries(v).map(
-        ([k, val]) => `${k}=${formatValue(val)}`
-      );
-      return `(${entries.join(', ')})`;
-    }
-    return String(v);
-  };
-
-  return `.${commit.tag} ${formatValue(commit.value)}\n`;
+  const printer = printFor(CommitType);
+  return printer(commit);
 }
 
 /**
@@ -97,17 +27,14 @@ export async function createNewTaskCommit(
   runtime: string,
   parent: string | null = null
 ): Promise<string> {
-  const commit: NewTaskCommit = {
-    tag: 'new_task',
-    value: {
-      task_id: taskId,
-      ir: irHash,
-      args: argsHashes,
-      runtime,
-      parent,
-      timestamp: new Date().toISOString(),
-    },
-  };
+  const commit = variant('new_task', {
+    task_id: taskId,
+    ir: irHash,
+    args: argsHashes,
+    runtime,
+    parent: parent ? variant('Some', parent) : variant('None', null),
+    timestamp: new Date().toISOString(),
+  });
 
   const commitText = formatCommit(commit);
   const commitData = new TextEncoder().encode(commitText);
@@ -125,16 +52,13 @@ export async function createTaskDoneCommit(
   runtime: string,
   executionTimeUs: number
 ): Promise<string> {
-  const commit: TaskDoneCommit = {
-    tag: 'task_done',
-    value: {
-      parent: parentCommitHash,
-      result: resultHash,
-      runtime,
-      execution_time_us: executionTimeUs,
-      timestamp: new Date().toISOString(),
-    },
-  };
+  const commit = variant('task_done', {
+    parent: parentCommitHash,
+    result: resultHash,
+    runtime,
+    execution_time_us: BigInt(executionTimeUs),
+    timestamp: new Date().toISOString(),
+  });
 
   const commitText = formatCommit(commit);
   const commitData = new TextEncoder().encode(commitText);
@@ -153,17 +77,14 @@ export async function createTaskErrorCommit(
   runtime: string,
   executionTimeUs: number
 ): Promise<string> {
-  const commit: TaskErrorCommit = {
-    tag: 'task_error',
-    value: {
-      parent: parentCommitHash,
-      error_message: errorMessage,
-      error_stack: errorStack,
-      runtime,
-      execution_time_us: executionTimeUs,
-      timestamp: new Date().toISOString(),
-    },
-  };
+  const commit: Commit = variant('task_error', {
+    parent: parentCommitHash,
+    error_message: errorMessage,
+    error_stack: errorStack,
+    runtime,
+    execution_time_us: BigInt(executionTimeUs),
+    timestamp: new Date().toISOString(),
+  });
 
   const commitText = formatCommit(commit);
   const commitData = new TextEncoder().encode(commitText);
@@ -181,16 +102,13 @@ export async function createTaskFailCommit(
   runtime: string,
   executionTimeUs: number
 ): Promise<string> {
-  const commit: TaskFailCommit = {
-    tag: 'task_fail',
-    value: {
-      parent: parentCommitHash,
-      error_message: errorMessage,
-      runtime,
-      execution_time_us: executionTimeUs,
-      timestamp: new Date().toISOString(),
-    },
-  };
+  const commit: Commit = variant('task_fail', {
+    parent: parentCommitHash,
+    error_message: errorMessage,
+    runtime,
+    execution_time_us: BigInt(executionTimeUs),
+    timestamp: new Date().toISOString(),
+  });
 
   const commitText = formatCommit(commit);
   const commitData = new TextEncoder().encode(commitText);

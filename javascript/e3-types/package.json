@@ -1,0 +1,21 @@
+{
+  "name": "@elaraai/e3-types",
+  "version": "0.0.1-alpha.0",
+  "description": "Shared type definitions for E3 (East Execution Engine)",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "keywords": ["east", "e3", "types"],
+  "author": "Elara AI",
+  "license": "AGPL-3.0",
+  "dependencies": {
+    "@elaraai/east": "file:../../../East"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
