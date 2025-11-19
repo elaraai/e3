@@ -9,7 +9,7 @@
  * Utilities for spawning CLI commands and managing test environments
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -33,6 +33,18 @@ export function getE3CliPath(): string {
   const workspaceRoot = dirname(integrationTestsDir); // workspace root
   const cliPath = join(workspaceRoot, 'e3-cli', 'dist', 'src', 'cli.js');
   return cliPath;
+}
+
+/**
+ * Get the path to the e3 runner binary
+ */
+export function getE3RunnerPath(): string {
+  const currentFile = fileURLToPath(import.meta.url);
+  const distDir = dirname(currentFile);
+  const integrationTestsDir = dirname(distDir);
+  const workspaceRoot = dirname(integrationTestsDir);
+  const runnerPath = join(workspaceRoot, 'e3-runner-node', 'dist', 'src', 'runner.js');
+  return runnerPath;
 }
 
 /**
@@ -117,4 +129,87 @@ export async function runE3Command(
       child.stdin.end();
     }
   });
+}
+
+/**
+ * Track active runner processes for cleanup
+ */
+const activeRunners = new Set<ChildProcess>();
+
+/**
+ * Start an E3 runner process in the background
+ *
+ * @param repoPath - Path to E3 repository (should point to directory containing .e3)
+ * @returns Runner process (must be killed when done)
+ */
+export function startRunner(repoPath: string): ChildProcess {
+  const runnerPath = getE3RunnerPath();
+
+  // Runner expects path to .e3 directory, not parent
+  const e3Path = join(repoPath, '.e3');
+
+  const runner = spawn('node', [runnerPath, '--repo', e3Path], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  // Capture output for debugging (optional - can be enabled if needed)
+  // runner.stdout.on('data', (data) => console.log('[runner stdout]', data.toString()));
+  // runner.stderr.on('data', (data) => console.error('[runner stderr]', data.toString()));
+
+  // Track for cleanup
+  activeRunners.add(runner);
+
+  // Auto-remove from tracking when it exits
+  runner.on('exit', (code) => {
+    activeRunners.delete(runner);
+    // Uncomment for debugging: console.log(`[runner] exited with code ${code}`);
+  });
+
+  return runner;
+}
+
+/**
+ * Stop a runner process
+ */
+export function stopRunner(runner: ChildProcess): void {
+  if (!runner.killed) {
+    runner.kill('SIGTERM');
+    activeRunners.delete(runner);
+  }
+}
+
+/**
+ * Stop all active runners (for cleanup)
+ */
+export function stopAllRunners(): void {
+  for (const runner of activeRunners) {
+    stopRunner(runner);
+  }
+  activeRunners.clear();
+}
+
+/**
+ * Wait for a condition with timeout
+ *
+ * @param condition - Function that returns true when condition is met
+ * @param timeoutMs - Maximum time to wait in milliseconds
+ * @param checkIntervalMs - How often to check the condition
+ * @returns Promise that resolves when condition is met or rejects on timeout
+ */
+export async function waitFor(
+  condition: () => Promise<boolean> | boolean,
+  timeoutMs: number = 5000,
+  checkIntervalMs: number = 100
+): Promise<void> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const result = await condition();
+    if (result) {
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, checkIntervalMs));
+  }
+
+  throw new Error(`Timeout waiting for condition after ${timeoutMs}ms`);
 }
