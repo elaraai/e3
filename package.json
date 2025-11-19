@@ -8,7 +8,8 @@
     "e3-cli",
     "e3-core",
     "e3-runner-node",
-    "e3-types"
+    "e3-types",
+    "integration-tests"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

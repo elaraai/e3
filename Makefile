@@ -31,6 +31,7 @@ build:
 	npm run build --workspace=e3-core
 	npm run build --workspace=e3-cli
 	npm run build --workspace=e3-runner-node
+	npm run build --workspace=integration-tests
 
 # Run all tests
 test:
