@@ -13,6 +13,7 @@ import { getTaskOutput } from './commands/get.js';
 import { listTasks } from './commands/list.js';
 import { showLog } from './commands/log.js';
 import { convertFile } from './commands/convert.js';
+import { viewData } from './commands/view.js';
 import { getRepository } from './repo.js';
 
 // TODO install commander-completions or similar for bash completions
@@ -86,6 +87,15 @@ program
   .option('--type <typespec>', 'Type specification in .east format (required for .json, optional for .east)')
   .action(async (input, options) => {
     await convertFile(input, options.to, options.output, options.type, options.from);
+  });
+
+program
+  .command('view [input]')
+  .description('Interactive data viewer for East values (reads from stdin if no input file)')
+  .option('--from <format>', 'Input format: east, json, or beast2 (default: auto-detect)')
+  .option('-f, --fullscreen', 'Start in fullscreen tree mode (detail pane minimized)')
+  .action(async (input, options) => {
+    await viewData(input, options.from, options.fullscreen);
   });
 
 // TODO: Add additional commands

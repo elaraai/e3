@@ -311,6 +311,44 @@ echo '42' | e3 convert --from json --type '.Integer'
 - stdin: Auto-detected (beast2 by magic byte, json by structure, otherwise east)
 - Override with `--from` when needed
 
+### Interactive Data Viewer
+
+View and explore East data structures with an interactive terminal UI:
+
+```bash
+e3 view [input] [--from <format>] [-f]
+```
+
+**Options:**
+- `[input]`: File path to view (reads from stdin if omitted or `-`)
+- `--from <format>`: Input format (east, json, beast2) - auto-detected if not specified
+- `-f, --fullscreen`: Use full terminal height
+
+**Navigation:**
+- `↑/↓` or `j/k`: Move cursor up/down
+- `→/Enter/Space`: Expand node
+- `←/Delete`: Collapse node
+- `d`: Toggle detail pane visibility
+- `q/Esc`: Quit
+
+**Features:**
+- Two-pane layout: tree navigator (left) + detail view (right)
+- Type-aware navigation for Structs and Arrays
+- Full East type and value formatting
+- Displays file path or `<stdin>` in title bar
+
+**Examples:**
+```bash
+# View a .beast2 file
+e3 view data.beast2
+
+# View from stdin with fullscreen mode
+cat data.east | e3 view -f
+
+# View a .json file with explicit format
+e3 view data.json --from json
+```
+
 ---
 
 ## Working with Tasks
