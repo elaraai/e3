@@ -12,7 +12,8 @@
   "dependencies": {
     "@elaraai/e3-cli": "*",
     "@elaraai/e3-core": "*",
-    "@elaraai/e3-runner-node": "*"
+    "@elaraai/e3-runner-node": "*",
+    "@elaraai/east": "file:../../East"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
