@@ -1,135 +1,140 @@
 # E3 Development TODO
 
-## Phase 1: Basic Single-Runtime Execution (NodeJS only)
+## Testing Strategy
 
-**Goal**: Get the system working with just the NodeJS runner, no `execute` command for subtasks, no logging (stdout only).
+### Overall Philosophy
+E3 is fundamentally a data orchestration system with strong correctness requirements. The cost of bugs (corrupted repos, lost task state, incorrect memoization) is high. Focus on high-value tests that catch real bugs, not achieving 100% coverage for its own sake.
 
-### CLI Tool (`e3cli`)
+### Phase 1: Foundation (Week 1)
+**Priority: HIGH - e3-core is the foundation everything builds on**
 
-- [x] **1. `e3 init` command** ✅
-  - [x] Create `.e3/` directory structure
-    - [x] `objects/` (content-addressable storage)
-    - [x] `queue/node/`, `queue/python/`, `queue/julia/`
-    - [x] `refs/tasks/` (named task references)
-    - [x] `tasks/` (task_id → commit_hash mapping)
-    - [x] `tmp/` (for atomic operations)
-  - [x] Initialize empty repository
-  - [x] Error handling for existing repository
-  - [x] Support custom path argument
+- [ ] Set up test infrastructure in e3-core
+  - [ ] Configure test scripts in package.json
+  - [ ] Create test helpers for temp directory setup/teardown
+  - [ ] Add test dependencies if needed
 
-- [x] **2. Task submission (zero-argument tasks)** ✅
-  - [x] Accept path to IR file (`.json`, `.east`, or `.beast2`)
-  - [x] Parse/decode IR from file format (JSON supported)
-  - [x] Convert IR to `.beast2` format (using JSON placeholder)
-  - [x] Calculate SHA256 hash of IR
-  - [x] Atomically emplace IR into `objects/` (via `tmp/`)
-    - [x] Write to `tmp/<random>` first
-    - [x] Rename to `objects/<hash[0:2]>/<hash[2:]>.beast2`
-  - [x] Compute task_id from hash(ir_hash + args_hashes + runtime)
-  - [x] Create `new_task` commit (`.east` formatted East value)
-  - [x] Atomically emplace commit into `objects/` as `.east` file
-  - [x] Write task_id to `refs/tasks/<name>`
-  - [x] Write commit_hash to `tasks/<task_id>`
-  - [x] Write commit_hash to `queue/node/<task_id>` to enqueue
-  - [x] Support `--runtime` option
+- [ ] Write core tests for objects.ts (20-30 tests)
+  - [ ] Test `storeObject()` and `loadObject()` round-trip
+  - [ ] Test atomic write behavior (tmp → rename pattern)
+  - [ ] Test concurrent writes to same hash (deduplication)
+  - [ ] Test error mid-write scenarios
+  - [ ] Test `computeHash()` correctness
+  - [ ] Test `computeTaskId()` with various inputs
 
-- [ ] **7. `e3 status <name>` - Get task status**
-  - [ ] Resolve `refs/tasks/<name>` → task_id
-  - [ ] Read `tasks/<task_id>` → commit_hash
-  - [ ] Load and decode commit from `objects/`
-  - [ ] Walk commit chain to find latest state
-  - [ ] Display status: pending, running, completed, or failed
+- [ ] Write tests for repository.ts
+  - [ ] Test `initRepository()` creates correct structure
+  - [ ] Test `findRepository()` walks parent directories
+  - [ ] Test `isValidRepository()` validation
+  - [ ] Test `setTaskRef()` and `deleteTaskRef()`
+  - [ ] Test `getTaskRefs()` listing
+  - [ ] Edge case: Empty repos, missing directories
 
-- [ ] **8. `e3 get <name>` - Retrieve task output**
-  - [ ] Follow named ref → task_id → commit
-  - [ ] Walk commit chain to find `task_done` commit
-  - [ ] Load result blob from `objects/`
-  - [ ] Decode Beast2 result
-  - [ ] Output in requested format (`.east`, `.json`, or `.beast2`)
+- [ ] Write tests for commits.ts
+  - [ ] Test `createNewTaskCommit()` structure
+  - [ ] Test `createTaskDoneCommit()` with result
+  - [ ] Test `createTaskErrorCommit()` with error
+  - [ ] Test `loadCommit()` .east → .beast2 fallback
+  - [ ] Test commit parent references
+  - [ ] Test invalid commit data handling
 
-### NodeJS Runner (`e3-runner-node`)
+### Phase 2: Critical Paths (Week 2)
+**Priority: HIGH - Complex algorithms and critical functionality**
 
-- [x] **3. Accept CLI argument for repository path**
-  - [x] Add `--repo <path>` argument (defaults to `E3_REPO` env or `~/.e3`)
-  - [x] Validate repository exists
+- [ ] Write tests for resolve.ts (high complexity)
+  - [ ] Test `resolveToTaskId()` with full hash
+  - [ ] Test `resolveToTaskId()` with partial hash (unique)
+  - [ ] Test `resolveToTaskId()` with partial hash (ambiguous - should error)
+  - [ ] Test `resolveToTaskId()` with task refs
+  - [ ] Test `resolveToCommit()` resolution chain
+  - [ ] Test `resolveObjectHash()` partial matching
+  - [ ] Edge cases: Empty refs, non-existent tasks
 
-- [x] **4. Task queue management with inotify**
-  - [x] Maintain global `Array<string>` of enqueued task_ids
-  - [x] Set up inotify watcher on `queue/node/` directory
-  - [x] On inotify event: add task_id to set
-  - [x] On startup: read existing files in `queue/node/`, add to set
-  - [x] Main loop: iterate over array, claim tasks atomically, launch tasks asynchronously
-  - [x] Remove from array when task claimed
+- [ ] Write tests for formats.ts
+  - [ ] Test `loadIR()` from .json, .east, .beast2
+  - [ ] Test `loadValue()` format detection
+  - [ ] Test `irToBeast2()` and `valueToBeast2()`
+  - [ ] Test format fallback logic
+  - [ ] Test error handling for invalid formats
 
-- [x] **Task claiming (atomic)**
-  - [x] Read `queue/node/<task_id>` (contains commit_hash)
-  - [x] Atomically claim by renaming to `queue/node/<task_id>.<worker_id>`
-  - [x] If rename fails (already claimed), skip
-  - [x] Delete claim file when task completes
+- [ ] Write tests for tasks.ts
+  - [ ] Test `updateTaskState()` atomicity
+  - [ ] Test `getTaskState()` reads
+  - [ ] Test `listTasks()` enumeration
+  - [ ] Test concurrent task updates
 
-- [ ] **5. Task execution**
-  - [ ] Load commit from `objects/<commit_hash>.beast2`
-  - [ ] Decode commit to get `ir_hash` and `args_hashes` (empty for zero-arg)
-  - [ ] Load IR blob from `objects/<ir_hash>.beast2`
-  - [ ] Decode IR
-  - [ ] Compile IR with east-node platform functions
-  - [ ] Execute compiled function (with `await` as necessary)
-  - [ ] Capture result
+- [ ] Write e3-runner-node integration tests (5-10 tests)
+  - [ ] Test runner picks up queued tasks via inotify
+  - [ ] Test claim atomicity (two runners, one task)
+  - [ ] Test successful task execution end-to-end
+  - [ ] Test error handling (task throws exception)
+  - [ ] Test signal handling (SIGTERM cleanup)
+  - [ ] Test subtask spawning (if implemented)
 
-- [ ] **6. Result commit and storage**
-  - [ ] Encode result as Beast2
-  - [ ] Calculate SHA256 of result
-  - [ ] Atomically emplace result into `objects/` (via `tmp/`)
-  - [ ] Create `task_done` commit (East value with parent, result_hash, execution_time, etc.)
-  - [ ] Encode commit as Beast2, calculate hash
-  - [ ] Atomically emplace commit into `objects/`
-  - [ ] Update `tasks/<task_id>` to point to new commit_hash
-  - [ ] Delete claim file from `queue/node/`
+### Phase 3: Polish (Week 3+)
+**Priority: MEDIUM - Smoke tests and CI setup**
 
-### Shared Core (`e3-core` or in each package)
+- [ ] Write end-to-end integration tests (2-3 tests)
+  - [ ] Happy path: init → run → execute → get result
+  - [ ] Memoization: run same task twice, verify cache hit
+  - [ ] Error propagation: run failing task, verify error commit
+  - [ ] Ref management: create/resolve/delete named refs
 
-- [ ] **Beast2 encoding/decoding helpers**
-  - [ ] Encode East values to Beast2 format
-  - [ ] Decode Beast2 to East values
-  - [ ] (Can use existing implementations from `@elaraai/east`)
+- [ ] Set up CI (GitHub Actions)
+  - [ ] Create .github/workflows/test.yml
+  - [ ] Run build + test on push/PR
+  - [ ] Verify filesystem tests work in CI environment
 
-- [ ] **Object storage helpers**
-  - [ ] `storeObject(data: Uint8Array): string` - atomically store, return hash
-  - [ ] `loadObject(hash: string): Uint8Array` - load from objects/
-  - [ ] `computeHash(data: Uint8Array): string` - SHA256 hex
+- [ ] Bug-driven testing
+  - [ ] Add tests for any bugs found in the wild
+  - [ ] Document failure scenarios
 
-- [ ] **Commit helpers**
-  - [ ] Create `new_task` commit (East variant value)
-  - [ ] Create `task_done` commit (East variant value)
-  - [ ] Create `task_error` commit (East variant value)
-  - [ ] Create `task_fail` commit (East variant value)
+### Out of Scope (Low ROI)
+**These provide limited value - skip unless recurring bugs appear**
 
-- [ ] **Task ID computation**
-  - [ ] `computeTaskId(ir_hash, args_hashes[], runtime?): string`
+- ❌ e3-cli command tests (thin presentation layer over e3-core)
+- ❌ Ink UI rendering tests (cosmetic bugs, not worth complexity)
+- ❌ Mock-heavy unit tests that don't reflect real behavior
+- ❌ Tests for simple forwarding functions
+- ❌ e3-types tests (type definitions only, no runtime behavior)
 
-### Testing & Validation
+### Testing Approach Guidelines
 
-- [ ] **End-to-end test**
-  - [ ] Create test IR (simple function returning a constant)
-  - [ ] `e3 init` creates proper directory structure
-  - [ ] `e3 run test-task ./test.ir.json` submits task
-  - [ ] Start `e3-runner-node --repo ./.e3`
-  - [ ] Runner picks up and executes task
-  - [ ] `e3 status test-task` shows "completed"
-  - [ ] `e3 get test-task` returns correct result
+**e3-core**:
+- Use real filesystem operations in temporary directories
+- Don't mock `fs` - interactions are too complex to mock accurately
+- Sandbox: `fs.mkdtempSync()` for each test, `rmSync()` in afterEach
+- Focus on atomic operations, edge cases, error conditions
 
-## Notes
+**e3-runner-node**:
+- Integration tests over unit tests (70% of complexity is coordination)
+- Start runner in subprocess, queue tasks, verify completion
+- Test race conditions (claim atomicity)
+- Test daemon lifecycle (startup, signal handling, shutdown)
 
-- **No logging infrastructure yet** - let stdout/stderr go to terminal
-- **No memoization checking yet** - always execute
-- **No subtasks/execute platform function yet** - single-runtime only
-- **No error handling UI** - basic error propagation for now
-- **Atomic operations**: Always write to `tmp/`, then rename to final location
+**Integration tests**:
+- Use real `e3` CLI binary and runner
+- Create temporary repos, clean up after
+- Target critical user paths only (3-5 scenarios)
 
-## Future Phases
+### Estimated Metrics
+- **Total test count**: 90-130 tests
+- **Implementation time**: 2-3 weeks for comprehensive coverage
+- **Maintenance burden**: Low (filesystem tests are stable)
+- **Coverage target**: Focus on critical paths, not 100% coverage
 
-- **Phase 2**: Add memoization (check `tasks/<task_id>` before executing / submitting tasks)
-- **Phase 3**: Add logging infrastructure (task-addressable log files)
-- **Phase 4**: Add Python and Julia runners
-- **Phase 5**: Add `execute` platform function for cross-runtime subtasks
-- **Phase 6**: Add CLI commands for logs, history, gc, etc.
+### CI Configuration Example
+```yaml
+name: Tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npm run build
+      - run: npm run test
+```
