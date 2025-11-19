@@ -37,6 +37,12 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'e3/package-lock.json'
 
+      - name: Install and build East
+        working-directory: East
+        run: |
+          npm install
+          npm run build
+
       - name: Install dependencies
         working-directory: e3
         run: make install
