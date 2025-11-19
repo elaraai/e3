@@ -2,7 +2,6 @@
  * e3 init command - Initialize a new E3 repository
  */
 
-import React from 'react';
 import { render } from 'ink';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -23,8 +22,8 @@ export interface InitRepositoryResult {
  * Core logic for initializing an E3 repository
  * This function is decoupled from CLI/UI concerns and can be used programmatically
  */
-export function initRepositoryCore(repoPath?: string): InitRepositoryResult {
-  const targetPath = repoPath ? path.resolve(repoPath) : process.cwd();
+export function initRepositoryCore(repoPath: string): InitRepositoryResult {
+  const targetPath = path.resolve(repoPath);
   const e3Dir = path.join(targetPath, '.e3');
 
   // Check if .e3 already exists
@@ -96,7 +95,7 @@ export function initRepositoryCore(repoPath?: string): InitRepositoryResult {
  * This function handles the UI/presentation layer
  */
 export async function initRepository(repoPath?: string): Promise<void> {
-  const result = initRepositoryCore(repoPath);
+  const result = initRepositoryCore(repoPath ?? process.cwd());
 
   if (!result.success) {
     if (result.alreadyExists) {

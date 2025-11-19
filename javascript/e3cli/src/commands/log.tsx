@@ -33,9 +33,7 @@ export interface GetCommitHistoryResult {
  * Core logic for retrieving commit history
  * This function is decoupled from CLI/UI concerns and can be used programmatically
  */
-export async function getCommitHistoryCore(refOrHash: string): Promise<GetCommitHistoryResult> {
-  const repoPath = getRepository();
-
+export async function getCommitHistoryCore(repoPath: string, refOrHash: string): Promise<GetCommitHistoryResult> {
   try {
     // Resolve to initial commit
     let commitHash: string | null = await resolveToCommit(repoPath, refOrHash);
@@ -75,8 +73,8 @@ export async function getCommitHistoryCore(refOrHash: string): Promise<GetCommit
  * CLI handler for the log command
  * This function handles the UI/presentation layer
  */
-export async function showLog(refOrHash: string): Promise<void> {
-  const result = await getCommitHistoryCore(refOrHash);
+export async function showLog(repoPath: string, refOrHash: string): Promise<void> {
+  const result = await getCommitHistoryCore(repoPath, refOrHash);
 
   if (!result.success) {
     render(<ErrorMessage message={`Failed to show log: ${result.error?.message}`} />);

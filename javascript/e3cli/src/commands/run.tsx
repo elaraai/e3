@@ -2,11 +2,9 @@
  * e3 run command - Submit a task for execution
  */
 
-import React from 'react';
 import { render } from 'ink';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { getRepository } from '../repo.js';
 import { storeObject, computeTaskId } from '../storage/objects.js';
 import { createNewTaskCommit } from '../storage/commits.js';
 import { loadIR, irToBeast2, loadValue, valueToBeast2 } from '../storage/formats.js';
@@ -38,13 +36,12 @@ export interface RunTaskResult {
  * This function is decoupled from CLI/UI concerns and can be used programmatically
  */
 export async function runTaskCore(
+  repoPath: string,
   taskName: string,
   irPath: string,
   argPaths: string[] = [],
   runtime: string = 'node'
 ): Promise<RunTaskResult> {
-  const repoPath = getRepository();
-
   try {
     // 1. Load IR from file (supports .json, .east, .beast2)
     const ir = await loadIR(irPath);
@@ -127,6 +124,7 @@ export async function runTaskCore(
  * This function handles the UI/presentation layer
  */
 export async function runTask(
+  repoPath: string,
   taskName: string,
   irPath: string,
   argPaths: string[] = [],
@@ -143,7 +141,7 @@ export async function runTask(
     />
   );
 
-  const result = await runTaskCore(taskName, irPath, argPaths, runtime);
+  const result = await runTaskCore(repoPath,taskName, irPath, argPaths, runtime);
 
   if (!result.success) {
     render(<ErrorMessage message={`Failed to submit task: ${result.error?.message}`} />);

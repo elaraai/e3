@@ -12,6 +12,9 @@ import { getTaskStatus } from './commands/status.js';
 import { getTaskOutput } from './commands/get.js';
 import { listTasks } from './commands/list.js';
 import { showLog } from './commands/log.js';
+import { getRepository } from './repo.js';
+
+// TODO install commander-completions or similar for bash completions
 
 const program = new Command();
 
@@ -30,38 +33,48 @@ program
 program
   .command('run <name> <ir> [args...]')
   .description('Submit a task for execution')
+  .option('--e3-dir <path>', 'Path to E3 repository')
   .option('-r, --runtime <runtime>', 'Runtime to use (node, python, julia)', 'node')
   .action(async (name, ir, args, options) => {
-    await runTask(name, ir, args || [], options.runtime);
+    const repoPath = getRepository(options.e3Dir);
+    await runTask(repoPath, name, ir, args || [], options.runtime);
   });
 
 program
   .command('status <name>')
   .description('Get status of a task')
-  .action(async (name) => {
-    await getTaskStatus(name);
+  .option('--e3-dir <path>', 'Path to E3 repository')
+  .action(async (name, options) => {
+    const repoPath = getRepository(options.e3Dir);
+    await getTaskStatus(repoPath, name);
   });
 
 program
   .command('get <refOrHash>')
   .description('Get output of a completed task or any object by hash')
   .option('-f, --format <format>', 'Output format (east, json)', 'east')
+  .option('--e3-dir <path>', 'Path to E3 repository')
   .action(async (refOrHash, options) => {
-    await getTaskOutput(refOrHash, options.format);
+    const repoPath = getRepository(options.e3Dir);
+    await getTaskOutput(repoPath, refOrHash, options.format);
   });
 
 program
   .command('list')
   .description('List all task refs')
-  .action(async () => {
-    await listTasks();
+  .option('--e3-dir <path>', 'Path to E3 repository')
+  .action(async (options) => {
+    const repoPath = getRepository(options.e3Dir);
+    await listTasks(repoPath);
   });
 
 program
   .command('log <refOrHash>')
   .description('Show commit history for a task')
-  .action(async (refOrHash) => {
-    await showLog(refOrHash);
+  .option('--e3-dir <path>', 'Path to E3 repository')
+  .action(async (refOrHash, options) => {
+    const repoPath = getRepository(options.e3Dir);
+    await showLog(repoPath, refOrHash);
   });
 
 // TODO: Add additional commands

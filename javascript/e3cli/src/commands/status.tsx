@@ -2,11 +2,9 @@
  * e3 status command - Get task status
  */
 
-import React from 'react';
 import { render } from 'ink';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { getRepository } from '../repo.js';
 import { Success, Error as ErrorMessage, Info } from '../ui/index.js';
 import { parseFor } from '@elaraai/east';
 import { CommitType, type Commit } from '@elaraai/e3-types';
@@ -44,9 +42,7 @@ export interface GetTaskStatusResult {
  * Core logic for getting task status
  * This function is decoupled from CLI/UI concerns and can be used programmatically
  */
-export async function getTaskStatusCore(taskName: string): Promise<GetTaskStatusResult> {
-  const repoPath = getRepository();
-
+export async function getTaskStatusCore(repoPath: string, taskName: string): Promise<GetTaskStatusResult> {
   try {
     // 1. Resolve task name to task_id
     const refPath = path.join(repoPath, 'refs', 'tasks', taskName);
@@ -119,8 +115,8 @@ export async function getTaskStatusCore(taskName: string): Promise<GetTaskStatus
  * CLI handler for the status command
  * This function handles the UI/presentation layer
  */
-export async function getTaskStatus(taskName: string): Promise<void> {
-  const result = await getTaskStatusCore(taskName);
+export async function getTaskStatus(repoPath: string, taskName: string): Promise<void> {
+  const result = await getTaskStatusCore(repoPath, taskName);
 
   if (!result.success) {
     if (result.notFound) {

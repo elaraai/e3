@@ -36,6 +36,12 @@ $E3_REPO/                         # Repository root (e.g., ~/.e3 or ./my-project
 │   ├── node/
 │   │   └── 456789...xyz.worker_id
 │   └── python/
+├── plugins/
+│   ├── julia/
+│   │   └── ElaraEast.jl/1.0.0/     # folder or symlink to a folder
+│   ├── node/
+│   │   └── east-node/1.0.0/        # folder or symlink to a folder
+│   └── python/
 ├── refs/
 │   └── tasks/                    # Named task references
 │       ├── pipeline              # Points to task_id for named task
@@ -933,6 +939,29 @@ def mark_commit(commit_hash: str, commits: set, blobs: set, task_ids: set):
     # Recursively mark parent
     if commit.value.parent:
         mark_commit(commit.value.parent, commits, blobs, task_ids)
+```
+
+## Plugins
+
+Plugins define the runtime and platform that a task can run with.
+
+```bash
+e3 plugin add plugin.east
+e3 plugin list
+e3 plugin delete
+```
+
+```
+// plugin.east
+(
+    name = "east-node",
+    runtime = "node",
+    version = "1.0.0",
+    location = .file "path/to/dir",
+    // location = .git "https://github.com/elaraai/east-node/releases/1.0.0",
+    // location = .npm "@elaraai/east-node@1.0.0",
+    entrypoint = "main.mjs",
+)
 ```
 
 ## CLI Integration

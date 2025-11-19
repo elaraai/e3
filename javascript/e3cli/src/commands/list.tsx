@@ -2,11 +2,9 @@
  * e3 list command - List all task refs
  */
 
-import React from 'react';
 import { render, Box, Text } from 'ink';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { getRepository } from '../repo.js';
 import { Error as ErrorMessage } from '../ui/index.js';
 
 /**
@@ -31,9 +29,7 @@ export interface ListTasksResult {
  * Core logic for listing all task refs
  * This function is decoupled from CLI/UI concerns and can be used programmatically
  */
-export async function listTasksCore(): Promise<ListTasksResult> {
-  const repoPath = getRepository();
-
+export async function listTasksCore(repoPath: string): Promise<ListTasksResult> {
   try {
     const refsDir = path.join(repoPath, 'refs', 'tasks');
 
@@ -93,8 +89,8 @@ export async function listTasksCore(): Promise<ListTasksResult> {
  * CLI handler for the list command
  * This function handles the UI/presentation layer
  */
-export async function listTasks(): Promise<void> {
-  const result = await listTasksCore();
+export async function listTasks(repoPath: string): Promise<void> {
+  const result = await listTasksCore(repoPath);
 
   if (!result.success) {
     render(<ErrorMessage message={`Failed to list tasks: ${result.error?.message}`} />);

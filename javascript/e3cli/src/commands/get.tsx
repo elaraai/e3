@@ -2,14 +2,12 @@
  * e3 get command - Retrieve task output or any object by hash
  */
 
-import React from 'react';
 import { render } from 'ink';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { getRepository } from '../repo.js';
 import { resolveToCommit, resolveObjectHash } from '../resolve.js';
-import { Error as ErrorMessage, Info } from '../ui/index.js';
-import { decodeBeast2For, decodeBeast2, printFor, toJSONFor, IntegerType, IRType } from '@elaraai/east';
+import { Error as ErrorMessage } from '../ui/index.js';
+import { decodeBeast2, printFor, toJSONFor } from '@elaraai/east';
 
 /**
  * Output format type
@@ -46,11 +44,10 @@ export interface GetObjectResult {
  * This function is decoupled from CLI/UI concerns and can be used programmatically
  */
 export async function getTaskOutputCore(
+  repoPath: string,
   refOrHash: string,
   format: OutputFormat = 'east'
 ): Promise<GetTaskOutputResult> {
-  const repoPath = getRepository();
-
   try {
     // Check if this looks like a hash (not a simple ref name)
     const isHash = /^[0-9a-f]+$/i.test(refOrHash);
@@ -240,10 +237,11 @@ export async function getObjectByHashCore(
  * This function handles the UI/presentation layer
  */
 export async function getTaskOutput(
+  repoPath: string,
   refOrHash: string,
   format: OutputFormat = 'east'
 ): Promise<void> {
-  const result = await getTaskOutputCore(refOrHash, format);
+  const result = await getTaskOutputCore(repoPath, refOrHash, format);
 
   if (!result.success) {
     if (result.notCompleted) {
