@@ -1,12 +1,15 @@
 {
-  "name": "@elaraai/e3-runner-node",
+  "name": "@elaraai/e3dk",
   "version": "0.0.1-alpha.0",
   "type": "module",
-  "description": "East Execution Engine Node.js Runner - Execute East tasks in the Node.js runtime",
+  "description": "East Execution Engine Development Kit - Platform definitions for cross-language execution",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
-  "bin": {
-    "e3-runner-node": "./dist/src/runner.js"
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
   },
   "files": [
     "dist/src",
@@ -18,21 +21,17 @@
     "build": "tsc",
     "test": "npm run build && node --enable-source-maps --test 'dist/src/**/*.spec.js'",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "dev": "npm run build && node --enable-source-maps dist/src/runner.js"
+    "lint:fix": "eslint . --fix"
   },
   "keywords": [
     "east",
-    "e3",
-    "runner",
-    "nodejs"
+    "execution",
+    "cross-language",
+    "platform"
   ],
   "license": "UNLICENSED",
   "dependencies": {
-    "@elaraai/e3-types": "file:../e3-types",
-    "@elaraai/e3dk": "file:../e3dk",
-    "@elaraai/east": "file:../../../East",
-    "commander": "^12.0.0"
+    "@elaraai/east": "file:../../East"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -166,13 +166,9 @@ This means:
 │   │   ├── cdef123....beast2   # Binary objects
 │   │   └── 9876543....east     # Text objects
 ├── queue/             # Pending tasks
-│   ├── node/
-│   ├── python/
-│   └── julia/
+│   └── node/
 ├── claims/            # In-progress tasks (claimed by workers)
-│   ├── node/
-│   ├── python/
-│   └── julia/
+│   └── node/
 ├── refs/
 │   └── tasks/         # Named task references
 │       ├── my-task    # Points to task_id
@@ -205,18 +201,12 @@ Submit a task for execution.
 e3 run task-name function.east              # No arguments
 e3 run task-name function.east arg1.east    # One argument
 e3 run add3 add.east 1.east 2.east 3.east  # Multiple arguments
-
-# Specify runtime (default: node)
-e3 run task-name function.east --runtime python
 ```
 
 **Arguments:**
 - `<name>`: Friendly name for the task (creates a ref)
 - `<ir>`: Path to IR file (.east, .json, or .beast2)
 - `[args...]`: Paths to argument files (optional)
-
-**Options:**
-- `-r, --runtime <runtime>`: Runtime to use (node, python, julia). Default: node
 
 **Output:**
 - Task ID (content hash)
@@ -751,7 +741,6 @@ e3 get <full-64-char-hash>
 
 ## Future Features
 
-- Python and Julia workers
 - Platform function support
 - Task cancellation
 - Stale claim recovery

@@ -34,10 +34,9 @@ program
   .command('run <name> <ir> [args...]')
   .description('Submit a task for execution')
   .option('--e3-dir <path>', 'Path to E3 repository')
-  .option('-r, --runtime <runtime>', 'Runtime to use (node, python, julia)', 'node')
   .action(async (name, ir, args, options) => {
     const repoPath = getRepository(options.e3Dir);
-    await runTask(repoPath, name, ir, args || [], options.runtime);
+    await runTask(repoPath, name, ir, args || [], 'node');
   });
 
 program

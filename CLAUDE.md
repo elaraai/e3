@@ -2,11 +2,12 @@
 
 ## Structure
 
- - javascript/e3cli - CLI tool (like git)
- - javascript/e3-runner-node - task execution runner for NodeJS runtime
- - javascript/e3dk - E3 development kit, TypeScript library containing platform functions including `execute`
- - julia/E3Runner - task execution runner for Julia runtime
- - python/e3_runner - task execution runner for Python runtime
+This is an npm workspace monorepo containing the E3 (East Execution Engine) packages:
+
+ - e3cli - CLI tool (like git)
+ - e3-runner-node - task execution runner for NodeJS runtime
+ - e3dk - E3 development kit, TypeScript library containing platform functions including `execute`
+ - e3-types - Shared type definitions for E3
  - design - design documentation
 
 ## References

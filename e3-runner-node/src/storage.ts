@@ -16,7 +16,7 @@ import {
   type IR,
 } from '@elaraai/east';
 import { CommitType, type Commit } from '@elaraai/e3-types';
-import { EastTypeValue } from '../../../../East/dist/src/type_of_type.js';
+import { EastTypeValue } from '../../../East/dist/src/type_of_type.js';
 
 // Commit types are now imported from @elaraai/e3-types
 

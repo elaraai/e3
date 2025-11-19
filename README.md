@@ -8,11 +8,11 @@ East is a statically and structurally typed embedded language designed for speed
 
 ## What is E3?
 
-E3 provides a git-like environment for your data and tasks, and executes tasks to completion. It enables seamless cross-language execution, allowing you to write a pipeline that uses Julia for numerical computation, Python for machine learning, and Node.js for data processing - all within a single workflow.
+E3 provides a git-like environment for your data and tasks, and executes tasks to completion. It enables execution of East programs using the Node.js runtime.
 
 ### Key Features
 
-- **Cross-Language Execution**: Execute East functions across Node.js, Python, and Julia runtimes seamlessly
+- **Node.js Execution**: Execute East functions in the Node.js runtime
 - **Content-Addressable Storage**: Git-like object store for IR, arguments, and results with automatic deduplication
 - **Automatic Memoization**: Cache results based on function IR and arguments for instant re-execution
 - **Durable Execution**: Tasks are queued and executed to completion with comprehensive logging
@@ -34,10 +34,8 @@ E3 consists of three main components:
 - **Task state tracking**: Fast O(1) memoization lookups via task identity
 - **Streaming logs**: Real-time log files with interleaved parent/child task output
 
-### 3. Runtime Runners
+### 3. Runtime Runner
 - **Node.js runner**: Uses async/await with event loop concurrency
-- **Python runner**: Uses asyncio with optional threading
-- **Julia runner**: Multi-threaded execution with `Threads.@spawn`
 - Workers watch queue directories via `inotify` for low-latency task pickup
 
 ## How It Works
@@ -66,9 +64,7 @@ User submits task with IR + arguments
 ├── logs/                     # Streaming task logs
 │   └── abc123...eastl        # One log per task_id
 ├── queue/                    # Task queues (watched by runners)
-│   ├── julia/
-│   ├── node/
-│   └── python/
+│   └── node/
 ├── refs/
 │   └── tasks/                # Named task references
 │       └── pipeline          # task_id
@@ -98,22 +94,19 @@ e3 list
 e3 log pipeline
 ```
 
-## Cross-Language Example
+## Example
 
 ```typescript
-// Define a pipeline that uses multiple runtimes
+// Define a pipeline using East
 const pipeline = East.function(
   [ArrayType(FloatType)],
   FloatType,
   ($, rawData) => {
-    // Preprocess in Python (using numpy)
-    const processed = $(python_preprocess(rawData));
+    // Process data
+    const processed = $(preprocessData(rawData));
 
-    // Optimize in Julia (using numerical libraries)
-    const optimized = $(julia_optimize(processed));
-
-    // Aggregate in Node.js
-    const result = $(node_aggregate(optimized));
+    // Aggregate results
+    const result = $(aggregateResults(processed));
 
     $.return(result);
   }
@@ -121,19 +114,19 @@ const pipeline = East.function(
 ```
 
 When executed, E3 automatically:
-1. Detects runtime requirements for each function
-2. Spawns tasks to appropriate runtime workers
-3. Serializes data using Beast2 format
-4. Streams execution across runtimes
-5. Returns final result with full execution history
+1. Executes functions using the Node.js runtime
+2. Serializes data using Beast2 format
+3. Tracks execution history
+4. Returns final result with full execution logs
 
 ## Components in this Repository
 
-- **CLI Tool** (`packages/e3-cli/`): TypeScript/Node.js/ink CLI
-- **Node.js Runner** (`packages/e3-runner-node/`): Uses `../East` and `../east-node` platform
-- **Python Runner** (`packages/e3-runner-python/`): Uses `../east-py` and `../east-py-std` platform
-- **Julia Runner** (`packages/e3-runner-julia/`): Uses `../East.jl` with std platform (TBD)
-- **Shared Core** (`packages/e3-core/`): Registry, storage, and protocol implementations
+This is an npm workspace containing:
+
+- **e3cli**: TypeScript/Node.js/ink CLI tool
+- **e3-runner-node**: Node.js runtime worker
+- **e3dk**: E3 development kit with platform functions
+- **e3-types**: Shared TypeScript type definitions
 
 ## Design Documents
 
