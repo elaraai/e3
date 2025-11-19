@@ -278,6 +278,39 @@ Displays the commit chain from newest to oldest (like `git log`):
 - Execution times
 - IR and argument hashes
 
+### `e3 convert [input]`
+
+Convert between .east, .json, and .beast2 formats, or inspect type information.
+
+```bash
+# View .beast2 files in readable format
+e3 convert result.beast2                    # → .east format (default)
+e3 convert result.beast2 --to json          # → JSON format
+
+# Inspect type information
+e3 convert data.beast2 --to type            # Show type, not value
+echo '[1, 2, 3]' | e3 convert --to type     # → .Array .Integer
+
+# Convert between formats
+e3 convert input.east --to beast2 -o output.beast2
+cat data.east | e3 convert --to json
+
+# Override format detection
+e3 convert data.txt --from east             # Ignore extension
+echo '42' | e3 convert --from json --type '.Integer'
+```
+
+**Options:**
+- `--from <format>`: Input format (east, json, beast2) - default: auto-detect
+- `--to <format>`: Output format (east, json, beast2, type) - default: east
+- `-o, --output <path>`: Write to file instead of stdout
+- `--type <typespec>`: Type specification in .east format (required for .json input)
+
+**Format Detection:**
+- Files: Detected from extension (.east, .json, .beast2)
+- stdin: Auto-detected (beast2 by magic byte, json by structure, otherwise east)
+- Override with `--from` when needed
+
 ---
 
 ## Working with Tasks

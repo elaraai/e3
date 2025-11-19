@@ -12,6 +12,7 @@ import { getTaskStatus } from './commands/status.js';
 import { getTaskOutput } from './commands/get.js';
 import { listTasks } from './commands/list.js';
 import { showLog } from './commands/log.js';
+import { convertFile } from './commands/convert.js';
 import { getRepository } from './repo.js';
 
 // TODO install commander-completions or similar for bash completions
@@ -74,6 +75,17 @@ program
   .action(async (refOrHash, options) => {
     const repoPath = getRepository(options.e3Dir);
     await showLog(repoPath, refOrHash);
+  });
+
+program
+  .command('convert [input]')
+  .description('Convert between .east, .json, and .beast2 formats (reads from stdin if no input file)')
+  .option('--from <format>', 'Input format: east, json, or beast2 (default: auto-detect)')
+  .option('--to <format>', 'Output format: east, json, beast2, or type (default: east)', 'east')
+  .option('-o, --output <path>', 'Output file path (default: stdout)')
+  .option('--type <typespec>', 'Type specification in .east format (required for .json, optional for .east)')
+  .action(async (input, options) => {
+    await convertFile(input, options.to, options.output, options.type, options.from);
   });
 
 // TODO: Add additional commands
