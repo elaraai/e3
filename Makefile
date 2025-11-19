@@ -24,10 +24,13 @@ install:
 	@echo "Installing dependencies via npm workspaces..."
 	npm install
 
-# Build all packages
+# Build all packages (in dependency order)
 build:
 	@echo "Building all packages..."
-	npm run build
+	npm run build --workspace=e3-types
+	npm run build --workspace=e3-core
+	npm run build --workspace=e3-cli
+	npm run build --workspace=e3-runner-node
 
 # Run all tests
 test:
