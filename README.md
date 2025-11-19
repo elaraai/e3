@@ -1,5 +1,7 @@
 # East Execution Engine (E3)
 
+[![Test](https://github.com/elaraai/e3/actions/workflows/test.yml/badge.svg)](https://github.com/elaraai/e3/actions/workflows/test.yml)
+
 E3 is an automated, durable execution engine for East programs with cross-language runtime support.
 
 ## What is East?
