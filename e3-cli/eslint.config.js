@@ -12,7 +12,14 @@ export default [
       parser: tsparser,
       parserOptions: {
         project: './tsconfig.json'
-      }
+      },
+      globals: {
+        process: 'readonly',
+        Buffer: 'readonly',
+        TextEncoder: 'readonly',
+        TextDecoder: 'readonly',
+        console: 'readonly',
+      },
     },
     plugins: {
       '@typescript-eslint': tseslint,
@@ -39,7 +46,14 @@ export default [
       parser: tsparser,
       parserOptions: {
         project: './tsconfig.json'
-      }
+      },
+      globals: {
+        process: 'readonly',
+        Buffer: 'readonly',
+        TextEncoder: 'readonly',
+        TextDecoder: 'readonly',
+        console: 'readonly',
+      },
     },
     plugins: {
       '@typescript-eslint': tseslint
