@@ -5,7 +5,6 @@
 
 import * as fs from 'fs/promises';
 import { decodeBeast2For, encodeBeast2For, IRType, type IR } from '@elaraai/east';
-import { type Commit } from '@elaraai/e3-types';
 import { EastTypeValue } from '../../../East/dist/src/type_of_type.js';
 
 // Re-export commonly used functions from e3-core
