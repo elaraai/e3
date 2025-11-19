@@ -1,15 +1,12 @@
 {
-  "name": "@elaraai/e3dk",
+  "name": "@elaraai/e3-cli",
   "version": "0.0.1-alpha.0",
   "type": "module",
-  "description": "East Execution Engine Development Kit - Platform definitions for cross-language execution",
+  "description": "East Execution Engine CLI - Command-line tool for managing E3 repositories and tasks",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/src/index.d.ts",
-      "default": "./dist/src/index.js"
-    }
+  "bin": {
+    "e3": "./dist/src/cli.js"
   },
   "files": [
     "dist/src",
@@ -21,20 +18,29 @@
     "build": "tsc",
     "test": "npm run build && node --enable-source-maps --test 'dist/src/**/*.spec.js'",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "dev": "npm run build && node --enable-source-maps dist/src/cli.js"
   },
   "keywords": [
     "east",
-    "execution",
-    "cross-language",
-    "platform"
+    "e3",
+    "cli",
+    "execution-engine"
   ],
   "license": "UNLICENSED",
   "dependencies": {
-    "@elaraai/east": "file:../../East"
+    "@elaraai/e3-core": "*",
+    "@elaraai/e3-types": "*",
+    "@elaraai/east": "file:../../East",
+    "commander": "^12.0.0",
+    "ink": "^6.5.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^19.2.0",
+    "react-devtools-core": "^6.1.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
     "@typescript-eslint/eslint-plugin": "^8.47.0",
     "@typescript-eslint/parser": "^8.47.0",
     "eslint": "^9.0.0",

@@ -4,9 +4,9 @@
 
 This is an npm workspace monorepo containing the E3 (East Execution Engine) packages:
 
- - e3cli - CLI tool (like git)
+ - e3-cli - CLI tool (like git)
+ - e3-core - Core business logic library (like libgit2)
  - e3-runner-node - task execution runner for NodeJS runtime
- - e3dk - E3 development kit, TypeScript library containing platform functions including `execute`
  - e3-types - Shared type definitions for E3
  - design - design documentation
 

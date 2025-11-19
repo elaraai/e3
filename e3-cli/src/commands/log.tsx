@@ -7,7 +7,7 @@ import { render, Box, Text } from 'ink';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getRepository } from '../repo.js';
-import { resolveToCommit } from '../resolve.js';
+import { resolveToCommit } from '@elaraai/e3-core';
 import { Error as ErrorMessage } from '../ui/index.js';
 import { parseFor, decodeBeast2For } from '@elaraai/east';
 import { CommitType, type Commit } from '@elaraai/e3-types';

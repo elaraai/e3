@@ -5,8 +5,8 @@
   "description": "East Execution Engine - Monorepo for E3 packages",
   "type": "module",
   "workspaces": [
-    "e3cli",
-    "e3dk",
+    "e3-cli",
+    "e3-core",
     "e3-runner-node",
     "e3-types"
   ],

@@ -24,6 +24,6 @@
     "dist"
   ],
   "references": [
-    { "path": "../e3dk" }
+    { "path": "../e3-core" }
   ]
 }

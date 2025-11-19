@@ -5,9 +5,17 @@
 import { render } from 'ink';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { storeObject, computeTaskId } from '../storage/objects.js';
-import { createNewTaskCommit } from '../storage/commits.js';
-import { loadIR, irToBeast2, loadValue, valueToBeast2 } from '../storage/formats.js';
+import {
+  storeObject,
+  computeTaskId,
+  createNewTaskCommit,
+  loadIR,
+  irToBeast2,
+  loadValue,
+  valueToBeast2,
+  setTaskRef,
+  updateTaskState,
+} from '@elaraai/e3-core';
 import { Success, Error as ErrorMessage, Info } from '../ui/index.js';
 
 /**
@@ -89,12 +97,10 @@ export async function runTaskCore(
     );
 
     // 7. Write task_id to refs/tasks/<name>
-    const refPath = path.join(repoPath, 'refs', 'tasks', taskName);
-    await fs.writeFile(refPath, taskId);
+    await setTaskRef(repoPath, taskName, taskId);
 
     // 8. Write commit_hash to tasks/<task_id>
-    const taskStatePath = path.join(repoPath, 'tasks', taskId);
-    await fs.writeFile(taskStatePath, commitHash);
+    await updateTaskState(repoPath, taskId, commitHash);
 
     // 9. Enqueue task: write commit_hash to queue/<runtime>/<task_id>
     const queuePath = path.join(repoPath, 'queue', runtime, taskId);

@@ -123,9 +123,9 @@ When executed, E3 automatically:
 
 This is an npm workspace containing:
 
-- **e3cli**: TypeScript/Node.js/ink CLI tool
+- **e3-cli**: TypeScript/Node.js/ink CLI tool
+- **e3-core**: Core business logic library (like libgit2)
 - **e3-runner-node**: Node.js runtime worker
-- **e3dk**: E3 development kit with platform functions
 - **e3-types**: Shared TypeScript type definitions
 
 ## Design Documents

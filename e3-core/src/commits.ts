@@ -3,8 +3,8 @@
  * Proprietary and confidential.
  */
 
-import { storeObject } from './objects.js';
-import { printFor, variant } from '@elaraai/east';
+import { loadObject, storeObject } from './objects.js';
+import { printFor, variant, parseFor, decodeBeast2For } from '@elaraai/east';
 import { CommitType, type Commit } from '@elaraai/e3-types';
 
 /**
@@ -113,4 +113,40 @@ export async function createTaskFailCommit(
   const commitData = new TextEncoder().encode(commitText);
 
   return await storeObject(repoPath, commitData, '.east');
+}
+
+/**
+ * Load and decode a commit
+ */
+export async function loadCommit(
+  repoPath: string,
+  commitHash: string
+): Promise<Commit> {
+  // Commits can be stored as .east or .beast2
+  // Try .east first (for debugging), then .beast2
+
+  try {
+    const data = await loadObject(repoPath, commitHash, '.east');
+    const text = new TextDecoder().decode(data);
+
+    // Parse .east format using East's parser
+    const parser = parseFor(CommitType);
+    const result = parser(text);
+
+    if (!result.success) {
+      throw new Error(`Failed to parse .east commit: ${result.error}`);
+    }
+
+    return result.value;
+  } catch (eastError) {
+    try {
+      const data = await loadObject(repoPath, commitHash, '.beast2');
+
+      // Decode Beast2 format using CommitType
+      const decoder = decodeBeast2For(CommitType);
+      return decoder(data);
+    } catch (beast2Error) {
+      throw new Error(`Failed to load commit: ${eastError} / ${beast2Error}`);
+    }
+  }
 }

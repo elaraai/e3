@@ -5,7 +5,7 @@
 import { render } from 'ink';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { resolveToCommit, resolveObjectHash } from '../resolve.js';
+import { resolveToCommit, resolveObjectHash } from '@elaraai/e3-core';
 import { Error as ErrorMessage } from '../ui/index.js';
 import { decodeBeast2, printFor, toJSONFor } from '@elaraai/east';
 

@@ -5,11 +5,12 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { isValidRepository as isValidRepositoryCore } from '@elaraai/e3-core';
 
 /**
- * Find the E3 repository directory
+ * Find the E3 repository directory for the runner
  *
- * Searches:
+ * Searches (different from CLI):
  * 1. Provided repoPath argument
  * 2. E3_REPO environment variable
  * 3. ~/.e3 (global default)
@@ -18,7 +19,7 @@ export function findRepository(repoPath?: string): string | null {
   // 1. Check provided argument
   if (repoPath) {
     const resolved = path.resolve(repoPath);
-    if (fs.existsSync(resolved) && isValidRepository(resolved)) {
+    if (fs.existsSync(resolved) && isValidRepositoryCore(resolved)) {
       return resolved;
     }
   }
@@ -26,7 +27,7 @@ export function findRepository(repoPath?: string): string | null {
   // 2. Check E3_REPO environment variable
   if (process.env.E3_REPO) {
     const envPath = path.resolve(process.env.E3_REPO);
-    if (fs.existsSync(envPath) && isValidRepository(envPath)) {
+    if (fs.existsSync(envPath) && isValidRepositoryCore(envPath)) {
       return envPath;
     }
   }
@@ -35,23 +36,12 @@ export function findRepository(repoPath?: string): string | null {
   const homeDir = process.env.HOME || process.env.USERPROFILE;
   if (homeDir) {
     const globalRepo = path.join(homeDir, '.e3');
-    if (fs.existsSync(globalRepo) && isValidRepository(globalRepo)) {
+    if (fs.existsSync(globalRepo) && isValidRepositoryCore(globalRepo)) {
       return globalRepo;
     }
   }
 
   return null;
-}
-
-/**
- * Validate that a directory is a valid E3 repository
- */
-function isValidRepository(repoPath: string): boolean {
-  const requiredDirs = ['objects', 'queue', 'claims', 'refs', 'tasks', 'tmp'];
-
-  return requiredDirs.every((dir) =>
-    fs.existsSync(path.join(repoPath, dir))
-  );
 }
 
 /**

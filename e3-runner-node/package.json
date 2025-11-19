@@ -29,8 +29,8 @@
   ],
   "license": "UNLICENSED",
   "dependencies": {
+    "@elaraai/e3-core": "*",
     "@elaraai/e3-types": "*",
-    "@elaraai/e3dk": "*",
     "@elaraai/east": "file:../../East",
     "commander": "^12.0.0"
   },
