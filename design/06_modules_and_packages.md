@@ -417,10 +417,23 @@ Does call-site specialization occur at the front end or the back end?
 
 For example, does AST support generics / type parameters but IR not? It would make implementing runtimes easier. The logic could all live in the `ast_to_ir` transformation.
 
-As a part of this, we should probably convert all closures to top-level functions, predeclare all the functions in the IR with their various specializations, then execute the "body" of the expression (or return the outer function for function expressions).
-
-(We could factor out a lot of the repeated information like location information in this case).
+Unfortunately this defeats the purpose of exporting generic functions as IR from "library packages" and not linking them together until runtime.
+So the type parameters **must** propagate through the IR.
+We may need to add an IR node to denote specialization.
 
 #### Precise effect tracking
 
 One advantage of call-site specialization is that the effects like `async` would be able to be tracked precisely in all circumstances.
+
+## Dev plan
+
+Zero to package proof-of-concept:
+
+ 1. Add types for package descriptions.
+ 2. Update `e3 init` to create the package dirs.
+ 2. Add the `e3 install` command for East packages.
+ 3. Add the `e3 resolve` command, `e3 install --resolve`.
+ 4. Allow `e3 run` to target function packages.
+ 5. Test e2e
+ 6. Allow `e3 install` to work for node runtime/platform packages, set up `.e3/node/node_modules` dir or similar.
+ 7. Test an installed platform function.
