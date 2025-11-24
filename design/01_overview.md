@@ -3,63 +3,55 @@
 The goal is to be able to run a single East function using multiple runtimes.
 This will enable seemless usage of libraries and capabilities across NodeJS, Python and Julia.
 
-## Seemless RPC-style calling
+## File and task based computation
 
-The functionality will work using a platform-provided RPC-style calling capability.
-It will not be possible to get, say, a function "pointer" from one language executing natively in another.
-But it will be possible to request a simulation by Julia followed by some scikit-learn analysis by python.
+The functionality will work using chains of tasks to represent larger computations, operating on data stored in your working directory.
+
+Each task execution is an atomic program that reads a number of input files, performs some calculations, and writes out the results as files to disk.
+A single task is run on a specific runtime.
+With multiple tasks chained together, functionality available in different runtimes can be used in tandem.
+It will be possible to arrange a simulation by Julia followed by some scikit-learn analysis by python.
 
 ## Low latency and local computing
 
 The initial implementation will focus on low-latency execution on a single computer.
-RPC requests and responses will be brokered by `inotify`, and IR and arguments encoded in our beast2 binary format.
-The IR and arguments will be stored on disk and enqueued messages would contain the relevant filenames in requests and repsonses.
 
-To begin with we consider a single worker for each process.
-Each worker will use a ROUTER-DEALER pattern with internal concurrency for request handling.
+The dataflow is executed by a supervisor process, which spawns each task and martials the results.
+The reesults can be computed as a once-off, like `make`.
+This will reuse cached results to only run tasks on unseen input combinations, such that running it a second time would be nearly instant.
+(Unlike `make`, we will cache historical computations and not just the most recent results).
 
-### NodeJS
+This can also be done in "watch" mode, using `inotify` to watch for file changes and propagating changes downstream.
+Whenever an input changes, depdendent tasks will be launched, which write outputs and trigger downstream jobs.
+The process can track provenance to maintain internal consistency.
 
-A single process subscribes to a repository by watching for messages in the `<repo>/queue/node/*` directory.
+### Runners
 
-When a subtask is required, it spawns a new request and a promise awaits for a response.
-We wait and keep state in memory, but can asynchronously perform other tasks.
+Task executions are performed by runners.
 
-### Julia
+The purpose of e3 is to execute East tasks, but e3 can also execute arbitrary commands.
+In fact, each runner is defined by an arbitrary command (`exec` command and argument list).
 
-A single process subscribes to a repository by watching for messages in the `<repo>/queue/julia/*` directory.
+### Tasks
 
-Each request can be `Threads.@spawn`ed onto a thread and Julia will be started with a command like `julia +1.12 -t4,1` for 4 worker threads and 1 interactive thread (to watch for messages and place on channels).
-Each request works in its own memory (no mutable objects alias between requests) so we do not need to worry about atomics, etc.
+Tasks have enough information to execute.
+They define a runner, the IR to execute, the input and output types
 
-When a subtask is required, it spawns a new request and `Channel`, and waits for a response.
-We wait and keep state in memory, but can asynchronously perform other tasks.
+### Executions
 
-### Python
+When a task is run on concrete inputs an execution is created.
+The ID of the execution is a hash of its task definition, IR and inputs.
+The logs and output of the task execution is are cached for later retrieval.
 
-Follows a similar pattern, using python's async (and possibly multithreading?) interfaces.
+### Dataflows
 
-### Failures
+A dataflow sets up automatic execution of tasks given a set of input files and locations to write one (or more) output file(s).
+Multiple dataflows can be chained together (outputs to inputs) to create a larger dataflow DAG.
+The dataflow DAG can either be executed as a once-off, or continually maintained in "watch" mode.
 
-The returned message could either be successful or an error.
+## Registry / Repository
 
-We want to be able to proagate EastError up the chain to callers.
-Furthermore, there are timeouts and crashes to consider.
-
-### Memoization
-
-If a request IR has been seen before, the already compiled function can be reused.
-
-If a request IR and arguments have been seen before, and no error occurred, memoized results can be returned.
-However, we need to be careful that we aren't performing externally visible and non-idempotent side-effects for this to be correct.
-
-## Registry
-
-We are proposing a lightweight, filesystem-based "registry" to facilitate intermediate caching, registering entrypoints and output results.
-
-### Compilation caching
-
-By taking the SHA256 of serialized IR, it is possible to cache any compiled functions.
+We are proposing a lightweight, filesystem-based "registry" or "repository" to facilitate intermediate caching, registering entrypoints and output results.
 
 ### Result caching
 
@@ -71,11 +63,7 @@ The ID of any given request or response can simply be the content hash.
 
 The simplest system I can think of roughly mirrors git (minus trees):
 
- - a directory with content-hashed (SHA256) filenames of .beast2 data files.
- - a directory with named "references" to entry points and their outputs (symlinks or hashes?).
- - a CLI tool that will copy in an entry point (and put a message on ZeroMQ to run it), can fetch outputs, clear the cache, etc.
- - workers receieve messages on ZeroMQ, read inputs and write results.
+ - an `.e3/objects` directory with content-hashed (SHA256) filenames of (mostly .beast2) data files.
+ - a `.e3/refs` directory with named "references" to entry points and their outputs (symlinks or hashes).
+ - a CLI tool to interact with the registry, the working copy, tasks, dataflows, etc
 
-The initial message might need the user-facing "name" of the entrypoint in it, so it can symlink the results when done.
-The ELARACore system supports multiple-output functions, and it might be possible to support multiple named outputs per entrypoint here too.
-We'll probably need a story around persisting logs and error results too.
