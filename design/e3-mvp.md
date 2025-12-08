@@ -6,14 +6,14 @@ A cut-down "version 1" plan for e3.
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  . (your e3 repository directory)                               │
-│  ├── e3.east           # Project configuration                  │
-│  ├── objects/          # Content-addressed storage              │
-│  ├── packages/         # Installed packages (refs)              │
-│  ├── tasks/            # Materialized tasks + execution state   │
-│  └── workspaces/       # Stateful dataset namespaces            │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│  . (your e3 repository directory)                     │
+│  ├── e3.east           # Project configuration        │
+│  ├── objects/          # Content-addressed storage    │
+│  ├── packages/         # Installed packages (refs)    │
+│  ├── executions/       # Execution state and results  │
+│  └── workspaces/       # Stateful dataset namespaces  │
+└───────────────────────────────────────────────────────┘
 ```
 
 The e3 repository contains and runs your workspaces, while also acting as a cache, execution log and package store.
@@ -691,40 +691,14 @@ $ e3 start . production --watch
 Watching inputs/... (Ctrl+C to stop)
 ```
 
+The full dataflow DAG is implicit - all dataflows in the package, connected by their input/output paths.
+
 `e3 start` topologically sorts dataflows by their input/output dependencies and executes them in order. Cached results are used when inputs haven't changed.
 With the `--watch` flag it will use inotify to watch for changed values (when an external process changes the workspace root dataset) and propagate them.
-
-### Dataflow DAG
-
-The full DAG is implicit - all dataflows in the package, connected by their input/output paths:
-
-```typescript
-// These form a DAG: preprocess → train → predict
-e3.dataflow("preprocess", {
-    task: "preprocess",
-    inputs: ["inputs/raw"],
-    output: "cleaned",  // → outputs/preprocess/cleaned.east
-});
-
-e3.dataflow("train", {
-    task: "train",
-    inputs: ["outputs/preprocess/cleaned"],
-    output: "model",  // → outputs/train/model.east
-});
-
-e3.dataflow("predict", {
-    task: "predict",
-    inputs: ["outputs/train/model", "inputs/new-data"],
-    output: "forecast",  // → outputs/predict/forecast.east
-});
-```
 
 ### Selective Execution
 
 ```bash
-# Run only dataflows matching a pattern
-$ e3 start . production --filter "train*"
-
 # Run a specific dataflow
 $ e3 start . production train
 ```
