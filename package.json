@@ -2,20 +2,17 @@
   "name": "@elaraai/e3",
   "version": "0.0.1-alpha.0",
   "private": true,
-  "description": "East Execution Engine - Monorepo for E3 packages",
+  "description": "East Execution Engine - Monorepo for e3 packages",
   "type": "module",
   "workspaces": [
-    "e3-cli",
-    "e3-core",
-    "e3-runner-node",
-    "e3-types",
+    "packages/*",
     "integration-tests"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present",
-    "lint:fix": "npm run lint:fix --workspaces --if-present",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "clean": "npm run clean --workspaces --if-present && rm -rf node_modules"
   },
   "keywords": [

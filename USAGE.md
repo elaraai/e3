@@ -1,8 +1,8 @@
-# E3 User Guide
+# e3 User Guide
 
-Usage guide for the E3 (East Execution Engine) - a durable, content-addressable execution engine for East IR.
+Usage guide for the e3 (East Execution Engine) - a durable, content-addressable execution engine for East IR.
 
-E3 provides git-like task management with cryptographic content addressing, allowing you to submit East functions for execution, track their progress, and retrieve results by hash.
+e3 provides git-like task management with cryptographic content addressing, allowing you to submit East functions for execution, track their progress, and retrieve results by hash.
 
 ---
 
@@ -16,7 +16,6 @@ E3 provides git-like task management with cryptographic content addressing, allo
 - [Creating IR](#creating-ir)
 - [File Formats](#file-formats)
 - [Git-like Features](#git-like-features)
-- [Running Workers](#running-workers)
 
 ---
 
@@ -25,8 +24,7 @@ E3 provides git-like task management with cryptographic content addressing, allo
 **Workflow:**
 1. **Initialize a repository** using `e3 init`
 2. **Submit tasks** with IR and arguments using `e3 run`
-3. **Start a worker** to execute queued tasks using `e3-runner-node`
-4. **Check status** and get results using `e3 status` and `e3 get`
+3. **Check status** and get results using `e3 status` and `e3 get`
 
 ### Basic Example
 
@@ -48,14 +46,11 @@ fs.writeFileSync('return42.east', printer(return42_ir));
 # Generate the IR file
 node create-ir.mjs
 
-# Initialize an E3 repository
+# Initialize an e3 repository
 e3 init
 
 # Submit the task
 e3 run my-task return42.east
-
-# Start a worker to execute it
-e3-runner-node
 
 # Check the result
 e3 get my-task
@@ -96,8 +91,7 @@ echo "41" > arg.east
 # Submit task with argument
 e3 run add-task add1.east arg.east
 
-# Execute and get result
-e3-runner-node
+# Get result
 e3 get add-task
 # Output: 42
 ```
@@ -115,22 +109,13 @@ npm run build
 npm link  # Makes 'e3' command available globally
 ```
 
-### Node.js Worker (e3-runner-node)
-
-```bash
-cd javascript/e3-runner-node
-npm install
-npm run build
-npm link  # Makes 'e3-runner-node' command available globally
-```
-
 ---
 
 ## Core Concepts
 
 ### Content-Addressable Storage
 
-E3 uses SHA256 hashing for all objects (IR, arguments, results, commits). Every object is stored once and referenced by its hash, ensuring:
+e3 uses SHA256 hashing for all objects (IR, arguments, results, commits). Every object is stored once and referenced by its hash, ensuring:
 - **Deduplication**: Identical content is stored only once
 - **Integrity**: Content cannot be modified without changing its hash
 - **Verifiability**: You can verify any object matches its hash
@@ -184,7 +169,7 @@ This means:
 
 ### `e3 init [path]`
 
-Initialize a new E3 repository.
+Initialize a new e3 repository.
 
 ```bash
 e3 init              # Initialize in current directory
@@ -375,7 +360,7 @@ e3 get d689550b              # Partial object hash
 e3 log bb11                  # Even shorter (if unambiguous)
 ```
 
-E3 will resolve to the full hash if unambiguous, or error if multiple matches exist.
+e3 will resolve to the full hash if unambiguous, or error if multiple matches exist.
 
 ### Viewing Task History
 
@@ -515,7 +500,7 @@ You can also write IR directly in .east format, though this is more error-prone:
 
 ## File Formats
 
-E3 supports three file formats for IR, arguments, and results:
+e3 supports three file formats for IR, arguments, and results:
 
 ### .east Format (Human-Readable)
 
@@ -573,11 +558,11 @@ e3 get <hash> --format east    # Human-readable
 
 ## Git-like Features
 
-E3 borrows many concepts from git for familiar workflows:
+e3 borrows many concepts from git for familiar workflows:
 
 ### Content Addressing
 
-Like git's object database, E3 stores everything by content hash:
+Like git's object database, e3 stores everything by content hash:
 
 ```bash
 # Objects are stored in .e3/objects/ab/cdef123...
@@ -609,81 +594,6 @@ Abbreviated hashes work everywhere:
 ```bash
 e3 get bb11842c           # Like 'git show bb11842c'
 e3 log d689550            # Like 'git log d689550'
-```
-
----
-
-## Running Workers
-
-### Node.js Worker
-
-The Node.js worker executes tasks using the East JavaScript compiler.
-
-```bash
-# Run in current directory (looks for .e3/)
-e3-runner-node
-
-# Specify repository path
-e3-runner-node --repo /path/to/repo/.e3
-
-# The worker will:
-# 1. Watch the queue/node/ directory
-# 2. Claim tasks atomically
-# 3. Compile and execute IR
-# 4. Store results
-# 5. Create task_done commits
-```
-
-**Worker Lifecycle:**
-```
-[Worker starts]
-  ↓
-[Scans queue/node/ for existing tasks]
-  ↓
-[Sets up inotify watcher for new tasks]
-  ↓
-[Main loop]
-  ├─ Claims available task (atomic rename)
-  ├─ Loads IR and arguments
-  ├─ Compiles with EastIR
-  ├─ Executes function
-  ├─ Stores result
-  ├─ Creates task_done commit
-  └─ Updates task state
-```
-
-### Worker Safety
-
-Workers use atomic operations to prevent conflicts:
-
-1. **Atomic Claiming**: `rename(queue/task, claims/task.worker_id)`
-2. **Worker IDs**: Unique per worker process
-3. **Claim Files**: Include worker_id to track ownership
-4. **Stale Detection**: Can identify abandoned claims (future feature)
-
-### Multiple Workers
-
-You can run multiple workers simultaneously:
-
-```bash
-# Terminal 1
-e3-runner-node
-
-# Terminal 2
-e3-runner-node
-
-# They will automatically distribute work
-# Each worker has a unique ID
-# Atomic claiming prevents double-execution
-```
-
-### Platform Functions
-
-Future: Workers will support platform functions for external I/O:
-
-```bash
-# Not yet implemented
-e3-runner-node --platform logging,database
 ```
 
 ---
@@ -768,16 +678,6 @@ e3 list
 
 ## Troubleshooting
 
-### Task stuck in queue
-
-```bash
-# Check if worker is running
-ps aux | grep e3-runner-node
-
-# Start a worker if needed
-e3-runner-node
-```
-
 ### Task failed
 
 ```bash
@@ -786,16 +686,6 @@ e3 log my-task
 
 # Look for task_error or task_fail commits
 # (Future: more detailed error reporting)
-```
-
-### Worker crashed with claimed task
-
-```bash
-# Check claims directory
-ls .e3/claims/node/
-
-# Task files will include worker_id
-# Future: automatic stale claim detection and recovery
 ```
 
 ### Object not found

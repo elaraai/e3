@@ -4,14 +4,15 @@ import headers from 'eslint-plugin-headers';
 
 export default [
   {
-    ignores: ['dist/**', '.package/**', 'node_modules/**', 'coverage/**']
+    ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**']
   },
   {
-    files: ['src/**/*.ts'],
+    files: ['packages/*/src/**/*.ts', 'integration-tests/src/**/*.ts'],
+    ignores: ['**/*.spec.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
-        project: './tsconfig.json'
+        project: true
       }
     },
     plugins: {
@@ -34,11 +35,11 @@ export default [
     }
   },
   {
-    files: ['src/**/*.spec.ts'],
+    files: ['packages/*/src/**/*.spec.ts', 'integration-tests/src/**/*.spec.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
-        project: './tsconfig.json'
+        project: true
       }
     },
     plugins: {
@@ -50,7 +51,7 @@ export default [
       '@typescript-eslint/no-unused-vars': ['warn', { 'argsIgnorePattern': '^_', 'varsIgnorePattern': '^_' }],
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-unnecessary-type-constraint': 'off',
-      '@typescript-eslint/no-floating-promises': 'off',  // Allow floating promises in test files
+      '@typescript-eslint/no-floating-promises': 'off',
       '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/no-misused-promises': 'off',
       'no-console': 'off'

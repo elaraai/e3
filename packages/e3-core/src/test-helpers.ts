@@ -1,4 +1,9 @@
 /**
+ * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
+ * Proprietary and confidential.
+ */
+
+/**
  * Test helpers for e3-core
  * Provides utilities for setting up and tearing down test repositories
  */
@@ -30,7 +35,7 @@ export function removeTempDir(dir: string): void {
 const parentDirs = new Map<string, string>();
 
 /**
- * Creates a temporary E3 repository for testing
+ * Creates a temporary e3 repository for testing
  * @returns Path to .e3 directory
  */
 export function createTestRepo(): string {

@@ -15,7 +15,7 @@ import { writeFileSync } from 'fs';
  * Returns the file path
  */
 export function createSimpleFunctionIR(dir: string, filename: string = 'simple.beast2'): string {
-  const fn = East.function([], IntegerType, ($) => 42n);
+  const fn = East.function([], IntegerType, (_$) => 42n);
   const ir = fn.toIR().ir;
 
   const encoder = encodeBeast2For(IRType);

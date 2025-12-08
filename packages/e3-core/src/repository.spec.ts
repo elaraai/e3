@@ -288,7 +288,7 @@ describe('repository', () => {
     it('throws if repository not found', () => {
       assert.throws(
         () => getRepository(testDir),
-        /E3 repository not found/
+        /e3 repository not found/
       );
     });
   });

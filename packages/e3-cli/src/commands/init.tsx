@@ -1,5 +1,5 @@
 /**
- * e3 init command - Initialize a new E3 repository
+ * e3 init command - Initialize a new e3 repository
  */
 
 import { render } from 'ink';
@@ -28,17 +28,17 @@ export async function initRepository(repoPath?: string): Promise<void> {
 
   if (!result.success) {
     if (result.alreadyExists) {
-      render(<ErrorComponent message={`E3 repository already exists at ${result.e3Dir}`} />);
+      render(<ErrorComponent message={`e3 repository already exists at ${result.e3Dir}`} />);
     } else {
-      render(<ErrorComponent message={`Failed to create E3 repository: ${result.error?.message}`} />);
+      render(<ErrorComponent message={`Failed to create e3 repository: ${result.error?.message}`} />);
     }
     process.exit(1);
   }
 
-  render(<Info message={`Initializing E3 repository at ${result.e3Dir}...`} />);
+  render(<Info message={`Initializing e3 repository at ${result.e3Dir}...`} />);
   render(
     <Success
-      message="E3 repository initialized successfully"
+      message="e3 repository initialized successfully"
       details={DIRECTORY_STRUCTURE}
     />
   );

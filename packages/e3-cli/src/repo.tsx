@@ -7,7 +7,7 @@ import { findRepository as findRepositoryCore } from '@elaraai/e3-core';
 import { Error } from './ui/index.js';
 
 /**
- * Get the E3 repository, or error if not found
+ * Get the e3 repository, or error if not found
  */
 export function getRepository(repoPath?: string): string {
   const repo = findRepositoryCore(repoPath);
@@ -15,7 +15,7 @@ export function getRepository(repoPath?: string): string {
   if (!repo) {
     render(
       <Error
-        message="Not in an E3 repository"
+        message="Not in an e3 repository"
         details={[
           'Run `e3 init` to create a new repository, or',
           'Set E3_REPO environment variable to point to an existing repository',

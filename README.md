@@ -1,16 +1,16 @@
-# East Execution Engine (E3)
+# East Execution Engine (e3)
 
 [![Test](https://github.com/elaraai/e3/actions/workflows/test.yml/badge.svg)](https://github.com/elaraai/e3/actions/workflows/test.yml)
 
-E3 is an automated, durable execution engine for East programs with cross-language runtime support.
+e3 is an automated, durable execution engine for East programs with cross-language runtime support.
 
 ## What is East?
 
 East is a statically and structurally typed embedded language designed for speed, simplicity and ease of use. The East spec is small and has multiple runtimes implemented in different languages. Each runtime can provide a different set of platform capabilities for programs to leverage.
 
-## What is E3?
+## What is e3?
 
-E3 provides a git-like environment for your data and tasks, and executes tasks to completion. It enables execution of East programs using the Node.js runtime.
+e3 provides a git-like environment for your data and tasks, and executes tasks to completion. It enables execution of East programs using the Node.js runtime.
 
 ### Key Features
 
@@ -23,7 +23,7 @@ E3 provides a git-like environment for your data and tasks, and executes tasks t
 
 ## Architecture
 
-E3 consists of three main components:
+e3 consists of three main components:
 
 ### 1. CLI Tool (`e3`)
 - Built with TypeScript/Node.js and [ink](https://github.com/vadimdemedes/ink) for rich terminal UI
@@ -59,7 +59,7 @@ User submits task with IR + arguments
 ## Repository Structure
 
 ```
-.e3/                          # E3 repository (like .git/)
+.e3/                          # e3 repository (like .git/)
 ├── objects/                  # Content-addressable storage
 │   ├── ab/
 │   │   └── cd1234...beast2   # IR, args, results, commits
@@ -115,7 +115,7 @@ const pipeline = East.function(
 );
 ```
 
-When executed, E3 automatically:
+When executed, e3 automatically:
 1. Executes functions using the Node.js runtime
 2. Serializes data using Beast2 format
 3. Tracks execution history
@@ -127,7 +127,6 @@ This is an npm workspace containing:
 
 - **e3-cli**: TypeScript/Node.js/ink CLI tool
 - **e3-core**: Core business logic library (like libgit2)
-- **e3-runner-node**: Node.js runtime worker
 - **e3-types**: Shared TypeScript type definitions
 
 ## Design Documents

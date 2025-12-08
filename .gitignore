@@ -15,7 +15,7 @@ yarn-error.log*
 *~
 .DS_Store
 
-# E3 repositories
+# e3 repositories
 .e3/
 
 # Logs

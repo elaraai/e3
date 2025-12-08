@@ -1,10 +1,10 @@
 # @elaraai/e3-core
 
-Programmatic API for E3 (East Execution Engine) repository operations.
+Programmatic API for e3 (East Execution Engine) repository operations.
 
 ## Overview
 
-`e3-core` is the filesystem-based business logic layer for E3, similar to `libgit2` for git. It provides a clean programmatic API with no UI dependencies (no commander, no ink), making it suitable for:
+`e3-core` is the filesystem-based business logic layer for e3, similar to `libgit2` for git. It provides a clean programmatic API with no UI dependencies (no commander, no ink), making it suitable for:
 
 - Building custom CLI tools
 - Integration with other Node.js applications
@@ -178,7 +178,7 @@ It does **not** depend on:
 - `ink` (terminal UI)
 - Any UI/presentation libraries
 
-This makes it suitable as a library for building tools on top of E3.
+This makes it suitable as a library for building tools on top of e3.
 
 ## License
 

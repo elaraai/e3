@@ -1,7 +1,7 @@
 {
   "name": "@elaraai/e3-types",
   "version": "0.0.1-alpha.0",
-  "description": "Shared type definitions for E3 (East Execution Engine)",
+  "description": "Shared type definitions for e3 (East Execution Engine)",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -19,7 +19,7 @@
   "author": "Elara AI",
   "license": "AGPL-3.0",
   "dependencies": {
-    "@elaraai/east": "file:../../East"
+    "@elaraai/east": "0.0.1-beta.5"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.47.0",

@@ -16,9 +16,8 @@
   },
   "files": [],
   "references": [
-    { "path": "./e3-types" },
-    { "path": "./e3-core" },
-    { "path": "./e3-cli" },
-    { "path": "./e3-runner-node" }
+    { "path": "./packages/e3-types" },
+    { "path": "./packages/e3-core" },
+    { "path": "./packages/e3-cli" }
   ]
 }

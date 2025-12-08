@@ -4,9 +4,9 @@
  */
 
 /**
- * E3 Core - Programmatic API for E3 repository operations
+ * e3 Core - Programmatic API for e3 repository operations
  *
- * This package provides the filesystem-based business logic for E3,
+ * This package provides the filesystem-based business logic for e3,
  * similar to libgit2 for git. It has no UI dependencies and can be
  * used programmatically.
  */

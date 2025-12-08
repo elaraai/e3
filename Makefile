@@ -1,4 +1,4 @@
-# E3 - East Execution Engine
+# e3 - East Execution Engine
 # Top-level Makefile for building all components
 
 .PHONY: all build test clean install dev help lint link unlink
@@ -7,7 +7,7 @@
 all: build
 
 help:
-	@echo "E3 - East Execution Engine"
+	@echo "e3 - East Execution Engine"
 	@echo ""
 	@echo "Available targets:"
 	@echo "  make build          - Build all packages"
@@ -30,7 +30,6 @@ build:
 	npm run build --workspace=e3-types
 	npm run build --workspace=e3-core
 	npm run build --workspace=e3-cli
-	npm run build --workspace=e3-runner-node
 	npm run build --workspace=integration-tests
 
 # Run all tests
@@ -55,10 +54,7 @@ dev: install build
 	@echo "Development environment ready!"
 	@echo ""
 	@echo "To run the CLI:"
-	@echo "  cd e3-cli && npm run dev"
-	@echo ""
-	@echo "To run the Node.js runner:"
-	@echo "  cd e3-runner-node && npm run dev"
+	@echo "  cd packages/e3-cli && npm run dev"
 	@echo ""
 	@echo "To make 'e3' available globally:"
 	@echo "  make link"
@@ -66,7 +62,7 @@ dev: install build
 # Link CLI to PATH
 link: build
 	@echo "Linking e3 CLI to PATH..."
-	cd e3-cli && npm link --force
+	cd packages/e3-cli && npm link --force
 	@echo ""
 	@echo "✓ e3 CLI is now available globally"
 	@echo "  Run 'e3 --help' to verify"
@@ -74,5 +70,5 @@ link: build
 # Unlink CLI from PATH
 unlink:
 	@echo "Unlinking e3 CLI from PATH..."
-	cd e3-cli && npm unlink -g @elaraai/e3-cli || true
+	cd packages/e3-cli && npm unlink -g @elaraai/e3-cli || true
 	@echo "✓ e3 CLI has been unlinked"

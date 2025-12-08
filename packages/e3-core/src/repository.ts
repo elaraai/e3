@@ -8,7 +8,7 @@ import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 
 /**
- * Result of initializing an E3 repository
+ * Result of initializing an e3 repository
  */
 export interface InitRepositoryResult {
   success: boolean;
@@ -18,7 +18,7 @@ export interface InitRepositoryResult {
 }
 
 /**
- * Initialize a new E3 repository
+ * Initialize a new e3 repository
  * Pure business logic - no UI dependencies
  */
 export function initRepository(repoPath: string): InitRepositoryResult {
@@ -31,7 +31,7 @@ export function initRepository(repoPath: string): InitRepositoryResult {
       success: false,
       e3Dir,
       alreadyExists: true,
-      error: new Error(`E3 repository already exists at ${e3Dir}`),
+      error: new Error(`e3 repository already exists at ${e3Dir}`),
     };
   }
 
@@ -71,7 +71,7 @@ export function initRepository(repoPath: string): InitRepositoryResult {
 }
 
 /**
- * Validate that a directory is a valid E3 repository
+ * Validate that a directory is a valid e3 repository
  */
 export function isValidRepository(repoPath: string): boolean {
   const requiredDirs = ['objects', 'queue', 'refs', 'tasks', 'tmp'];
@@ -80,7 +80,7 @@ export function isValidRepository(repoPath: string): boolean {
 }
 
 /**
- * Find the E3 repository directory
+ * Find the e3 repository directory
  *
  * Searches:
  * 1. E3_REPO environment variable
@@ -115,13 +115,13 @@ export function findRepository(startPath?: string): string | null {
 }
 
 /**
- * Get the E3 repository, throw error if not found
+ * Get the e3 repository, throw error if not found
  */
 export function getRepository(repoPath?: string): string {
   const repo = findRepository(repoPath);
 
   if (!repo) {
-    throw new Error('E3 repository not found. Run `e3 init` to create one.');
+    throw new Error('e3 repository not found. Run `e3 init` to create one.');
   }
 
   return repo;

@@ -27,7 +27,7 @@ program
 
 program
   .command('init [path]')
-  .description('Initialize a new E3 repository')
+  .description('Initialize a new e3 repository')
   .action(async (path) => {
     await initRepository(path);
   });
@@ -35,7 +35,7 @@ program
 program
   .command('run <name> <ir> [args...]')
   .description('Submit a task for execution')
-  .option('--e3-dir <path>', 'Path to E3 repository')
+  .option('--e3-dir <path>', 'Path to e3 repository')
   .action(async (name, ir, args, options) => {
     const repoPath = getRepository(options.e3Dir);
     await runTask(repoPath, name, ir, args || [], 'node');
@@ -44,7 +44,7 @@ program
 program
   .command('status <name>')
   .description('Get status of a task')
-  .option('--e3-dir <path>', 'Path to E3 repository')
+  .option('--e3-dir <path>', 'Path to e3 repository')
   .action(async (name, options) => {
     const repoPath = getRepository(options.e3Dir);
     await getTaskStatus(repoPath, name);
@@ -54,7 +54,7 @@ program
   .command('get <refOrHash>')
   .description('Get output of a completed task or any object by hash')
   .option('-f, --format <format>', 'Output format (east, json)', 'east')
-  .option('--e3-dir <path>', 'Path to E3 repository')
+  .option('--e3-dir <path>', 'Path to e3 repository')
   .action(async (refOrHash, options) => {
     const repoPath = getRepository(options.e3Dir);
     await getTaskOutput(repoPath, refOrHash, options.format);
@@ -63,7 +63,7 @@ program
 program
   .command('list')
   .description('List all task refs')
-  .option('--e3-dir <path>', 'Path to E3 repository')
+  .option('--e3-dir <path>', 'Path to e3 repository')
   .action(async (options) => {
     const repoPath = getRepository(options.e3Dir);
     await listTasks(repoPath);
@@ -72,7 +72,7 @@ program
 program
   .command('log <refOrHash>')
   .description('Show commit history for a task')
-  .option('--e3-dir <path>', 'Path to E3 repository')
+  .option('--e3-dir <path>', 'Path to e3 repository')
   .action(async (refOrHash, options) => {
     const repoPath = getRepository(options.e3Dir);
     await showLog(repoPath, refOrHash);

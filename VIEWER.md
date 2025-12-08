@@ -1,4 +1,4 @@
-# E3 Data Viewer (`e3 view`)
+# e3 Data Viewer (`e3 view`)
 
 Interactive Terminal UI for exploring and visualizing East data structures.
 
