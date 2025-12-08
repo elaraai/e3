@@ -702,3 +702,12 @@ With the `--watch` flag it will use inotify to watch for changed values (when an
 # Run a specific dataflow
 $ e3 start . production train
 ```
+
+### Project structure
+
+This git repository is an npm workspace with the following packages:
+
+ - **e3-types** - TypeScript types for e3 object and ref content (shared)
+ - **e3-core** - Programmatic TypeScript API for interacting with e3 repositories (NodeJS)
+ - **e3-cli** - CLI tool wrapping the above 
+ - **integration-tests** - runs end-to-end tests using the CLI tool in a temp dir
