@@ -18,7 +18,7 @@ A cut-down "version 1" plan for e3.
 
 The e3 repository contains and runs your workspaces, while also acting as a cache, execution log and package store.
 
-Workspaces are where you work with data and follow the "template" defined in the package deployed to that workspace. You can type `e3 start <workspace>` to execute the dataflow to produce results.
+Workspaces are where you work with data and follow the "template" defined in the package deployed to that workspace. You can type `e3 start <workspace>` to execute the tasks to produce results.
 
 Packages can serve different purposes, from support libraries to client project code. When a package is deployed to a workspace, so are all of its dependencies (meaning each workspace is associated with a given "root" or "main" package). Packages are immutable, and if you run the same package in a different workspace or e3 repository (even on a different computer), the same outputs will be reproduced.
 
@@ -26,17 +26,17 @@ e3 is agnostic to how code and packages are authored. You might create packages 
 
 ### Key Concepts
 
-**Workspaces** are namespaces of interactive datasets that you can read and write. Each workspace is initialized by deploying a package to the workspace, and contains the datasets and dataflows (tasks producing datasets).
+**Workspaces** are namespaces of interactive datasets that you can read and write. Each workspace is initialized by deploying a package to the workspace, and contains the datasets and tasks (transformations producing datasets).
 
-**Packages** are an immutable bundle of e3 objects - East IR, tasks, datasets and dataflows.
+**Packages** are an immutable bundle of e3 objects - East IR, task objects, datasets and task bindings.
 
 **Runner** are programs that can execute e3 tasks (e.g. our JavaScript interpretter or Julia compiler, or a completely custom program). They are defined by CLI commands.
 
-**Tasks** are a specific invocation of a runner with inputs of given East types. Some of the inputs may have a fixed value (statically defined in the package that defines the task). For an East task, the first input is a (fixed) East function IR - which is itself an East value stored in e3. The remaining inputs are the function arguments.
+**Task objects** are stored computations: a runner with inputs of given East types. Some of the inputs may have a fixed value (statically defined in the package that defines the task). For an East task, the first input is a (fixed) East function IR - which is itself an East value stored in e3. The remaining inputs are the function arguments.
 
-**Executions** are tasks executions with specific inputs. A task's identity is the hash of its module plus its input hashes - same inputs always produce the same task ID, enabling memoization.
+**Executions** are task executions with specific inputs. A task object's identity is the hash of its runner plus its input hashes - same inputs always produce the same task ID, enabling memoization.
 
-**Dataflows** are DAGs of tasks over files. Define which tasks read which files and produce which outputs, then `e3 start` executes the whole pipeline (like `make`).
+**Tasks** (user-facing) are transformations that read input datasets and produce output datasets. They consist of a task object (the computation) and a task binding (which dataset paths to read/write). `e3 start` executes all tasks in dependency order (like `make`).
 
 ### Example Workflow
 

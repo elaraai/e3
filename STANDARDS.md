@@ -30,11 +30,15 @@ e3 is organized as a monorepo with three packages:
 **Key abstractions:**
 - **Repository** - Directory containing objects/, packages/, workspaces/, executions/
 - **Objects** - Content-addressed storage (SHA256 hash → bytes)
-- **Packages** - Immutable bundles of modules, tasks, datasets, dataflows
+- **Packages** - Immutable bundles of modules, task objects, datasets, task bindings
 - **Workspaces** - Stateful dataset namespaces with deployed packages
-- **Tasks** - Computation definitions (runner + inputs + output type)
+- **Dataset** - A location holding a value (leaf node in the data tree)
+- **Tree** - A location containing datasets or nested trees (branch node)
+- **Structure** - The shape of the data tree (what trees/datasets exist and their types)
+- **Task** - A transformation that reads input datasets and produces an output dataset
+- **Task object** - Computation definition stored in objects/ (runner + inputs + output type)
+- **Task binding** - Connects a task object to specific dataset paths
 - **Executions** - Cached task results keyed by input hash
-- **Dataflows** - DAGs connecting tasks to dataset paths
 
 ---
 
@@ -318,8 +322,8 @@ describe('objects', () => {
 - `taskRun`: execution, caching, output storage
 - Memoization: same inputs → cache hit
 
-#### e3-core/dataflows
-- `dataflowStart`: topological sort, sequential execution
+#### e3-core/tasks (execution)
+- `taskStart`: topological sort, sequential execution
 - Caching: unchanged inputs skip execution
 
 ### Test Patterns

@@ -155,4 +155,28 @@ Future enhancements may include:
 
 ## License
 
-TBD
+This project is dual-licensed:
+
+- **Open Source**: [AGPL-3.0](LICENSE.md) - Free for open source use with source disclosure requirements
+- **Commercial**: Available for proprietary use - contact support@elara.ai
+
+See [LICENSE.md](LICENSE.md) for full details.
+
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+**Note**: Contributors must sign our [CLA](CLA.md) before we can accept pull requests. This allows us to offer commercial licenses while keeping the project open source.
+
+## Links
+
+- **Website**: [https://elaraai.com/](https://elaraai.com/)
+- **Repository**: [https://github.com/elaraai/e3](https://github.com/elaraai/e3)
+- **Issues**: [https://github.com/elaraai/e3/issues](https://github.com/elaraai/e3/issues)
+- **Email**: support@elara.ai
+
+## About Elara
+
+e3 is developed by [Elara AI Pty Ltd](https://elaraai.com/), an AI-powered platform that creates economic digital twins of businesses that optimize performance. Elara combines business objectives, decisions and data to help organizations make data-driven decisions across work management, purchasing, customer engagement, and investment planning. e3 powers the execution layer of Elara solutions, enabling durable and efficient execution of East programs.
+
+---

@@ -1,15 +1,18 @@
 /**
- * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
- * Proprietary and confidential.
+ * Copyright (c) 2025 Elara AI Pty Ltd
+ * Dual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.
  */
 
 /**
- * Dataset schema and tree path types for e3.
+ * Data structure and path types for e3.
  *
- * Schemas define the structure of workspace data trees - which nodes are
- * branches (trees) vs leaves (values). Paths identify locations within trees.
+ * Terminology:
+ * - **Dataset**: A location holding a value (leaf node in the data tree)
+ * - **Tree**: A location containing datasets or nested trees (branch node)
+ * - **Structure**: The shape of the data tree (what trees/datasets exist and their types)
+ * - **Path**: An address pointing to a dataset or tree
  *
- * Tree paths use East's keypath syntax:
+ * Paths use East's keypath syntax:
  * - `.field` for struct field access (backtick-quoted for special chars)
  * - `[N]` for array index access (future)
  * - `[key]` for dict key lookup (future)
@@ -20,40 +23,49 @@
 import { VariantType, StringType, ArrayType, DictType, RecursiveType, ValueTypeOf, printIdentifier, variant, EastTypeType } from '@elaraai/east';
 
 /**
- * Dataset schema defines the structure of a data tree node.
+ * Structure definition for a data tree node.
  *
- * Schemas are recursive - a tree node contains child schemas.
+ * Defines the shape of the data tree - which paths are datasets (hold values)
+ * and which are trees (hold other nodes).
  *
  * @remarks
- * - `value`: A leaf node holding a typed value. The type is an `EastTypeValue`.
- * - `struct`: A tree node with named fields, each with its own schema.
+ * - `value`: A dataset - holds a typed value. The type is an `EastTypeValue`.
+ * - `struct`: A tree - has named children, each with its own structure.
  *
- * MVP only supports struct trees. Future: array, dict trees.
+ * MVP only supports struct trees. Future: array, dict, variant trees.
  *
  * @example
  * ```ts
- * // A leaf node holding an Integer value
- * const leafSchema: DatasetSchema = variant('value', variant('Integer', null));
+ * // A dataset holding an Integer value
+ * const dataset: Structure = variant('value', variant('Integer', null));
  *
- * // A tree node with struct fields
- * const treeSchema: DatasetSchema = variant('struct', new Map([
+ * // A tree with named children
+ * const tree: Structure = variant('struct', new Map([
  *   ['count', variant('value', variant('Integer', null))],
  *   ['items', variant('value', variant('Array', variant('String', null)))],
  * ]));
  * ```
  */
-export const DatasetSchemaType = RecursiveType(self => VariantType({
-  /** Leaf node: East type of the value (homoiconic EastTypeValue) */
+export const StructureType = RecursiveType(self => VariantType({
+  /** Dataset: East type of the value (homoiconic EastTypeValue) */
   value: EastTypeType,
-  /** Struct tree: named fields mapping to child schemas */
+  /** Struct tree: named children mapping to child structures */
   struct: DictType(StringType, self),
 }));
-export type DatasetSchemaType = typeof DatasetSchemaType;
+export type StructureType = typeof StructureType;
 
-export type DatasetSchema = ValueTypeOf<typeof DatasetSchemaType>;
+export type Structure = ValueTypeOf<typeof StructureType>;
+
+// Backwards compatibility alias
+/** @deprecated Use StructureType instead */
+export const DatasetSchemaType = StructureType;
+/** @deprecated Use Structure instead */
+export type DatasetSchemaType = StructureType;
+/** @deprecated Use Structure instead */
+export type DatasetSchema = Structure;
 
 /**
- * Path segment for navigating dataset trees.
+ * Path segment for navigating data trees.
  *
  * Uses East keypath syntax for consistency:
  * - `field`: Struct field access (rendered as `.field` or `` .`field` `` if quoted)
@@ -81,14 +93,14 @@ export type PathSegmentType = typeof PathSegmentType;
 export type PathSegment = ValueTypeOf<typeof PathSegmentType>;
 
 /**
- * Tree path: sequence of segments identifying a location in a dataset tree.
+ * Path: sequence of segments identifying a location in a data tree.
  *
- * Paths are used by dataflows to specify where task inputs come from
- * and where outputs should be written.
+ * Paths point to either a dataset (leaf) or a tree (branch).
+ * Used by tasks to specify where inputs come from and where outputs go.
  *
  * @example
  * ```ts
- * // Path to inputs.sales.data
+ * // Path to .inputs.sales.data
  * const path: TreePath = [
  *   variant('field', 'inputs'),
  *   variant('field', 'sales'),
@@ -102,12 +114,12 @@ export type TreePathType = typeof TreePathType;
 export type TreePath = ValueTypeOf<typeof TreePathType>;
 
 /**
- * Converts a tree path to East keypath string representation.
+ * Converts a path to East keypath string representation.
  *
  * Uses East's keypath syntax: `.field` for simple identifiers,
  * `` .`field` `` for identifiers needing quoting.
  *
- * @param path - The tree path to convert
+ * @param path - The path to convert
  * @returns A keypath string (e.g., ".inputs.sales" or ".inputs.`my/field`")
  *
  * @example
@@ -130,52 +142,52 @@ export function pathToString(path: TreePath): string {
 }
 
 /**
- * Result of parsing a path with schema validation.
+ * Result of parsing a path with structure validation.
  */
 export interface ParsePathResult {
   /** The parsed path segments */
   path: TreePath;
-  /** The schema at the path location */
-  schema: DatasetSchema;
+  /** The structure at the path location */
+  structure: Structure;
 }
 
 /**
- * Parses an East keypath string into a TreePath, validating against the schema.
+ * Parses an East keypath string into a path, validating against the structure.
  *
  * Supports `.field` syntax for struct field access.
  * Backtick-quoted identifiers (`` .`field` ``) are supported for special chars.
  *
  * @param pathStr - A keypath string (e.g., ".inputs.sales")
- * @param schema - The root schema to validate against
- * @returns The parsed path and the schema at that location
+ * @param structure - The root structure to validate against
+ * @returns The parsed path and the structure at that location
  *
- * @throws {Error} If a field doesn't exist in the schema or path descends into a value
+ * @throws {Error} If a field doesn't exist in the structure or path descends into a dataset
  *
  * @remarks
- * - Empty string returns empty path (root) with the root schema
+ * - Empty string returns empty path (root) with the root structure
  * - Path must start with `.` (no leading slash)
  * - Backtick escaping: `` \` `` for literal backtick, `\\` for backslash
- * - Future: will disambiguate variant cases from struct fields using schema
- * - Future: will use schema to parse dict keys with correct type
+ * - Future: will disambiguate variant cases from struct fields using structure
+ * - Future: will use structure to parse dict keys with correct type
  *
  * @example
  * ```ts
- * const schema = variant('struct', new Map([
+ * const structure = variant('struct', new Map([
  *   ['inputs', variant('struct', new Map([
  *     ['sales', variant('value', variant('Integer', null))],
  *   ]))],
  * ]));
  *
- * const { path, schema: leafSchema } = parsePath('.inputs.sales', schema);
+ * const { path, structure: leafStructure } = parsePath('.inputs.sales', structure);
  * // path = [field('inputs'), field('sales')]
- * // leafSchema = variant('value', variant('Integer', null))
+ * // leafStructure = variant('value', variant('Integer', null))
  * ```
  */
-export function parsePath(pathStr: string, schema: DatasetSchema): ParsePathResult {
-  if (pathStr === '') return { path: [], schema };
+export function parsePath(pathStr: string, structure: Structure): ParsePathResult {
+  if (pathStr === '') return { path: [], structure };
 
   const segments: TreePath = [];
-  let currentSchema = schema;
+  let currentStructure = structure;
   let pos = 0;
 
   while (pos < pathStr.length) {
@@ -215,44 +227,44 @@ export function parsePath(pathStr: string, schema: DatasetSchema): ParsePathResu
         throw new Error(`parsePath: expected identifier after '.' at position ${pos}`);
       }
 
-      // Validate against schema
-      if (currentSchema.type === 'value') {
-        throw new Error(`parsePath: cannot descend into value at '${pathToString(segments)}'`);
+      // Validate against structure
+      if (currentStructure.type === 'value') {
+        throw new Error(`parsePath: cannot descend into dataset at '${pathToString(segments)}'`);
       }
 
-      // currentSchema.type === 'struct' (only other option after 'value' check)
-      const fields = currentSchema.value;
-      const childSchema = fields.get(fieldName);
-      if (childSchema === undefined) {
+      // currentStructure.type === 'struct' (only other option after 'value' check)
+      const fields = currentStructure.value;
+      const childStructure = fields.get(fieldName);
+      if (childStructure === undefined) {
         const available = [...fields.keys()].map(k => printIdentifier(k)).join(', ');
         throw new Error(`parsePath: field '${fieldName}' not found at '${pathToString(segments)}'. Available: ${available}`);
       }
       segments.push(variant('field', fieldName));
-      currentSchema = childSchema;
+      currentStructure = childStructure;
     } else {
       throw new Error(`parsePath: unexpected character at position ${pos}: '${pathStr[pos]}'`);
     }
   }
 
-  return { path: segments, schema: currentSchema };
+  return { path: segments, structure: currentStructure };
 }
 
 /**
- * Creates a tree path from field names, validating against the schema.
+ * Creates a path from field names, validating against the structure.
  *
  * Convenience function for the common case of navigating through struct fields.
  *
- * @param schema - The root schema to validate against
+ * @param structure - The root structure to validate against
  * @param fields - Field names to include in the path
- * @returns The parsed path and the schema at that location
+ * @returns The parsed path and the structure at that location
  *
- * @throws {Error} If a field doesn't exist in the schema
+ * @throws {Error} If a field doesn't exist in the structure
  *
  * @example
  * ```ts
- * const { path, schema: leafSchema } = treePath(rootSchema, 'inputs', 'sales');
+ * const { path, structure: leafStructure } = treePath(rootStructure, 'inputs', 'sales');
  * ```
  */
-export function treePath(schema: DatasetSchema, ...fields: string[]): ParsePathResult {
-  return parsePath('.' + fields.map(printIdentifier).join('.'), schema);
+export function treePath(structure: Structure, ...fields: string[]): ParsePathResult {
+  return parsePath('.' + fields.map(printIdentifier).join('.'), structure);
 }

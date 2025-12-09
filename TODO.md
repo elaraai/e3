@@ -11,204 +11,121 @@ The existing code is a prototype that will be replaced piece-by-piece, starting 
 ### Package Dependencies
 
 ```
-east  →  e3-types  →  e3-core  →  e3-cli
-  ↓                                  ↓
+east  →  e3-types  →  e3  →  e3-core  →  e3-cli
+                             ↓
+                       yauzl/yazl (zip handling)
+                             ↓
 east-node-std  →  east-node-cli  →  integration-tests
 ```
 
 (east, east-node-std and east-node-cli are external dependencies)
 
+Note: e3-core depends on e3 (SDK) so that CLI/web UI can programmatically create packages using the SDK APIs.
+
 ### Implementation Order
 
 1. **e3-types** - Define all East types for objects and refs
-2. **e3-core** - Implement repository operations
-3. **e3-cli** - Wire up CLI commands
-4. **integration-tests** - End-to-end workflow tests, including task runners
+2. **e3** - TypeScript SDK for authoring packages
+3. **e3-core** - Implement repository operations
+4. **e3-cli** - Wire up CLI commands
+5. **integration-tests** - End-to-end workflow tests, including task runners
 
 ---
 
-## Phase 1: e3-types
+## Phase 1: e3-types ✓
 
 Define East types for all e3 objects. These types are used for beast2 serialization.
 
-### Object Types
-
-- [ ] **DataRef** - Reference to data in the object store
-  ```ts
-  DataRefType = VariantType<{
-    unassigned: NullType,  // Pending task output
-    null: NullType,        // Inline null value
-    value: StringType,     // Hash of beast2 blob
-    tree: StringType,      // Hash of tree object
-  }>
-  ```
-
-- [ ] **TreeObject** - Persistent tree node (struct only for MVP)
-  ```ts
-  // For a struct with fields {a, b, c}, the tree object is:
-  // StructType<{ a: DataRefType, b: DataRefType, c: DataRefType }>
-  ```
-
-- [ ] **TaskObject** - Computation definition
-  ```ts
-  TaskObjectType = StructType<{
-    runner: StringType,
-    inputs: ArrayType<StructType<{
-      type: EastTypeType,  // Serialized East type
-      value: OptionType<StringType>,  // Fixed value hash
-    }>>,
-    output: EastTypeType,
-  }>
-  ```
-
-- [ ] **PackageObject** - Bundle manifest
-  ```ts
-  PackageObjectType = StructType<{
-    name: StringType,
-    version: StringType,
-    tasks: DictType<StringType, StringType>,  // name → hash
-    datasets: StructType<{
-      schema: DatasetSchemaType,
-      value: StringType,  // Root tree hash
-    }>,
-    dataflows: ArrayType<DataflowDefType>,
-  }>
-  ```
-
-### Schema Types
-
-- [ ] **DatasetSchema** - Defines tree structure
-  ```ts
-  DatasetSchemaType = VariantType<{
-    obj: EastTypeType,   // Leaf (blob)
-    tree: TreeSchemaType, // Branch
-  }>
-
-  TreeSchemaType = VariantType<{
-    struct: DictType<StringType, DatasetSchemaType>,
-  }>
-  ```
-
-- [ ] **TreePath** - Location in dataset tree
-  ```ts
-  PathComponentType = VariantType<{
-    field: StringType,
-  }>
-
-  TreePathType = ArrayType<PathComponentType>
-  ```
-
-- [ ] **DataflowDef** - Task orchestration rule
-  ```ts
-  DataflowDefType = VariantType<{
-    task: StructType<{
-      task: StringType,
-      inputs: ArrayType<TreePathType>,
-      output: TreePathType,
-    }>,
-  }>
-  ```
-
-### Config Types
-
-- [ ] **CommandPart** - Runner command template
-  ```ts
-  CommandPartType = VariantType<{
-    literal: StringType,
-    input_path: NullType,
-    inputs: ArrayType<...>,
-    output_path: NullType,
-  }>
-  ```
-
-- [ ] **Config** - Repository configuration (e3.east)
-  ```ts
-  ConfigType = StructType<{
-    runners: DictType<StringType, ArrayType<CommandPartType>>,
-  }>
-  ```
-
-### Cleanup
-
-- [ ] Remove old commit types (NewTaskCommit, TaskDoneCommit, etc.)
+- [x] **DataRef** - Reference to data in the object store
+- [x] **DataTreeType** - Persistent tree node type constructor
+- [x] **TaskObject** - Computation definition
+- [x] **PackageObject** - Bundle manifest
+- [x] **Structure** - Defines tree structure (recursive)
+- [x] **TreePath** - Location in data tree (East keypath syntax)
+- [x] **TaskBinding** - Binds task to dataset paths
+- [x] **CommandPart** - Runner command template
+- [x] **Config** - Repository configuration (e3.east)
 
 ---
 
-## Phase 2: e3-core
+## Phase 2: e3 (SDK)
+
+TypeScript SDK for authoring e3 packages. Users write package definitions in TypeScript and export to `.zip` bundles.
+
+### Core API
+
+- [x] **e3.input(name, type, default?)** - Define input dataset
+  - Returns DatasetDef with name, path, type, optional default value
+  - Used to declare leaf nodes in the data tree
+
+- [x] **e3.task(name, inputs, fn)** - Define a task
+  - Infers output type from function return
+  - Compiles East function to IR at export time
+  - Returns TaskDef with `.output` accessor for chaining
+  - Collects dependencies automatically
+
+- [x] **e3.package(name, version, ...items)** - Bundle into package
+  - Collects all dependencies from items automatically
+  - Builds data structure from inputs/outputs
+  - Returns PackageDef with discoverable access to contents
+
+- [ ] **e3.export(pkg, path)** - Export to .zip bundle
+  - Compiles all tasks to IR
+  - Serializes objects using beast2
+  - Creates manifest.east
+  - Writes to zip file using yazl
+
+### Type Inference
+
+- [ ] Infer output types from East function definitions
+- [ ] Type-safe task chaining (output of one → input of another)
+- [ ] Validation of input/output type compatibility
+
+### Testing
+
+- [ ] Unit tests for each API function
+- [ ] Integration test: define package → export → verify contents
+- [ ] Round-trip test: export → import into repo → verify structure
+
+---
+
+## Phase 3: e3-core
 
 Implement repository operations per `design/e3-mvp-core.md`.
 
 ### Repository Module
 
 - [ ] `initRepository(path)` - Create new repository
-  - Creates: e3.east, objects/, packages/, executions/, workspaces/
-  - Tests: directory structure, config file, idempotency
-
 - [ ] `isValidRepository(path)` - Validate repository structure
-  - Tests: valid repo, missing dirs, missing config
-
 - [ ] `loadConfig(repo)` / `saveConfig(repo, config)` - Config management
-  - Tests: load default, save custom runners
 
 ### Objects Module
 
 - [ ] `objectWrite(repo, data)` - Store bytes, return hash
-  - Atomic write (temp → rename)
-  - Tests: round-trip, idempotency, concurrent writes
-
 - [ ] `objectRead(repo, hash)` - Load bytes by hash
-  - Tests: exists, not found error
-
 - [ ] `objectExists(repo, hash)` - Check existence
-  - Tests: exists true/false
-
 - [ ] `objectPath(repo, hash)` - Compute filesystem path
-  - Path: `objects/<hash[0..2]>/<hash[2..]>`
 
 ### Packages Module
 
 - [ ] `packageImport(repo, zipPath)` - Import from .zip
-  - Extract objects, create ref at packages/<name>/<version>
-  - Tests: import, deduplication, invalid zip
-
 - [ ] `packageExport(repo, name, version, zipPath)` - Export to .zip
-  - Collect package + referenced objects
-  - Tests: export, re-import matches
-
 - [ ] `packageList(repo)` - List installed packages
-  - Returns: Array<{name, version}>
-
 - [ ] `packageRemove(repo, name, version)` - Remove package ref
-  - Objects remain until GC
-
 - [ ] `packageRead(repo, name, version)` - Load PackageObject
 
 ### Workspaces Module
 
 - [ ] `workspaceCreate(repo, name)` - Create empty workspace
-  - Creates: workspaces/<name>/
-
 - [ ] `workspaceDeploy(repo, ws, pkgName, pkgVersion)` - Deploy package
-  - Writes package ref, copies initial dataset tree
-  - Tests: deploy, redeploy replaces
-
 - [ ] `workspaceExport(repo, ws, zipPath)` - Export as package
-  - Snapshots current data state
-
 - [ ] `workspaceList(repo)` - List workspaces
-
 - [ ] `workspaceRemove(repo, ws)` - Remove workspace
 
 ### Dataset Module
 
 - [ ] `datasetGet(repo, ws, path)` - Read value at path
-  - Traverses tree, returns blob bytes
-  - Tests: read leaf, read through tree
-
 - [ ] `datasetSet(repo, ws, path, value)` - Write value at path
-  - Creates new tree objects (structural sharing)
-  - Tests: set leaf, atomic root update
-
 - [ ] `datasetList(repo, ws, path)` - List keys at tree node
 
 ### Tree Module (internal)
@@ -225,32 +142,16 @@ Implement repository operations per `design/e3-mvp-core.md`.
 ### Execution Module
 
 - [ ] `executionRun(repo, taskHash, inputs, outputPath)` - Execute task
-  - Compute input hash, check cache
-  - Marshal inputs to scratch dir
-  - Exec runner command
-  - Store output, write ref
-  - Tests: execution, caching, stdout/stderr capture
-
 - [ ] `executionGetOutput(repo, inputHash)` - Get cached output
 
-### Dataflow Module
+### Task Execution Module
 
-- [ ] `dataflowStart(repo, ws, filter?)` - Run dataflows
-  - Build dependency graph
-  - Topological sort
-  - Execute in order (respecting cache)
-  - Tests: sequential execution, caching, partial runs
-
-- [ ] `dataflowStartWatch(repo, ws, filter?)` - Watch mode
-  - inotify on workspace root
-  - Re-run affected dataflows
+- [ ] `taskStart(repo, ws, filter?)` - Run tasks in dependency order
+- [ ] `taskStartWatch(repo, ws, filter?)` - Watch mode
 
 ### GC Module
 
 - [ ] `gc(repo)` - Remove unreferenced objects
-  - Trace from roots (packages, workspaces, executions)
-  - Delete unreachable objects
-  - Tests: gc removes orphans, preserves referenced
 
 ### Cleanup
 
@@ -259,7 +160,7 @@ Implement repository operations per `design/e3-mvp-core.md`.
 
 ---
 
-## Phase 3: e3-cli
+## Phase 4: e3-cli
 
 Wire up CLI commands per `design/e3-mvp-cli.md`.
 
@@ -293,7 +194,7 @@ Wire up CLI commands per `design/e3-mvp-cli.md`.
 ### Execution Commands
 
 - [ ] `e3 run <repo> <task> <inputs...> -o <out>` - Ad-hoc run
-- [ ] `e3 start <repo> <ws>` - Run dataflows
+- [ ] `e3 start <repo> <ws>` - Run tasks
 - [ ] `e3 start <repo> <ws> --watch` - Watch mode
 
 ### Utility Commands
@@ -308,7 +209,7 @@ Wire up CLI commands per `design/e3-mvp-cli.md`.
 
 ---
 
-## Phase 4: Integration Tests
+## Phase 5: Integration Tests
 
 End-to-end tests using the CLI.
 
@@ -319,8 +220,8 @@ End-to-end tests using the CLI.
 - [ ] **Workspace lifecycle** - Create, deploy, list, remove
 - [ ] **Dataset operations** - Set, get, list
 - [ ] **Runner configuration** - Configure and use our east-node runner
-- [ ] **Task execution** - Run, verify output, verify caching
-- [ ] **Dataflow execution** - Start, verify order, verify caching
+- [ ] **Task execution** - Run ad-hoc, verify output, verify caching
+- [ ] **Task orchestration** - Start, verify dependency order, verify caching
 - [ ] **Workspace export/import** - Round-trip with data
 
 ### Edge Cases

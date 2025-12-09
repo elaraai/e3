@@ -1,13 +1,16 @@
 /**
- * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
- * Proprietary and confidential.
+ * Copyright (c) 2025 Elara AI Pty Ltd
+ * Dual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.
  */
 
 /**
  * Task object types for e3.
  *
- * A task defines how to run a computation: which runner to use,
+ * A task object defines how to run a computation: which runner to use,
  * what inputs it expects (with optional fixed values), and what output type it produces.
+ *
+ * Task objects are stored in the object store and referenced by task bindings.
+ * They are content-addressed, enabling deduplication and memoization.
  */
 
 import { StructType, StringType, ArrayType, ValueTypeOf, OptionType } from '@elaraai/east';
@@ -32,7 +35,7 @@ import { StructType, StringType, ArrayType, ValueTypeOf, OptionType } from '@ela
  * // Fixed IR input (first argument to East functions)
  * const irInput: TaskInput = { type: 'IR', value: some('abc123...') };
  *
- * // Runtime data input
+ * // Runtime data input (from a dataset)
  * const dataInput: TaskInput = { type: 'Array Integer', value: none };
  * ```
  */
@@ -66,7 +69,7 @@ export type TaskInput = ValueTypeOf<typeof TaskInputType>;
  *   runner: 'east-node',
  *   inputs: [
  *     { type: 'IR', value: some('abc123...') },  // Fixed: the function IR
- *     { type: 'Integer', value: none },          // Runtime: first argument
+ *     { type: 'Integer', value: none },          // Runtime: input dataset
  *   ],
  *   output: 'Integer',
  * };

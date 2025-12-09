@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
- * Proprietary and confidential.
+ * Copyright (c) 2025 Elara AI Pty Ltd
+ * Dual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.
  */
 
 import { Command } from 'commander';

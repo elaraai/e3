@@ -27,7 +27,7 @@
     "cli",
     "execution-engine"
   ],
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "@elaraai/e3-core": "*",
     "@elaraai/e3-types": "*",

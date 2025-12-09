@@ -30,7 +30,7 @@ export default [
       '@typescript-eslint/no-misused-promises': 'error',
       'headers/header-format': ['error', {
         source: 'string',
-        content: 'Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.\nProprietary and confidential.'
+        content: 'Copyright (c) 2025 Elara AI Pty Ltd\nDual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.'
       }]
     }
   },

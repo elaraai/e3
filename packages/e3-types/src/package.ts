@@ -1,32 +1,38 @@
 /**
- * Copyright (c) 2025 Elara AI Pty. Ltd. All rights reserved.
- * Proprietary and confidential.
+ * Copyright (c) 2025 Elara AI Pty Ltd
+ * Dual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.
  */
 
 /**
  * Package object and manifest types for e3.
  *
  * A package bundles everything needed to run computations:
- * tasks, dataset structure, initial data, and dataflow definitions.
+ * tasks, data structure, initial datasets, and task bindings.
+ *
+ * Terminology:
+ * - **Package**: A deployable bundle of tasks and data structure
+ * - **Structure**: The shape of the data tree
+ * - **Task binding**: Rules for running tasks on datasets
  */
 
 import { StructType, StringType, DictType, ValueTypeOf } from '@elaraai/east';
-import { DatasetSchemaType } from './schema.js';
-import { DataflowDefType } from './dataflow.js';
+import { StructureType } from './schema.js';
+import { BindingDefType } from './dataflow.js';
 
 /**
- * Dataset configuration in a package.
+ * Data configuration in a package.
  *
- * Defines the structure (schema) and initial values (root tree hash).
+ * Defines the structure (which paths are datasets vs trees)
+ * and initial values (root tree hash).
  *
  * @remarks
- * - `schema`: Defines which nodes are values vs trees (recursive)
+ * - `structure`: Defines which paths are datasets vs trees (recursive)
  * - `value`: Hash of the root tree object in the object store
  *
  * @example
  * ```ts
- * const datasets: PackageDatasets = {
- *   schema: variant('struct', new Map([
+ * const data: PackageData = {
+ *   structure: variant('struct', new Map([
  *     ['inputs', variant('struct', new Map([
  *       ['sales', variant('value', variant('Array', variant('Integer', null)))],
  *     ]))],
@@ -38,15 +44,23 @@ import { DataflowDefType } from './dataflow.js';
  * };
  * ```
  */
-export const PackageDatasetsType = StructType({
-  /** Schema defining tree structure (what's a tree vs value) */
-  schema: DatasetSchemaType,
+export const PackageDataType = StructType({
+  /** Structure defining tree shape (what's a group vs dataset) */
+  structure: StructureType,
   /** Hash of the root tree object containing initial/default values */
   value: StringType,
 });
-export type PackageDatasetsType = typeof PackageDatasetsType;
+export type PackageDataType = typeof PackageDataType;
 
-export type PackageDatasets = ValueTypeOf<typeof PackageDatasetsType>;
+export type PackageData = ValueTypeOf<typeof PackageDataType>;
+
+// Backwards compatibility alias
+/** @deprecated Use PackageDataType instead */
+export const PackageDatasetsType = PackageDataType;
+/** @deprecated Use PackageData instead */
+export type PackageDatasetsType = PackageDataType;
+/** @deprecated Use PackageData instead */
+export type PackageDatasets = PackageData;
 
 /**
  * Package object stored in the object store.
@@ -62,8 +76,8 @@ export type PackageDatasets = ValueTypeOf<typeof PackageDatasetsType>;
  * ```ts
  * const pkg: PackageObject = {
  *   tasks: new Map([['process', 'abc123...']]),
- *   datasets: { schema: ..., value: 'def456...' },
- *   dataflows: new Map([
+ *   data: { structure: ..., value: 'def456...' },
+ *   bindings: new Map([
  *     ['process-sales', variant('task', { task: 'process', inputs: [...], output: [...] })],
  *   ]),
  * };
@@ -72,10 +86,10 @@ export type PackageDatasets = ValueTypeOf<typeof PackageDatasetsType>;
 export const PackageObjectType = StructType({
   /** Tasks defined in this package: name -> task object hash */
   tasks: DictType(StringType, StringType),
-  /** Dataset structure and initial values */
-  datasets: PackageDatasetsType,
-  /** Named dataflow definitions for orchestration */
-  dataflows: DictType(StringType, DataflowDefType),
+  /** Data structure and initial values */
+  data: PackageDataType,
+  /** Named task bindings for execution */
+  bindings: DictType(StringType, BindingDefType),
 });
 export type PackageObjectType = typeof PackageObjectType;
 
