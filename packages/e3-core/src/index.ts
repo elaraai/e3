@@ -74,7 +74,9 @@ export {
   packageGetDataset,
   workspaceListTree,
   workspaceGetDataset,
+  workspaceGetDatasetHash,
   workspaceSetDataset,
+  workspaceSetDatasetByHash,
 } from './trees.js';
 
 // Task operations
@@ -84,3 +86,37 @@ export {
   workspaceListTasks,
   workspaceGetTask,
 } from './tasks.js';
+
+// Execution operations
+export {
+  // Identity
+  inputsHash,
+  executionPath,
+  // Status
+  executionGet,
+  executionGetOutput,
+  executionListForTask,
+  executionList,
+  // Logs
+  executionReadLog,
+  type LogReadOptions,
+  type LogChunk,
+  // Config
+  configRead,
+  configWrite,
+  // Process detection
+  isProcessAlive,
+  // Execution
+  taskExecute,
+  type ExecuteOptions,
+  type ExecutionResult,
+} from './executions.js';
+
+// Dataflow execution
+export {
+  dataflowExecute,
+  dataflowGetGraph,
+  type DataflowOptions,
+  type DataflowResult,
+  type TaskExecutionResult,
+} from './dataflow.js';

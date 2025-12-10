@@ -626,3 +626,174 @@ export async function workspaceGetDataset(
   const result = await datasetRead(repoPath, ref.value);
   return result.value;
 }
+
+/**
+ * Get the hash of a dataset at a path within a workspace's data tree.
+ *
+ * Unlike workspaceGetDataset which decodes the value, this returns the raw
+ * hash reference. Useful for dataflow execution which operates on hashes.
+ *
+ * @param repoPath - Path to .e3 repository
+ * @param ws - Workspace name
+ * @param treePath - Path to the dataset
+ * @returns Object with ref type and hash (null for unassigned/null refs)
+ * @throws If workspace not deployed, path invalid, or path points to a tree
+ */
+export async function workspaceGetDatasetHash(
+  repoPath: string,
+  ws: string,
+  treePath: TreePath
+): Promise<{ refType: DataRef['type']; hash: string | null }> {
+  const { rootHash, rootStructure } = await getWorkspaceRootInfo(repoPath, ws);
+
+  if (treePath.length === 0) {
+    throw new Error('Cannot get dataset at root path - root is always a tree');
+  }
+
+  // Traverse to the path
+  const { structure, ref } = await traverse(repoPath, rootHash, rootStructure, treePath);
+
+  // Must be a value structure
+  if (structure.type !== 'value') {
+    const pathStr = treePath.map(s => s.value).join('.');
+    throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
+  }
+
+  // Return ref type and hash
+  if (ref.type === 'unassigned' || ref.type === 'null') {
+    return { refType: ref.type, hash: null };
+  }
+
+  if (ref.type === 'tree') {
+    const pathStr = treePath.map(s => s.value).join('.');
+    throw new Error(`Path '${pathStr}' structure says value but ref is tree`);
+  }
+
+  return { refType: ref.type, hash: ref.value };
+}
+
+/**
+ * Set a dataset at a path within a workspace using a pre-computed hash.
+ *
+ * Unlike workspaceSetDataset which encodes a value, this takes a hash
+ * directly. Useful for dataflow execution which already has the output hash.
+ *
+ * @param repoPath - Path to .e3 repository
+ * @param ws - Workspace name
+ * @param treePath - Path to the dataset
+ * @param valueHash - Hash of the dataset value already in the object store
+ * @throws If workspace not deployed, path invalid, or path points to a tree
+ */
+export async function workspaceSetDatasetByHash(
+  repoPath: string,
+  ws: string,
+  treePath: TreePath,
+  valueHash: string
+): Promise<void> {
+  if (treePath.length === 0) {
+    throw new Error('Cannot set dataset at root path - root is always a tree');
+  }
+
+  const state = await readWorkspaceState(repoPath, ws);
+
+  // Read the deployed package object to get the structure
+  const pkgData = await objectRead(repoPath, state.packageHash);
+  const decoder = decodeBeast2For(PackageObjectType);
+  const pkgObject = decoder(Buffer.from(pkgData));
+  const rootStructure = pkgObject.data.structure;
+
+  // Validate that the path leads to a value structure
+  let currentStructure = rootStructure;
+  for (let i = 0; i < treePath.length; i++) {
+    const segment = treePath[i]!;
+    if (segment.type !== 'field') {
+      throw new Error(`Unsupported path segment type: ${segment.type}`);
+    }
+
+    if (currentStructure.type !== 'struct') {
+      const pathSoFar = treePath.slice(0, i).map(s => s.value).join('.');
+      throw new Error(`Cannot descend into non-struct at path '${pathSoFar}'`);
+    }
+
+    const childStructure = currentStructure.value.get(segment.value);
+    if (!childStructure) {
+      const pathSoFar = treePath.slice(0, i).map(s => s.value).join('.');
+      const available = Array.from(currentStructure.value.keys()).join(', ');
+      throw new Error(`Field '${segment.value}' not found at '${pathSoFar}'. Available: ${available}`);
+    }
+
+    currentStructure = childStructure;
+  }
+
+  // Final structure must be a value
+  if (currentStructure.type !== 'value') {
+    const pathStr = treePath.map(s => s.value).join('.');
+    throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
+  }
+
+  // Rebuild the tree path from leaf to root (structural sharing)
+  // Collect all tree hashes and structures along the path
+  const treeInfos: Array<{
+    hash: string;
+    structure: Structure;
+  }> = [];
+
+  let currentHash = state.rootHash;
+  currentStructure = rootStructure;
+
+  // Read all trees along the path (except the last segment which is the dataset)
+  for (let i = 0; i < treePath.length - 1; i++) {
+    treeInfos.push({ hash: currentHash, structure: currentStructure });
+
+    const segment = treePath[i]!;
+    const treeObject = await treeRead(repoPath, currentHash, currentStructure);
+    const childRef = treeObject[segment.value];
+
+    if (!childRef || childRef.type !== 'tree') {
+      throw new Error(`Expected tree ref at path segment ${i}`);
+    }
+
+    currentHash = childRef.value;
+    currentStructure = (currentStructure as { type: 'struct'; value: Map<string, Structure> }).value.get(segment.value)!;
+  }
+
+  // Add the final tree that contains the dataset
+  treeInfos.push({ hash: currentHash, structure: currentStructure });
+
+  // Now rebuild from leaf to root
+  // Start with the provided value hash as the new ref
+  let newRef: DataRef = { type: 'value', value: valueHash } as DataRef;
+
+  for (let i = treeInfos.length - 1; i >= 0; i--) {
+    const { hash, structure } = treeInfos[i]!;
+    const fieldName = treePath[i]!.value;
+
+    // Read the current tree
+    const treeObject = await treeRead(repoPath, hash, structure);
+
+    // Create modified tree with the new ref
+    const newTreeObject: TreeObject = {
+      ...treeObject,
+      [fieldName]: newRef,
+    };
+
+    // Write the new tree
+    const newTreeHash = await treeWrite(repoPath, newTreeObject, structure);
+
+    // This becomes the new ref for the parent
+    newRef = { type: 'tree', value: newTreeHash } as DataRef;
+  }
+
+  // The final newRef is always a tree ref pointing to the new root
+  if (newRef.type !== 'tree' || newRef.value === null) {
+    throw new Error('Internal error: expected tree ref after rebuilding path');
+  }
+  const newRootHash = newRef.value;
+
+  // Update workspace state atomically
+  await writeWorkspaceState(repoPath, ws, {
+    ...state,
+    rootHash: newRootHash,
+    rootUpdatedAt: new Date(),
+  });
+}
