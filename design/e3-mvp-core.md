@@ -174,59 +174,110 @@ Get root data tree hash. Throws if workspace not deployed.
 
 Atomically update root data tree hash. Updates `rootUpdatedAt` timestamp. Throws if workspace not deployed.
 
-## Tree Objects
+## Data Trees
 
-Tree objects form persistent trees with structural sharing. See e3.md "Data Tree Objects" for the type definitions.
-
-### `treeRead(repo: string, hash: string): Promise<TreeObject>`
-
-Read and parse a tree object.
-
-### `treeWriteStruct(repo: string, fields: Record<string, DataRef>): Promise<string>`
-
-Write a struct tree (field name -> DataRef). Returns hash.
-
-## Dataset Access
-
-High-level operations on workspace data trees using TreePaths.
+Data is stored as persistent trees with structural sharing (like git trees). A tree node contains DataRefs pointing to either other tree nodes or dataset values (leaves).
 
 ```ts
-type TreePath = Array<PathComponent>;
-type PathComponent = { field: string };  // .field "name"
+// Reference to data - either a tree node or a value
+type DataRef =
+  | { type: 'unassigned' }           // Pending task output
+  | { type: 'null' }                 // Inline null value
+  | { type: 'value', hash: string }  // Hash of value blob
+  | { type: 'tree', hash: string }   // Hash of tree object
+
+// Tree object: struct of DataRefs (field name -> DataRef)
+type TreeObject = Record<string, DataRef>;
+
+// Structure describes the shape of a tree node
+type Structure =
+  | { type: 'value', value: EastType }              // Leaf: dataset with typed value
+  | { type: 'struct', value: Map<string, Structure> }  // Branch: named children
+
+// Path through the tree
+type TreePath = Array<PathSegment>;
+type PathSegment = { field: string };
 ```
 
-### `datasetGet(repo: string, ws: string, path: TreePath): Promise<Uint8Array>`
+### Low-level Operations (by hash)
 
-Read a value at a specific path. Traverses the tree, returns blob bytes.
+These operate on individual objects given their hash - like inode-level filesystem operations.
 
-Example: `datasetGet(repo, "production", [{ field: "inputs" }, { field: "sales" }])`
+Tree operations require a `Structure` parameter describing the shape of the tree node. This enables encoding/decoding with the correct `StructType` derived from the structure's field names.
 
-### `datasetSet(repo: string, ws: string, path: TreePath, value: Uint8Array): Promise<void>`
+#### `treeRead(repo: string, hash: string, structure: Structure): Promise<TreeObject>`
 
-Update a blob at a specific path. Creates new tree objects along the path (structural sharing), updates workspace root atomically.
+Read and decode a tree object. The structure must describe this node (not its children). Returns the struct of DataRefs.
 
-### `datasetList(repo: string, ws: string, path: TreePath): Promise<Array<string>>`
+#### `treeWrite(repo: string, fields: TreeObject, structure: Structure): Promise<string>`
 
-List keys at a tree node (field names). The path should point to a struct tree.
+Encode and write a tree object. The structure must describe this node. Returns hash.
 
-### Atomic updates?
+#### `datasetRead(repo: string, hash: string): Promise<{ type: EastType, value: unknown }>`
 
-We need to consider whether a workspace-level write lock is required, or whether we have an API for "transactions" mutating multiple datasets at once.
-(Read locks are not necessary given our git-like structure).
+Read and decode a dataset value. The `.beast2` format includes type information, so values can be decoded without knowing the schema in advance. Returns both the decoded value and its type.
+
+#### `datasetWrite(repo: string, value: unknown, type: EastType): Promise<string>`
+
+Encode and write a dataset value. Returns hash. Requires the type for encoding.
+
+### High-level Operations (by path)
+
+These traverse the tree from a root to a path location. "Get" operations on trees return the TreeObject (listing its fields). "Get" operations on datasets return the decoded value.
+
+#### From Packages (read-only)
+
+#### `packageListTree(repo: string, name: string, version: string, path: TreePath): Promise<string[]>`
+
+List field names at a tree path within a package's data tree.
+
+#### `packageGetDataset(repo: string, name: string, version: string, path: TreePath): Promise<unknown>`
+
+Read and decode a dataset value at a path within a package's data tree.
+
+#### From Workspaces (read-write)
+
+#### `workspaceListTree(repo: string, ws: string, path: TreePath): Promise<string[]>`
+
+List field names at a tree path within a workspace's data tree.
+
+#### `workspaceGetDataset(repo: string, ws: string, path: TreePath): Promise<unknown>`
+
+Read and decode a dataset value at a path within a workspace.
+
+#### `workspaceSetDataset(repo: string, ws: string, path: TreePath, value: unknown, type: EastType): Promise<void>`
+
+Update a dataset at a path. Encodes the value, creates new tree objects along the path (structural sharing), and updates workspace root atomically.
 
 ## Tasks
 
-### `taskResolve(repo: string, pkgName: string, pkgVersion: string, taskName: string): Promise<string>`
+### High-level Operations (by name)
 
-Resolve a task to its TaskObject hash.
+#### From Packages (read-only)
 
-### `taskRead(repo: string, hash: string): Promise<TaskObject>`
+#### `packageListTasks(repo: string, name: string, version: string): Promise<string[]>`
 
-Read and parse a TaskObject.
+List task names in a package.
 
-### `taskRun(repo: string, taskHash: string, inputs: Array<string>, outputPath: string): Promise<string>`
+#### `packageGetTask(repo: string, name: string, version: string, taskName: string): Promise<TaskObject>`
 
-Execute a task:
+Get task details (runner, input paths, output path) from a package.
+
+#### From Workspaces (read-only - tasks are defined by deployed package)
+
+#### `workspaceListTasks(repo: string, ws: string): Promise<string[]>`
+
+List task names in a workspace's deployed package.
+
+#### `workspaceGetTask(repo: string, ws: string, taskName: string): Promise<TaskObject>`
+
+Get task details from a workspace's deployed package.
+
+### Task Execution
+
+### `taskRun(repo: string, task: TaskObject, inputHashes: Array<string>): Promise<string>`
+
+Execute a single task:
 1. Compute executionHash = hash(runner, ...inputHashes)
 2. Check cache: `executions/<executionHash>/output`
 3. If cached, return cached result hash

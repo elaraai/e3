@@ -314,8 +314,10 @@ describe('gc', () => {
       const data = new Uint8Array([11, 22, 33]);
       const hash = await objectWrite(testRepo, data);
 
-      // Create an execution ref
-      const execDir = join(testRepo, 'executions', 'exec123');
+      // Create an execution ref at executions/<taskHash>/<inputsHash>/output
+      const taskHash = 'a'.repeat(64);
+      const inputsHash = 'b'.repeat(64);
+      const execDir = join(testRepo, 'executions', taskHash, inputsHash);
       mkdirSync(execDir, { recursive: true });
       writeFileSync(join(execDir, 'output'), hash + '\n');
 

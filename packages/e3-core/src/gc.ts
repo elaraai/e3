@@ -105,9 +105,9 @@ async function collectRoots(repoPath: string): Promise<Set<string>> {
   const packagesDir = path.join(repoPath, 'packages');
   await collectRefsFromDir(packagesDir, roots, 2); // depth 2: packages/<name>/<version>
 
-  // Collect from executions/<hash>/* files
+  // Collect from executions/<taskHash>/<inputsHash>/output files
   const executionsDir = path.join(repoPath, 'executions');
-  await collectRefsFromDir(executionsDir, roots, 2); // depth 2: executions/<id>/<ref>
+  await collectRefsFromDir(executionsDir, roots, 3); // depth 3: executions/<taskHash>/<inputsHash>/output
 
   // Collect from workspaces/<name>/state.beast2 files
   const workspacesDir = path.join(repoPath, 'workspaces');

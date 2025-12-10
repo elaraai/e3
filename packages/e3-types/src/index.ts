@@ -83,3 +83,8 @@ export {
   type WorkspaceState,
 } from './workspace.js';
 
+// Execution status
+export {
+  ExecutionStatusType,
+  type ExecutionStatus,
+} from './execution.js';

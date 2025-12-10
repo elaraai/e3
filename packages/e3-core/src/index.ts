@@ -58,3 +58,29 @@ export {
   workspaceExport,
   type WorkspaceExportResult,
 } from './workspaces.js';
+
+// Tree and dataset operations (low-level, by hash)
+export {
+  treeRead,
+  treeWrite,
+  datasetRead,
+  datasetWrite,
+  type TreeObject,
+} from './trees.js';
+
+// Tree and dataset operations (high-level, by path)
+export {
+  packageListTree,
+  packageGetDataset,
+  workspaceListTree,
+  workspaceGetDataset,
+  workspaceSetDataset,
+} from './trees.js';
+
+// Task operations
+export {
+  packageListTasks,
+  packageGetTask,
+  workspaceListTasks,
+  workspaceGetTask,
+} from './tasks.js';
