@@ -6,82 +6,55 @@
 /**
  * Task object types for e3.
  *
- * A task object defines how to run a computation: which runner to use,
- * what inputs it expects (with optional fixed values), and what output type it produces.
+ * A task object defines a complete executable unit: which runner to use,
+ * where to read inputs from, and where to write the output.
  *
- * Task objects are stored in the object store and referenced by task bindings.
+ * Task objects are stored in the object store and referenced by packages.
  * They are content-addressed, enabling deduplication and memoization.
+ *
+ * Input and output types are inferred from the package's structure at the
+ * specified paths - the task just references locations, not types.
  */
 
-import { StructType, StringType, ArrayType, ValueTypeOf, OptionType } from '@elaraai/east';
-
-/**
- * Specification for a single task input.
- *
- * Each input has an East type (serialized as a string) and optionally
- * a fixed value (hash of the value object in the store).
- *
- * @remarks
- * - `type`: The East type printed as a string (e.g., "Integer", "Array Integer")
- * - `value`: Either `some(hash)` for fixed values or `none` for runtime inputs
- *
- * Uses East's standard `OptionType(StringType)` for optional values.
- * Import `some` and `none` from `@elaraai/east` to construct values.
- *
- * @example
- * ```ts
- * import { some, none } from '@elaraai/east';
- *
- * // Fixed IR input (first argument to East functions)
- * const irInput: TaskInput = { type: 'IR', value: some('abc123...') };
- *
- * // Runtime data input (from a dataset)
- * const dataInput: TaskInput = { type: 'Array Integer', value: none };
- * ```
- */
-export const TaskInputType = StructType({
-  /** Serialized East type (printed form) */
-  type: StringType,
-  /** Object hash if this input has a fixed value, none if provided at runtime */
-  value: OptionType(StringType),
-});
-export type TaskInputType = typeof TaskInputType;
-
-export type TaskInput = ValueTypeOf<typeof TaskInputType>;
+import { StructType, StringType, ArrayType, ValueTypeOf } from '@elaraai/east';
+import { TreePathType } from './structure.js';
 
 /**
  * Task object stored in the object store.
  *
- * Tasks are referenced by packages and define how computations run.
- * The task identity (hash) is determined by the runner, input types/values,
- * and output type, enabling memoization of executions.
+ * A task is a complete executable unit that reads from input dataset paths
+ * and writes to an output dataset path. The runner determines how to execute it.
  *
  * @remarks
  * - `runner`: Key into the repository's runner configuration (e.g., "east-node")
- * - `inputs`: Array of input specifications; fixed values are baked in
- * - `output`: The East type of the task's return value
+ * - `inputs`: Paths to input datasets in the data tree (first is typically function_ir)
+ * - `output`: Path to the output dataset in the data tree
+ *
+ * Types are not stored in the task - they are inferred from the package's
+ * structure at the specified paths. This keeps tasks simple and avoids
+ * redundant type information.
  *
  * @example
  * ```ts
- * import { some, none } from '@elaraai/east';
+ * import { variant } from '@elaraai/east';
  *
  * const task: TaskObject = {
  *   runner: 'east-node',
  *   inputs: [
- *     { type: 'IR', value: some('abc123...') },  // Fixed: the function IR
- *     { type: 'Integer', value: none },          // Runtime: input dataset
+ *     [variant('field', 'tasks'), variant('field', 'train'), variant('field', 'function_ir')],
+ *     [variant('field', 'inputs'), variant('field', 'sales')],
  *   ],
- *   output: 'Integer',
+ *   output: [variant('field', 'tasks'), variant('field', 'train'), variant('field', 'output')],
  * };
  * ```
  */
 export const TaskObjectType = StructType({
-  /** Runner key (e.g., "east-node", "east-py") - maps to config */
+  /** Runner key (e.g., "east-node", "east-py") - maps to repo config */
   runner: StringType,
-  /** Input specifications */
-  inputs: ArrayType(TaskInputType),
-  /** Serialized East type of the output */
-  output: StringType,
+  /** Input paths: where to read each input dataset from the data tree */
+  inputs: ArrayType(TreePathType),
+  /** Output path: where to write the output dataset in the data tree */
+  output: TreePathType,
 });
 export type TaskObjectType = typeof TaskObjectType;
 

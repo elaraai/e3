@@ -4,20 +4,19 @@
  */
 
 /**
- * Package object and manifest types for e3.
+ * Package object types for e3.
  *
  * A package bundles everything needed to run computations:
- * tasks, data structure, initial datasets, and task bindings.
+ * tasks and data structure with initial values.
  *
  * Terminology:
  * - **Package**: A deployable bundle of tasks and data structure
  * - **Structure**: The shape of the data tree
- * - **Task binding**: Rules for running tasks on datasets
+ * - **Task**: A computation with input/output paths (stored separately)
  */
 
 import { StructType, StringType, DictType, ValueTypeOf } from '@elaraai/east';
-import { StructureType } from './schema.js';
-import { BindingDefType } from './dataflow.js';
+import { StructureType } from './structure.js';
 
 /**
  * Data configuration in a package.
@@ -36,8 +35,11 @@ import { BindingDefType } from './dataflow.js';
  *     ['inputs', variant('struct', new Map([
  *       ['sales', variant('value', variant('Array', variant('Integer', null)))],
  *     ]))],
- *     ['outputs', variant('struct', new Map([
- *       ['result', variant('value', variant('Integer', null))],
+ *     ['tasks', variant('struct', new Map([
+ *       ['process', variant('struct', new Map([
+ *         ['function_ir', variant('value', ...)],
+ *         ['output', variant('value', variant('Integer', null))],
+ *       ]))],
  *     ]))],
  *   ])),
  *   value: 'abc123...',  // Hash of initial tree
@@ -69,17 +71,21 @@ export type PackageDatasets = PackageData;
  * They are immutable and content-addressed by their hash.
  *
  * @remarks
- * Package identity (name/version) is stored in the manifest, not here.
- * This allows the same package contents to be referenced under different names.
+ * - `tasks`: Maps task names to task object hashes. Each task object
+ *   contains runner, input paths, and output path.
+ * - `data`: The structure and initial values for the data tree.
+ *
+ * Package identity (name/version) is determined by the path in the
+ * bundle's `packages/<name>/<version>` directory structure.
  *
  * @example
  * ```ts
  * const pkg: PackageObject = {
- *   tasks: new Map([['process', 'abc123...']]),
- *   data: { structure: ..., value: 'def456...' },
- *   bindings: new Map([
- *     ['process-sales', variant('task', { task: 'process', inputs: [...], output: [...] })],
- *   ]),
+ *   tasks: new Map([['process', 'abc123...']]),  // hash of TaskObject
+ *   data: {
+ *     structure: variant('struct', new Map([...])),
+ *     value: 'def456...',  // hash of root tree
+ *   },
  * };
  * ```
  */
@@ -88,40 +94,7 @@ export const PackageObjectType = StructType({
   tasks: DictType(StringType, StringType),
   /** Data structure and initial values */
   data: PackageDataType,
-  /** Named task bindings for execution */
-  bindings: DictType(StringType, BindingDefType),
 });
 export type PackageObjectType = typeof PackageObjectType;
 
 export type PackageObject = ValueTypeOf<typeof PackageObjectType>;
-
-/**
- * Package manifest stored in bundled .zip files.
- *
- * The manifest provides the human-readable identity (name/version)
- * and points to the package object by hash.
- *
- * @remarks
- * When deploying to a workspace, we look up by name/version and
- * diff the package contents for efficient updates.
- *
- * @example
- * ```ts
- * const manifest: PackageManifest = {
- *   name: 'acme-forecast',
- *   version: '0.21.1',
- *   root: 'abc123...',  // Hash of PackageObject
- * };
- * ```
- */
-export const PackageManifestType = StructType({
-  /** Package name (e.g., "acme-forecast") */
-  name: StringType,
-  /** Package version (e.g., "0.21.1") */
-  version: StringType,
-  /** Hash of the PackageObject in the bundle */
-  root: StringType,
-});
-export type PackageManifestType = typeof PackageManifestType;
-
-export type PackageManifest = ValueTypeOf<typeof PackageManifestType>;

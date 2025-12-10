@@ -19,11 +19,15 @@
   },
   "dependencies": {
     "@elaraai/e3-types": "*",
-    "@elaraai/east": "0.0.1-beta.5"
+    "@elaraai/east": "0.0.1-beta.5",
+    "yazl": "^2.5.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
-    "typescript": "^5.7.2"
+    "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^2.4.5",
+    "typescript": "^5.7.2",
+    "yauzl": "^3.2.0"
   },
   "files": [
     "dist"

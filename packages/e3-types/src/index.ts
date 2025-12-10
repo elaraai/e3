@@ -8,18 +8,16 @@
  *
  * This package defines the East types used for serializing e3 objects:
  * - Data references and tree structures
- * - Task definitions
- * - Package manifests
+ * - Task definitions (runner, input/output paths)
+ * - Package objects
  * - Data structure and paths
- * - Task bindings
  * - Repository configuration
  *
  * Terminology:
  * - **Dataset**: A location holding a value (leaf node)
  * - **Tree**: A location containing other locations (branch node)
  * - **Structure**: The shape of the data tree
- * - **Task**: A computation (reads datasets, produces a dataset)
- * - **Task binding**: Connects a task to specific dataset paths
+ * - **Task**: A computation with runner and input/output paths
  * - **Path**: An address in the data tree
  */
 
@@ -34,8 +32,6 @@ export {
 
 // Task definitions
 export {
-  TaskInputType,
-  type TaskInput,
   TaskObjectType,
   type TaskObject,
 } from './task.js';
@@ -55,20 +51,7 @@ export {
   // Backwards compatibility
   DatasetSchemaType,
   type DatasetSchema,
-} from './schema.js';
-
-// Task bindings
-export {
-  TaskBindingType,
-  type TaskBinding,
-  BindingDefType,
-  type BindingDef,
-  // Backwards compatibility
-  TaskDataflowType,
-  type TaskDataflow,
-  DataflowDefType,
-  type DataflowDef,
-} from './dataflow.js';
+} from './structure.js';
 
 // Package objects
 export {
@@ -76,8 +59,6 @@ export {
   type PackageData,
   PackageObjectType,
   type PackageObject,
-  PackageManifestType,
-  type PackageManifest,
   // Backwards compatibility
   PackageDatasetsType,
   type PackageDatasets,
@@ -95,3 +76,4 @@ export {
   type Config,
   emptyConfig,
 } from './config.js';
+

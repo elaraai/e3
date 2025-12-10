@@ -48,13 +48,14 @@ import type {
   DatasetDef,
   DataTreeDef,
   DatasetsOf,
+  MergeDatasets,
   PackageDef,
   PackageItem,
   TaskDef,
 } from './types.js';
 import { input } from './input.js';
 import { task } from './task.js';
-import { package_, MergeDatasets } from './package.js';
+import { package_ } from './package.js';
 import { export_ } from './export.js';
 
 export type {
@@ -86,7 +87,8 @@ export { input, task, package_ as package, export_ as export };
 
 // Singleton tree definitions
 export { inputsTree } from './input.js';
-export { outputsTree } from './task.js';
+export { tasksTree } from './task.js';
 
 // Utility exports
 export { sha256File, sha256Bytes, hashToPath } from './sha256.js';
+export { addObject } from './export.js';

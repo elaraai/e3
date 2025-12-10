@@ -4,6 +4,27 @@ This document specifies the e3 command-line interface.
 
 All commands take a repository path as the first argument (`.` for current directory).
 
+## Path Syntax
+
+Dataset paths in the CLI use `workspace.path.to.dataset` syntax:
+
+```
+production.inputs.sales           # Input dataset in 'production' workspace
+production.tasks.train.output     # Output of 'train' task
+production.tasks.predict.output   # Output of 'predict' task
+```
+
+The first segment is always the workspace name, followed by the path within that workspace.
+
+For identifiers with special characters (spaces, dots), use backticks:
+```
+production.inputs.`sales data`    # Field name with space
+'production.inputs.`my.field`'    # Quote the whole thing in bash
+```
+
+Internally, e3 uses keypath syntax (`#.field[index]`) for serialization and glob patterns,
+but the CLI uses the simpler dot-separated format for usability.
+
 ## Repository
 
 ```bash
@@ -34,17 +55,28 @@ e3 workspace remove <repo> <ws>             # Remove workspace
 
 ## Datasets
 
+Dataset commands use `workspace.path` syntax to identify datasets:
+
 ```bash
-e3 dataset get <repo> <ws> <path>           # Print dataset value
-e3 dataset set <repo> <ws> <path> <file>    # Set dataset from file
-e3 dataset list <repo> <ws>                 # List datasets in workspace
+e3 get <repo> <ws.path>                     # Print dataset value
+e3 set <repo> <ws.path> <file>              # Set dataset from file
+e3 list <repo> <ws>[.path]                  # List datasets (optionally under path)
+```
+
+Examples:
+```bash
+e3 get . production.inputs.sales
+e3 get . production.tasks.train.output
+e3 set . production.inputs.sales ./new_sales.beast2
+e3 list . production                        # List all datasets
+e3 list . production.inputs                 # List input datasets only
 ```
 
 ## Execution
 
 ```bash
-e3 run <repo> <task> <inputs...> -o <out>   # Ad-hoc task execution
-e3 start <repo> <ws> [--filter <pattern>]   # Run dataflows in workspace
+e3 run <repo> <pkg>/<task> <inputs...> -o <out>  # Ad-hoc task execution
+e3 start <repo> <ws> [--filter <pattern>]   # Run tasks in workspace
 e3 start <repo> <ws> --watch                # Watch mode - re-run on changes
 ```
 
@@ -52,7 +84,7 @@ e3 start <repo> <ws> --watch                # Watch mode - re-run on changes
 
 ```bash
 e3 logs <repo> [<task_hash>] [--follow]     # View execution logs
-e3 view <repo> <path>                       # TUI data viewer
+e3 view <repo> <ws.path>                    # TUI data viewer
 e3 convert <path> [--format east|json]      # Convert between formats
 ```
 
@@ -67,10 +99,10 @@ $ e3 package import . ~/dev/my-pkg/dist/my-pkg-1.0.0.zip
 $ e3 workspace create . production
 $ e3 workspace deploy . production my-pkg@1.0.0
 $ e3 start . production
-$ e3 dataset get . production outputs/predict
+$ e3 get . production.tasks.predict.output
 
 # Update data and rerun
-$ e3 dataset set . production inputs/sales ./new_sales.beast2
+$ e3 set . production.inputs.sales ./new_sales.beast2
 $ e3 start . production
 
 # Export workspace state for colleague

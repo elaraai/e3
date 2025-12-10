@@ -28,15 +28,27 @@ e3 is agnostic to how code and packages are authored. You might create packages 
 
 **Workspaces** are namespaces of interactive datasets that you can read and write. Each workspace is initialized by deploying a package to the workspace, and contains the datasets and tasks (transformations producing datasets).
 
-**Packages** are an immutable bundle of e3 objects - East IR, task objects, datasets and task bindings.
+**Packages** are an immutable bundle of e3 objects - task objects, data structure, and initial values.
 
-**Runner** are programs that can execute e3 tasks (e.g. our JavaScript interpretter or Julia compiler, or a completely custom program). They are defined by CLI commands.
+**Runners** are programs that can execute e3 tasks (e.g. our JavaScript interpreter or Julia compiler, or a completely custom program). They are defined by CLI commands in the repository config.
 
-**Task objects** are stored computations: a runner with inputs of given East types. Some of the inputs may have a fixed value (statically defined in the package that defines the task). For an East task, the first input is a (fixed) East function IR - which is itself an East value stored in e3. The remaining inputs are the function arguments.
+**Task objects** define a computation: a runner key plus paths to input and output datasets. For East tasks, the first input path points to the function IR (at `tasks.{name}.function_ir`), and the remaining inputs are the function arguments. Input/output types are inferred from the package's structure at those paths.
 
-**Executions** are task executions with specific inputs. A task object's identity is the hash of its runner plus its input hashes - same inputs always produce the same task ID, enabling memoization.
+**Executions** are task executions with specific inputs. Execution identity is the hash of the runner plus all input hashes - same inputs always produce the same result, enabling memoization.
 
-**Tasks** (user-facing) are transformations that read input datasets and produce output datasets. They consist of a task object (the computation) and a task binding (which dataset paths to read/write). `e3 start` executes all tasks in dependency order (like `make`).
+**Tasks** (user-facing) are transformations that read input datasets and produce output datasets. `e3 start` executes all tasks in dependency order (like `make`).
+
+**Data tree structure:**
+- `.inputs.{name}` - Input datasets (user-provided data)
+- `.tasks.{name}.function_ir` - Task IR (compiled function, private)
+- `.tasks.{name}.output` - Task output (result of running the task)
+
+**Path syntax:**
+- **CLI:** `workspace.path.to.dataset` (e.g., `production.inputs.sales`)
+- **Internal/Keypath:** `#.path.to.dataset` (e.g., `#.inputs.sales`)
+
+The CLI syntax uses the workspace name as the first segment for a natural feel.
+Internally, e3 uses keypath syntax (`#.field[index]`) for serialization, glob patterns, and future East language integration.
 
 ### Example Workflow
 
@@ -65,17 +77,17 @@ Created production workspace
 $ e3 workspace deploy . production acme-forecast@0.21.1
 Deploying acme-forecast@0.21.1 to production... done
 
-# Execute the full dataflow pipeline
+# Execute all tasks
 $ e3 start . production
 [1/3] preprocess... done (0.5s)
 [2/3] train... done (38.1s)
 [3/3] predict... done (1.2s)
 
 # Get/set datasets
-$ e3 dataset get . production outputs/predict
-$ e3 dataset set . production inputs/sales ./new_sales.beast2
+$ e3 get . production.tasks.predict.output
+$ e3 set . production.inputs.sales ./new_sales.beast2
 
-# Rerun - only affected dataflows execute
+# Rerun - only affected tasks execute
 $ e3 start . production
 [1/3] preprocess... cached
 [2/3] train... cached
@@ -114,11 +126,9 @@ An e3 repository is a directory containing configuration, content-addressed stor
 │       └── e847...                   # An execution result
 │
 ├── packages/                         # Installed packages (refs)
-│   ├── east-python/
-│   │   └── 1.2.0                     # Contains: 3a8f2b... → objects/3a/8f2b...
 │   └── acme-forecast/
-│       ├── 0.20.0                    # Contains: 7d3e1a...
-│       └── 0.21.1                    # Contains: 9b4c2f...
+│       ├── 0.20.0                    # Contains: 7d3e1a... → objects/7d/3e1a...
+│       └── 0.21.1                    # Contains: 9b4c2f... → objects/9b/4c2f...
 │
 ├── executions/                       # Execution history for tasks
 │   └── c4f9a2.../                    # Input hash (hash of all input values)
@@ -165,11 +175,11 @@ Note that e3 will martial the inputs into a scratch space for the task
 
 #### `objects/`
 
-Content-addressed storage for all immutable data. Objects are stored by SHA256 hash, split into subdirectories by first two hex characters (like git). Everything ends up here: module IR, task definitions, dataset values, execution results, package manifests.
+Content-addressed storage for all immutable data. Objects are stored by SHA256 hash, split into subdirectories by first two hex characters (like git). Everything ends up here: module IR, task definitions, dataset values, execution results, packages.
 
 #### `packages/`
 
-Installed packages. Each `<name>/<version>` file is a ref pointing to a package object in `objects/`. Package objects contain refs to their modules, tasks, dataflows, and datasets.
+Installed packages. Each `<name>/<version>` file is a ref pointing to a package object in `objects/`. Package objects contain refs to their tasks, data structure, and initial values.
 
 When you `e3 package add . acme-forecast`:
 1. Package object and all referenced objects stored in `objects/`
@@ -191,7 +201,7 @@ Stateful namespaces where you work with data. Each workspace has:
 - `package` - Ref to the deployed package (e.g., `acme-forecast/0.21.1`)
 - `root` - Ref to the root DataObject (a struct matching package's dataset schema)
 
-Workspaces follow the "template" defined by their package: the dataflows determine what tasks run and how datasets connect. But the actual data values can differ between workspaces.
+Workspaces follow the "template" defined by their package: the tasks determine what computations run and how datasets connect. But the actual data values can differ between workspaces.
 
 The workspace root is a tree structure (like a git commit's root tree) enabling:
 - **Atomic updates**: Swap one ref to update entire workspace
@@ -225,12 +235,12 @@ All data in `objects/` is one of these types:
 
 | Object | Description | Defined in |
 |--------|-------------|------------|
-| **Package** | Bundle of modules, tasks, dataflows, datasets | Packages section |
+| **Package** | Bundle of tasks, data structure, initial values | Packages section |
 | **Module** | East IR + imports | Packages section |
-| **Task** | How to run a computation (init + run commands) | Tasks & Execution section |
+| **Task** | How to run a computation (runner + input/output paths) | Tasks & Execution section |
 | **Data** | East values as trees or blobs | Data Objects section |
 
-Objects reference each other by hash. A package contains hashes pointing to its modules and tasks. A task contains hashes pointing to module IR and init files.
+Objects reference each other by hash. A package contains hashes pointing to its tasks. A task contains paths to datasets (where input data and function IR are read, and where outputs are written).
 
 ### Data Tree Objects
 
@@ -260,7 +270,7 @@ The more dynamic types will allow for data partitioning and dataflow patterns li
 ```east
 (
     inputs = .tree "a1bc56...",
-    outputs = .tree "d4e5f6...",
+    tasks = .tree "d4e5f6...",
 )
 ```
 
@@ -268,17 +278,26 @@ The more dynamic types will allow for data partitioning and dataflow patterns li
 
 ```east
 (
-    sales = .object "7c91d4...",
-    features = .object "8d2e7f...",
+    sales = .value "7c91d4...",
+    features = .value "8d2e7f...",
 )
 ```
 
-**Example: outputs struct**
+**Example: tasks struct**
 
 ```east
 (
-    model = .unassigned,
-    predictions = .unassigned,
+    train = .tree "b2c3d4...",
+    predict = .tree "e5f6a7...",
+)
+```
+
+**Example: task subtree (tasks/train)**
+
+```east
+(
+    function_ir = .value "1a2b3c...",   // The compiled IR (private)
+    output = .unassigned,                // Task output (initially unassigned)
 )
 ```
 
@@ -301,8 +320,8 @@ The more dynamic types will allow for data partitioning and dataflow patterns li
 | Object | References |
 |--------|------------|
 | PackageObject | `tasks` → TaskObject hashes |
-| | `datasets.root` → TreeObject hash (root of data tree) |
-| TaskObject | Any fixed input DataObject hashes |
+| | `data.value` → TreeObject hash (root of data tree) |
+| TaskObject | None (contains paths, not hashes) |
 | TreeObject | `.value` refs → DataObject hashes (blobs) |
 | | `.tree` refs → TreeObject hashes (subtrees) |
 | | `.null` / `.unassigned` → None (terminal) |
@@ -312,13 +331,16 @@ The more dynamic types will allow for data partitioning and dataflow patterns li
 **Bundled** (`.zip` for distribution):
 ```
 acme-forecast-0.21.1.zip
-├── manifest.east     # Package name, version, root object hash
+├── packages/
+│   └── acme-forecast/
+│       └── 0.21.1              # Ref to package object hash
 └── objects/
     ├── 3a/8f2b...
     ├── 7c/91d4...
     └── ...
 ```
 - All objects inline in a zip file
+- Package identity via path structure (no separate manifest)
 - Self-contained, can be copied anywhere
 - Produced by TypeScript build, `e3 package export`, or `e3 workspace export`
 - Streaming I/O via `yauzl`/`yazl` (no need to load into RAM)
@@ -331,7 +353,7 @@ acme-forecast-0.21.1.zip
 
 ## Packages
 
-A **package** bundles everything needed to run computations: modules, tasks, dataflows, and datasets. Packages are:
+A **package** bundles everything needed to run computations: task objects, data structure, and initial values. Packages are:
 - **Defined in TypeScript** using the e3 SDK
 - **Distributed as `.zip`** files (bundled form)
 - **Installed as refs** to objects in the repository
@@ -342,63 +364,42 @@ A package object is stored in `objects/` and contains refs (hashes) to other obj
 
 ```ts
 type PackageObject = StructType<{
-    name: StringType,
-    version: StringType,
+    // Task objects: name → task object hash
+    tasks: DictType<StringType, StringType>,
 
-    // Refs to other objects (hash strings)
-    tasks: DictType<StringType, StringType>,      // name → task object hash
-
-    // Dataset structure and values
-    datasets: StructType<{
-        schema: DatasetSchema,   // Defines tree vs blob structure (root is always .tree .struct)
+    // Data structure and initial values
+    data: StructType<{
+        structure: Structure,    // Defines tree shape (what's a tree vs dataset)
         value: StringType,       // Hash of root TreeObject
     }>,
-    dataflows: ArrayType<DataflowDef>,            // Orchestration rules
 
     // Future package dependencies:
     // dependencies: DictType<StringType, StringType>,  // pkg name → version
 }>;
 
-// Dataset schema defines the workspace tree structure (what's a tree vs blob)
-type DatasetSchema = VariantType<{
-    obj: EastTypeValue,              // Leaf: task-managed, opaque to orchestrator
-    tree: TreeSchema,                 // Branch: orchestrator-managed, supports iteration
+// Structure defines the workspace tree shape (what's a tree vs dataset)
+type Structure = VariantType<{
+    value: EastTypeValue,                         // Dataset: holds a typed value
+    struct: DictType<StringType, Structure>,      // Tree: has named children
+    // Future variants: array, dict, variant trees
 }>;
 
-type TreeSchema = VariantType<{
-    struct: DictType<StringType, DatasetSchema>,  // Fixed fields
-    // Future variants
-    // - array values
-    // - dict entries
-    // - variant cases
-    // - recursive trees
-}>;
+// TreePath identifies a location in the data tree
+type TreePath = ArrayType<PathSegment>;
 
-// TreePath identifies a location in the dataset tree
-type TreePath = ArrayType<PathComponent>;
-
-type PathComponent = VariantType<{
-    field: StringType,  // .field "name" - struct tree field
+type PathSegment = VariantType<{
+    field: StringType,  // Struct field access
     // Future variants:
-    //  - glob (iterate over array/dict tree entries)
-    //  - variant cases (conditional execution)
-    //  - access multiple struct fields
-    //  - array index / dict key selection
-    //  - recursive trees + loopy tasks
+    //  - index: array element access
+    //  - key: dict key lookup
+    //  - glob: iterate over array/dict entries
 }>;
 
-// Dataflow defines how orchestrator marshals inputs/outputs
-type DataflowDef = VariantType<{
-    task: StructType<{
-        task: StringType,             // Task name in this package
-        inputs: ArrayType<TreePath>,  // TreePath for each input
-        output: TreePath,             // TreePath of output
-    }>,
-    // Future variants:
-    // - shuffle: rearrange nested dynamic datasets to enable partitioned group-by (split-apply-combine) dataflows
-    // - source: External data source (polling, webhooks)
-    // - sink: External data sink (APIs, databases)
-    // - cron: Time-triggered execution
+// Task object: runner + input/output paths (types inferred from structure)
+type TaskObject = StructType<{
+    runner: StringType,           // Runner key (e.g., "east-node")
+    inputs: ArrayType<TreePath>,  // Paths to input datasets
+    output: TreePath,             // Path to output dataset
 }>;
 ```
 
@@ -406,47 +407,44 @@ type DataflowDef = VariantType<{
 
 ```east
 (
-    name = "acme-forecast",
-    version = "0.21.1",
     tasks = {
-        "train": "5e7a3b...",
-        "predict": "c4d5e6...",
+        "train": "5e7a3b...",      // hash of TaskObject
+        "predict": "c4d5e6...",    // hash of TaskObject
     },
 
-    // Dataset structure and initial values
-    datasets = (
-        schema = .tree .struct {
-            "inputs": .tree .struct {
+    data = (
+        structure = .struct {
+            "inputs": .struct {
                 "sales": .value SalesRecordType,
                 "features": .value FeaturesType,
             },
-            "outputs": .tree .struct {
-                "model": .value ModelType,
-                "predictions": .value PredictionType,
+            "tasks": .struct {
+                "train": .struct {
+                    "function_ir": .value FunctionIRType,
+                    "output": .value ModelType,
+                },
+                "predict": .struct {
+                    "function_ir": .value FunctionIRType,
+                    "output": .value PredictionType,
+                },
             },
         },
-        root = "f4a7c2...",  // Hash of root TreeObject (initial/current state)
+        value = "f4a7c2...",  // Hash of root TreeObject (initial values)
     ),
+)
+```
 
-    // Dataflows: how tasks are orchestrated
-    dataflows = [
-        .task (
-            task = "train",
-            inputs = [
-                [.field "inputs", .field "sales", .glob],
-                [.field "inputs", .field "features"],
-            ],
-            output = [.field "outputs", .field "model"],
-        ),
-        .task (
-            task = "predict",
-            inputs = [
-                [.field "outputs", .field "model"],
-                [.field "inputs", .field "sales", .glob],
-            ],
-            output = [.field "outputs", .field "predictions", .glob],
-        ),
+**Example task object (for "train"):**
+
+```east
+(
+    runner = "east-node",
+    inputs = [
+        [.field "tasks", .field "train", .field "function_ir"],
+        [.field "inputs", .field "sales"],
+        [.field "inputs", .field "features"],
     ],
+    output = [.field "tasks", .field "train", .field "output"],
 )
 ```
 
@@ -490,32 +488,29 @@ const ml = $.import("east-python/ml");
 Packages are defined in TypeScript using the e3 SDK:
 
 ```typescript
-import { East } from '@elaraai/east';
-import { e3 } from '@elaraai/e3-sdk';
+import { ArrayType } from '@elaraai/east';
+import e3 from '@elaraai/e3';
 
-// input dataset - loaded from ./inputs/sales.* (user can provide .beast2, .east or .json)
-const sales = e3.input("sales", ArrayType(...), /* default value goes here */)
+// Input dataset at .inputs.sales
+const sales = e3.input("sales", ArrayType(...), /* default value goes here */);
 
-// Define a dataflow step from a function
-const trainFunction = East.function([ArrayType(...)], output_type, ($) => {
-    // ... East code
+// Define a task - creates .tasks.train.function_ir and .tasks.train.output
+const train = e3.task("train", [sales], ($, salesData) => {
+    // ... East function body
+    return model;
 });
-const pipeline = e3.dataflow("train", [sales], trainFunction); 
 
-// Or define it inline
-const pipeline = e3.dataflow("train", [sales], $ => { ... }); 
+// Chain tasks - train.output is at .tasks.train.output
+const predict = e3.task("predict", [train.output, sales], ($, model, salesData) => {
+    // ... East function body
+    return predictions;
+});
 
-// Construct the package bundle
-const pkg = e3.package(
-    {
-        name: "acme-forecast",
-        version: "0.21.0",
-    },
-    pipeline, // automatically infers any dependencies (input datasets, upstream dataflows, etc)
-    // ... can add more
-);
+// Construct the package - dependencies collected automatically
+const pkg = e3.package("acme-forecast", "0.21.0", predict);
 
-await pkg.save(/* defaults to save at ./acme-forecast-0.21.0.zip */);
+// Export to zip
+await e3.export(pkg, "./acme-forecast-0.21.0.zip");
 ```
 
 There is a lot of freedom to import and bundle "pure" East modules defined in other npm packages, dynamically link with e3 packages, define logic inline, or more.
@@ -524,20 +519,19 @@ Simply run the script to produce the `acme-forecast-0.21.0.zip` bundle.
 
 ## Tasks & Execution
 
-A **task** is an object that defines how to run a computation. Tasks are stored in `objects/` and referenced by packages.
+A **task object** defines how to run a computation: a runner key plus paths to input and output datasets. Tasks are stored in `objects/` and referenced by packages.
 
 ### Task Object
 
 ```ts
 type TaskObject = StructType<{
-    runner: StringType,
-    inputs: ArrayType<StructType<{
-        type: EastType,
-        value: OptionType<StringType>, // object hash for "fixed" values
-    }>,
-    output: EastType,
+    runner: StringType,           // Runner key (e.g., "east-node")
+    inputs: ArrayType<TreePath>,  // Paths to input datasets
+    output: TreePath,             // Path to output dataset
 }>;
 ```
+
+Input/output types are inferred from the package's structure at those paths - the task just references locations, not types.
 
 ### Example: Node.js Task
 
@@ -545,10 +539,10 @@ type TaskObject = StructType<{
 (
     runner = "east-node",
     inputs = [
-        ( type = IRValueType, value = .some pipelineFunction.to_ir().ir ),
-        ( type = ArrayType(...), value = .none ),
+        [.field "tasks", .field "train", .field "function_ir"],
+        [.field "inputs", .field "sales"],
     ],
-    output = ...
+    output = [.field "tasks", .field "train", .field "output"],
 )
 ```
 
@@ -650,56 +644,32 @@ This means:
 - Re-running unchanged computation → instant cache hit
 - User can handle failures manually
 
-Note e3 MPV has no capability for the user to concurrently launch multiple tasks or dataflow (use `e3 start` to get it to handle this in a single process).
+Note e3 MVP has no capability for the user to concurrently launch multiple tasks (use `e3 start` to get it to handle this in a single process).
 Possibly we should use a repository-wide lock file to handle this.
 
-## Dataflows
-
-A **dataflow** connects a task to dataset paths. Dataflows are defined inline in the package object (not separate objects).
-
-```east
-dataflows = {
-    "train": (task = "train", inputs = ["inputs/sales"], output = "model"),
-    "predict": (task = "predict", inputs = ["outputs/train/model"], output = "forecast"),
-}
-```
-
-- `task` - name of a task in this package
-- `inputs` - dataset paths to read
-- `output` - name of output dataset (stored at `outputs/<dataflow>/output`)
-
-In TypeScript:
-
-```typescript
-e3.dataflow("train", [sales], trainTask);
-```
-
-In future, we'll add the ability to destructure outputs to allow multiple named outputs.
-We can similarly generalize inputs to enable different patterns, including scatter-gather tasks, etc.
-
-### Running Dataflows
+## Running Tasks
 
 ```bash
-# Run all dataflows in a workspace (like `make`)
+# Run all tasks in a workspace (like `make`)
 $ e3 start . production
 [1/3] preprocess... done (0.5s)
 [2/3] train... cached
 [3/3] predict... done (1.2s)
 
-# Watch for changes and re-run affected dataflows
+# Watch for changes and re-run affected tasks
 $ e3 start . production --watch
-Watching inputs/... (Ctrl+C to stop)
+Watching for changes... (Ctrl+C to stop)
 ```
 
-The full dataflow DAG is implicit - all dataflows in the package, connected by their input/output paths.
+The task DAG is implicit - all tasks in the package, connected by their input/output paths.
 
-`e3 start` topologically sorts dataflows by their input/output dependencies and executes them in order. Cached results are used when inputs haven't changed.
-With the `--watch` flag it will use inotify to watch for changed values (when an external process changes the workspace root dataset) and propagate them.
+`e3 start` topologically sorts tasks by their input/output dependencies and executes them in order. Cached results are used when inputs haven't changed.
+With the `--watch` flag it will use inotify to watch for changed values (when an external process changes the workspace data) and propagate them.
 
 ### Selective Execution
 
 ```bash
-# Run a specific dataflow
+# Run a specific task
 $ e3 start . production train
 ```
 
