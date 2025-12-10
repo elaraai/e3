@@ -1,19 +1,20 @@
 /**
+ * Copyright (c) 2025 Elara AI Pty Ltd
+ * Dual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.
+ */
+
+/**
  * Tests for repository.ts
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  initRepository,
-  isValidRepository,
-  findRepository,
-  getRepository,
-  setTaskRef,
-  deleteTaskRef,
-  listTaskRefs,
+  repoInit,
+  repoFind,
+  repoGet,
 } from './repository.js';
 import { createTempDir, removeTempDir } from './test-helpers.js';
 
@@ -28,30 +29,39 @@ describe('repository', () => {
     removeTempDir(testDir);
   });
 
-  describe('initRepository', () => {
+  describe('repoInit', () => {
     it('creates .e3 directory', () => {
-      const result = initRepository(testDir);
+      const result = repoInit(testDir);
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(existsSync(join(testDir, '.e3')), true);
     });
 
     it('creates all required directories', () => {
-      const result = initRepository(testDir);
+      const result = repoInit(testDir);
 
       assert.strictEqual(result.success, true);
 
       const e3Dir = join(testDir, '.e3');
       assert.strictEqual(existsSync(join(e3Dir, 'objects')), true);
-      assert.strictEqual(existsSync(join(e3Dir, 'queue', 'node')), true);
-      assert.strictEqual(existsSync(join(e3Dir, 'claims', 'node')), true);
-      assert.strictEqual(existsSync(join(e3Dir, 'refs', 'tasks')), true);
-      assert.strictEqual(existsSync(join(e3Dir, 'tasks')), true);
-      assert.strictEqual(existsSync(join(e3Dir, 'tmp')), true);
+      assert.strictEqual(existsSync(join(e3Dir, 'packages')), true);
+      assert.strictEqual(existsSync(join(e3Dir, 'executions')), true);
+      assert.strictEqual(existsSync(join(e3Dir, 'workspaces')), true);
+    });
+
+    it('creates empty config file', () => {
+      const result = repoInit(testDir);
+
+      assert.strictEqual(result.success, true);
+
+      const e3Dir = join(testDir, '.e3');
+      const configPath = join(e3Dir, 'e3.east');
+      assert.strictEqual(existsSync(configPath), true);
+      assert.strictEqual(readFileSync(configPath, 'utf-8'), '');
     });
 
     it('returns e3Dir path in result', () => {
-      const result = initRepository(testDir);
+      const result = repoInit(testDir);
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.e3Dir, join(testDir, '.e3'));
@@ -59,11 +69,11 @@ describe('repository', () => {
 
     it('fails if .e3 already exists', () => {
       // First init succeeds
-      const result1 = initRepository(testDir);
+      const result1 = repoInit(testDir);
       assert.strictEqual(result1.success, true);
 
       // Second init fails
-      const result2 = initRepository(testDir);
+      const result2 = repoInit(testDir);
       assert.strictEqual(result2.success, false);
       assert.strictEqual(result2.alreadyExists, true);
       assert.strictEqual(result2.error?.message.includes('already exists'), true);
@@ -73,7 +83,7 @@ describe('repository', () => {
       const nestedDir = join(testDir, 'foo', 'bar', 'baz');
       mkdirSync(nestedDir, { recursive: true });
 
-      const result = initRepository(nestedDir);
+      const result = repoInit(nestedDir);
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(existsSync(join(nestedDir, '.e3')), true);
@@ -84,7 +94,7 @@ describe('repository', () => {
       try {
         process.chdir(testDir);
 
-        const result = initRepository('.');
+        const result = repoInit('.');
 
         assert.strictEqual(result.success, true);
         assert.strictEqual(existsSync(join(testDir, '.e3')), true);
@@ -94,146 +104,60 @@ describe('repository', () => {
     });
   });
 
-  describe('isValidRepository', () => {
-    it('returns true for valid repository', () => {
-      initRepository(testDir);
-
-      const e3Dir = join(testDir, '.e3');
-      const isValid = isValidRepository(e3Dir);
-
-      assert.strictEqual(isValid, true);
-    });
-
-    it('returns false for non-existent directory', () => {
-      const isValid = isValidRepository(join(testDir, 'nonexistent'));
-
-      assert.strictEqual(isValid, false);
-    });
-
-    it('returns false if missing objects directory', () => {
-      initRepository(testDir);
-
-      const e3Dir = join(testDir, '.e3');
-      const objectsDir = join(e3Dir, 'objects');
-      removeTempDir(objectsDir);
-
-      const isValid = isValidRepository(e3Dir);
-
-      assert.strictEqual(isValid, false);
-    });
-
-    it('returns false if missing queue directory', () => {
-      initRepository(testDir);
-
-      const e3Dir = join(testDir, '.e3');
-      const queueDir = join(e3Dir, 'queue');
-      removeTempDir(queueDir);
-
-      const isValid = isValidRepository(e3Dir);
-
-      assert.strictEqual(isValid, false);
-    });
-
-    it('returns false if missing refs directory', () => {
-      initRepository(testDir);
-
-      const e3Dir = join(testDir, '.e3');
-      const refsDir = join(e3Dir, 'refs');
-      removeTempDir(refsDir);
-
-      const isValid = isValidRepository(e3Dir);
-
-      assert.strictEqual(isValid, false);
-    });
-
-    it('returns false if missing tasks directory', () => {
-      initRepository(testDir);
-
-      const e3Dir = join(testDir, '.e3');
-      const tasksDir = join(e3Dir, 'tasks');
-      removeTempDir(tasksDir);
-
-      const isValid = isValidRepository(e3Dir);
-
-      assert.strictEqual(isValid, false);
-    });
-
-    it('returns false if missing tmp directory', () => {
-      initRepository(testDir);
-
-      const e3Dir = join(testDir, '.e3');
-      const tmpDir = join(e3Dir, 'tmp');
-      removeTempDir(tmpDir);
-
-      const isValid = isValidRepository(e3Dir);
-
-      assert.strictEqual(isValid, false);
-    });
-
-    it('returns false for empty directory', () => {
-      const emptyDir = join(testDir, 'empty');
-      mkdirSync(emptyDir);
-
-      const isValid = isValidRepository(emptyDir);
-
-      assert.strictEqual(isValid, false);
-    });
-  });
-
-  describe('findRepository', () => {
+  describe('repoFind', () => {
     it('finds repository in current directory', () => {
-      initRepository(testDir);
+      repoInit(testDir);
 
-      const found = findRepository(testDir);
+      const found = repoFind(testDir);
 
       assert.strictEqual(found, join(testDir, '.e3'));
     });
 
     it('finds repository in parent directory', () => {
-      initRepository(testDir);
+      repoInit(testDir);
 
       const subDir = join(testDir, 'subdir');
       mkdirSync(subDir);
 
-      const found = findRepository(subDir);
+      const found = repoFind(subDir);
 
       assert.strictEqual(found, join(testDir, '.e3'));
     });
 
     it('finds repository in ancestor directory', () => {
-      initRepository(testDir);
+      repoInit(testDir);
 
       const deepDir = join(testDir, 'a', 'b', 'c', 'd');
       mkdirSync(deepDir, { recursive: true });
 
-      const found = findRepository(deepDir);
+      const found = repoFind(deepDir);
 
       assert.strictEqual(found, join(testDir, '.e3'));
     });
 
     it('returns null if no repository found', () => {
-      const found = findRepository(testDir);
+      const found = repoFind(testDir);
 
       assert.strictEqual(found, null);
     });
 
     it('prefers closer repository', () => {
       // Create repo in testDir
-      initRepository(testDir);
+      repoInit(testDir);
 
       // Create nested dir and repo there
       const nestedDir = join(testDir, 'nested');
       mkdirSync(nestedDir);
-      initRepository(nestedDir);
+      repoInit(nestedDir);
 
-      const found = findRepository(nestedDir);
+      const found = repoFind(nestedDir);
 
       // Should find the closer one
       assert.strictEqual(found, join(nestedDir, '.e3'));
     });
 
     it('uses E3_REPO environment variable if set', () => {
-      initRepository(testDir);
+      repoInit(testDir);
 
       const originalEnv = process.env.E3_REPO;
       try {
@@ -241,7 +165,7 @@ describe('repository', () => {
 
         // Find from different directory
         const otherDir = createTempDir();
-        const found = findRepository(otherDir);
+        const found = repoFind(otherDir);
 
         assert.strictEqual(found, join(testDir, '.e3'));
 
@@ -256,13 +180,13 @@ describe('repository', () => {
     });
 
     it('ignores invalid E3_REPO', () => {
-      initRepository(testDir);
+      repoInit(testDir);
 
       const originalEnv = process.env.E3_REPO;
       try {
         process.env.E3_REPO = join(testDir, 'nonexistent');
 
-        const found = findRepository(testDir);
+        const found = repoFind(testDir);
 
         // Should fall back to directory search
         assert.strictEqual(found, join(testDir, '.e3'));
@@ -274,146 +198,70 @@ describe('repository', () => {
         }
       }
     });
+
+    it('returns false if missing objects directory', () => {
+      repoInit(testDir);
+
+      const e3Dir = join(testDir, '.e3');
+      const objectsDir = join(e3Dir, 'objects');
+      rmSync(objectsDir, { recursive: true });
+
+      const found = repoFind(testDir);
+
+      assert.strictEqual(found, null);
+    });
+
+    it('returns false if missing packages directory', () => {
+      repoInit(testDir);
+
+      const e3Dir = join(testDir, '.e3');
+      const packagesDir = join(e3Dir, 'packages');
+      rmSync(packagesDir, { recursive: true });
+
+      const found = repoFind(testDir);
+
+      assert.strictEqual(found, null);
+    });
+
+    it('returns false if missing executions directory', () => {
+      repoInit(testDir);
+
+      const e3Dir = join(testDir, '.e3');
+      const executionsDir = join(e3Dir, 'executions');
+      rmSync(executionsDir, { recursive: true });
+
+      const found = repoFind(testDir);
+
+      assert.strictEqual(found, null);
+    });
+
+    it('returns false if missing workspaces directory', () => {
+      repoInit(testDir);
+
+      const e3Dir = join(testDir, '.e3');
+      const workspacesDir = join(e3Dir, 'workspaces');
+      rmSync(workspacesDir, { recursive: true });
+
+      const found = repoFind(testDir);
+
+      assert.strictEqual(found, null);
+    });
   });
 
-  describe('getRepository', () => {
+  describe('repoGet', () => {
     it('returns repository path if found', () => {
-      initRepository(testDir);
+      repoInit(testDir);
 
-      const repo = getRepository(testDir);
+      const repo = repoGet(testDir);
 
       assert.strictEqual(repo, join(testDir, '.e3'));
     });
 
     it('throws if repository not found', () => {
       assert.throws(
-        () => getRepository(testDir),
+        () => repoGet(testDir),
         /e3 repository not found/
       );
-    });
-  });
-
-  describe('setTaskRef', () => {
-    let repoPath: string;
-
-    beforeEach(() => {
-      initRepository(testDir);
-      repoPath = join(testDir, '.e3');
-    });
-
-    it('creates task ref file', async () => {
-      const taskId = 'abc123';
-      await setTaskRef(repoPath, 'my-task', taskId);
-
-      const refPath = join(repoPath, 'refs', 'tasks', 'my-task');
-      assert.strictEqual(existsSync(refPath), true);
-    });
-
-    it('writes task ID to ref file', async () => {
-      const taskId = 'abc123';
-      await setTaskRef(repoPath, 'my-task', taskId);
-
-      const refPath = join(repoPath, 'refs', 'tasks', 'my-task');
-      const content = await import('fs/promises').then((fs) => fs.readFile(refPath, 'utf-8'));
-
-      assert.strictEqual(content, taskId);
-    });
-
-    it('overwrites existing ref', async () => {
-      await setTaskRef(repoPath, 'my-task', 'abc123');
-      await setTaskRef(repoPath, 'my-task', 'def456');
-
-      const refPath = join(repoPath, 'refs', 'tasks', 'my-task');
-      const content = await import('fs/promises').then((fs) => fs.readFile(refPath, 'utf-8'));
-
-      assert.strictEqual(content, 'def456');
-    });
-
-    it('handles refs with special characters', async () => {
-      await setTaskRef(repoPath, 'my-task_v2.0', 'abc123');
-
-      const refPath = join(repoPath, 'refs', 'tasks', 'my-task_v2.0');
-      assert.strictEqual(existsSync(refPath), true);
-    });
-  });
-
-  describe('deleteTaskRef', () => {
-    let repoPath: string;
-
-    beforeEach(() => {
-      initRepository(testDir);
-      repoPath = join(testDir, '.e3');
-    });
-
-    it('deletes existing ref', async () => {
-      await setTaskRef(repoPath, 'my-task', 'abc123');
-
-      const refPath = join(repoPath, 'refs', 'tasks', 'my-task');
-      assert.strictEqual(existsSync(refPath), true);
-
-      await deleteTaskRef(repoPath, 'my-task');
-
-      assert.strictEqual(existsSync(refPath), false);
-    });
-
-    it('throws if ref does not exist', async () => {
-      await assert.rejects(
-        async () => await deleteTaskRef(repoPath, 'nonexistent'),
-        /ENOENT/
-      );
-    });
-  });
-
-  describe('listTaskRefs', () => {
-    let repoPath: string;
-
-    beforeEach(() => {
-      initRepository(testDir);
-      repoPath = join(testDir, '.e3');
-    });
-
-    it('returns empty array for no refs', async () => {
-      const refs = await listTaskRefs(repoPath);
-
-      assert.deepStrictEqual(refs, []);
-    });
-
-    it('lists single ref', async () => {
-      await setTaskRef(repoPath, 'task1', 'abc123');
-
-      const refs = await listTaskRefs(repoPath);
-
-      assert.deepStrictEqual(refs, ['task1']);
-    });
-
-    it('lists multiple refs', async () => {
-      await setTaskRef(repoPath, 'task1', 'abc123');
-      await setTaskRef(repoPath, 'task2', 'def456');
-      await setTaskRef(repoPath, 'task3', 'ghi789');
-
-      const refs = await listTaskRefs(repoPath);
-      refs.sort(); // Sort for consistent comparison
-
-      assert.deepStrictEqual(refs, ['task1', 'task2', 'task3']);
-    });
-
-    it('does not include deleted refs', async () => {
-      await setTaskRef(repoPath, 'task1', 'abc123');
-      await setTaskRef(repoPath, 'task2', 'def456');
-      await deleteTaskRef(repoPath, 'task1');
-
-      const refs = await listTaskRefs(repoPath);
-
-      assert.deepStrictEqual(refs, ['task2']);
-    });
-
-    it('returns empty array if refs directory does not exist', async () => {
-      // Remove refs directory
-      removeTempDir(join(repoPath, 'refs'));
-
-      const refs = await listTaskRefs(repoPath);
-
-      assert.deepStrictEqual(refs, []);
     });
   });
 });

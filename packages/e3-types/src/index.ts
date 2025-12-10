@@ -77,3 +77,9 @@ export {
   emptyConfig,
 } from './config.js';
 
+// Workspace state
+export {
+  WorkspaceStateType,
+  type WorkspaceState,
+} from './workspace.js';
+

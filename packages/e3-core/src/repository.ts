@@ -19,9 +19,17 @@ export interface InitRepositoryResult {
 
 /**
  * Initialize a new e3 repository
+ *
+ * Creates:
+ * - e3.east (empty config)
+ * - objects/
+ * - packages/
+ * - executions/
+ * - workspaces/
+ *
  * Pure business logic - no UI dependencies
  */
-export function initRepository(repoPath: string): InitRepositoryResult {
+export function repoInit(repoPath: string): InitRepositoryResult {
   const targetPath = path.resolve(repoPath);
   const e3Dir = path.join(targetPath, '.e3');
 
@@ -39,23 +47,20 @@ export function initRepository(repoPath: string): InitRepositoryResult {
     // Create main .e3 directory
     fs.mkdirSync(e3Dir, { recursive: true });
 
-    // Create objects directory
+    // Create empty config file
+    fs.writeFileSync(path.join(e3Dir, 'e3.east'), '');
+
+    // Create objects directory (content-addressed storage)
     fs.mkdirSync(path.join(e3Dir, 'objects'), { recursive: true });
 
-    // Create queue directory for node runtime
-    fs.mkdirSync(path.join(e3Dir, 'queue', 'node'), { recursive: true });
+    // Create packages directory (package refs: packages/<name>/<version> -> hash)
+    fs.mkdirSync(path.join(e3Dir, 'packages'), { recursive: true });
 
-    // Create claims directory for node runtime
-    fs.mkdirSync(path.join(e3Dir, 'claims', 'node'), { recursive: true });
+    // Create executions directory (execution cache: executions/<hash>/output -> hash)
+    fs.mkdirSync(path.join(e3Dir, 'executions'), { recursive: true });
 
-    // Create refs directory for named task references
-    fs.mkdirSync(path.join(e3Dir, 'refs', 'tasks'), { recursive: true });
-
-    // Create tasks directory (task_id -> commit_hash mapping)
-    fs.mkdirSync(path.join(e3Dir, 'tasks'), { recursive: true });
-
-    // Create tmp directory for atomic operations
-    fs.mkdirSync(path.join(e3Dir, 'tmp'), { recursive: true });
+    // Create workspaces directory (workspace state)
+    fs.mkdirSync(path.join(e3Dir, 'workspaces'), { recursive: true });
 
     return {
       success: true,
@@ -72,9 +77,10 @@ export function initRepository(repoPath: string): InitRepositoryResult {
 
 /**
  * Validate that a directory is a valid e3 repository
+ * @internal
  */
-export function isValidRepository(repoPath: string): boolean {
-  const requiredDirs = ['objects', 'queue', 'refs', 'tasks', 'tmp'];
+function isValidRepository(repoPath: string): boolean {
+  const requiredDirs = ['objects', 'packages', 'executions', 'workspaces'];
 
   return requiredDirs.every((dir) => fs.existsSync(path.join(repoPath, dir)));
 }
@@ -86,7 +92,7 @@ export function isValidRepository(repoPath: string): boolean {
  * 1. E3_REPO environment variable
  * 2. Current directory and parents (like git)
  */
-export function findRepository(startPath?: string): string | null {
+export function repoFind(startPath?: string): string | null {
   // 1. Check E3_REPO environment variable
   if (process.env.E3_REPO) {
     const repoPath = path.resolve(process.env.E3_REPO);
@@ -117,8 +123,8 @@ export function findRepository(startPath?: string): string | null {
 /**
  * Get the e3 repository, throw error if not found
  */
-export function getRepository(repoPath?: string): string {
-  const repo = findRepository(repoPath);
+export function repoGet(repoPath?: string): string {
+  const repo = repoFind(repoPath);
 
   if (!repo) {
     throw new Error('e3 repository not found. Run `e3 init` to create one.');
@@ -127,37 +133,3 @@ export function getRepository(repoPath?: string): string {
   return repo;
 }
 
-/**
- * Set a named task reference
- */
-export async function setTaskRef(
-  repoPath: string,
-  refName: string,
-  taskId: string
-): Promise<void> {
-  const refPath = path.join(repoPath, 'refs', 'tasks', refName);
-  await fsPromises.writeFile(refPath, taskId);
-}
-
-/**
- * Delete a named task reference
- */
-export async function deleteTaskRef(
-  repoPath: string,
-  refName: string
-): Promise<void> {
-  const refPath = path.join(repoPath, 'refs', 'tasks', refName);
-  await fsPromises.unlink(refPath);
-}
-
-/**
- * List all task refs
- */
-export async function listTaskRefs(repoPath: string): Promise<string[]> {
-  const refsDir = path.join(repoPath, 'refs', 'tasks');
-  try {
-    return await fsPromises.readdir(refsDir);
-  } catch {
-    return [];
-  }
-}

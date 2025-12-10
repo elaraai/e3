@@ -13,57 +13,48 @@
 
 // Repository management
 export {
-  initRepository,
-  isValidRepository,
-  findRepository,
-  getRepository,
-  setTaskRef,
-  deleteTaskRef,
-  listTaskRefs,
+  repoInit,
+  repoFind,
+  repoGet,
   type InitRepositoryResult,
 } from './repository.js';
+
+// Garbage collection
+export { repoGc, type GcOptions, type GcResult } from './gc.js';
 
 // Object storage
 export {
   computeHash,
-  storeObject,
-  loadObject,
-  computeTaskId,
-  storeObjectFromStream,
-  computeHashFromStream,
+  objectWrite,
+  objectWriteStream,
+  objectRead,
+  objectExists,
+  objectPath,
+  objectAbbrev,
 } from './objects.js';
 
-// Commits
+// Package operations
 export {
-  createNewTaskCommit,
-  createTaskDoneCommit,
-  createTaskErrorCommit,
-  createTaskFailCommit,
-  loadCommit,
-} from './commits.js';
+  packageImport,
+  packageExport,
+  packageRemove,
+  packageList,
+  packageResolve,
+  packageRead,
+  type PackageImportResult,
+  type PackageExportResult,
+} from './packages.js';
 
-// Task state
+// Workspace operations
 export {
-  updateTaskState,
-  getTaskState,
-  listTasks,
-} from './tasks.js';
-
-// Resolution
-export {
-  resolveToTaskId,
-  resolveToCommit,
-  resolveObjectHash,
-} from './resolve.js';
-
-// Format utilities
-export {
-  loadIR,
-  irToBeast2,
-  loadValue,
-  valueToBeast2,
-  formatEast,
-  parseEast,
-  loadBeast2,
-  writeStreamToFile,
-} from './formats.js';
+  workspaceCreate,
+  workspaceRemove,
+  workspaceList,
+  workspaceGetState,
+  workspaceGetPackage,
+  workspaceGetRoot,
+  workspaceSetRoot,
+  workspaceDeploy,
+  workspaceExport,
+  type WorkspaceExportResult,
+} from './workspaces.js';

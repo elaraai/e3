@@ -19,8 +19,9 @@ export function computeHash(data: Uint8Array): string {
 
 /**
  * Calculate SHA256 hash of a stream
+ * @internal
  */
-export async function computeHashFromStream(
+async function computeHashFromStream(
   stream: ReadableStream<Uint8Array>
 ): Promise<{ hash: string; data: Uint8Array[] }> {
   const hash = crypto.createHash('sha256');
@@ -43,18 +44,17 @@ export async function computeHashFromStream(
 }
 
 /**
- * Atomically store an object in the repository
+ * Atomically write an object to the repository
  *
  * @param repoPath - Path to .e3 repository
  * @param data - Data to store
- * @param extension - File extension (e.g., '.beast2', '.east')
  * @returns SHA256 hash of the data
  */
-export async function storeObject(
+export async function objectWrite(
   repoPath: string,
-  data: Uint8Array,
-  extension: string = '.beast2'
+  data: Uint8Array
 ): Promise<string> {
+  const extension = '.beast2';
   const hash = computeHash(data);
 
   // Split hash: first 2 chars as directory
@@ -75,27 +75,47 @@ export async function storeObject(
   // Create directory if needed
   await fs.mkdir(dirPath, { recursive: true });
 
-  // Write atomically: tmp file + rename
-  const tmpPath = path.join(repoPath, 'tmp', `${hash}-${Date.now()}`);
-  await fs.writeFile(tmpPath, data);
-  await fs.rename(tmpPath, filePath);
+  // Write atomically: stage in same directory (same filesystem) + rename
+  // Staging files use .partial extension; gc can clean up any orphaned ones
+  // Use random suffix to avoid collisions with concurrent writes
+  const randomSuffix = Math.random().toString(36).slice(2, 10);
+  const stagingPath = path.join(dirPath, `${fileName}.${Date.now()}.${randomSuffix}.partial`);
+  await fs.writeFile(stagingPath, data);
+
+  try {
+    await fs.rename(stagingPath, filePath);
+  } catch (err) {
+    // If rename fails because target exists (concurrent write won), that's fine
+    // Clean up our staging file
+    try {
+      await fs.unlink(stagingPath);
+    } catch {
+      // Ignore cleanup errors
+    }
+    // Verify the file exists (another writer should have created it)
+    try {
+      await fs.access(filePath);
+    } catch {
+      // File doesn't exist and rename failed - re-throw original error
+      throw err;
+    }
+  }
 
   return hash;
 }
 
 /**
- * Atomically store a stream in the repository
+ * Atomically write a stream to the repository
  *
  * @param repoPath - Path to .e3 repository
  * @param stream - Stream to store
- * @param extension - File extension (e.g., '.beast2', '.east')
  * @returns SHA256 hash of the data
  */
-export async function storeObjectFromStream(
+export async function objectWriteStream(
   repoPath: string,
-  stream: ReadableStream<Uint8Array>,
-  extension: string = '.beast2'
+  stream: ReadableStream<Uint8Array>
 ): Promise<string> {
+  const extension = '.beast2';
   // First pass: compute hash while collecting data
   const { hash, data } = await computeHashFromStream(stream);
 
@@ -117,32 +137,52 @@ export async function storeObjectFromStream(
   // Create directory if needed
   await fs.mkdir(dirPath, { recursive: true });
 
-  // Write atomically: tmp file + rename
-  const tmpPath = path.join(repoPath, 'tmp', `${hash}-${Date.now()}`);
+  // Write atomically: stage in same directory (same filesystem) + rename
+  // Staging files use .partial extension; gc can clean up any orphaned ones
+  // Use random suffix to avoid collisions with concurrent writes
+  const randomSuffix = Math.random().toString(36).slice(2, 10);
+  const stagingPath = path.join(dirPath, `${fileName}.${Date.now()}.${randomSuffix}.partial`);
 
   // Reconstruct stream from collected chunks
   const nodeStream = Readable.from(data);
-  const writeStream = createWriteStream(tmpPath);
+  const writeStream = createWriteStream(stagingPath);
 
   await pipeline(nodeStream, writeStream);
-  await fs.rename(tmpPath, filePath);
+
+  try {
+    await fs.rename(stagingPath, filePath);
+  } catch (err) {
+    // If rename fails because target exists (concurrent write won), that's fine
+    // Clean up our staging file
+    try {
+      await fs.unlink(stagingPath);
+    } catch {
+      // Ignore cleanup errors
+    }
+    // Verify the file exists (another writer should have created it)
+    try {
+      await fs.access(filePath);
+    } catch {
+      // File doesn't exist and rename failed - re-throw original error
+      throw err;
+    }
+  }
 
   return hash;
 }
 
 /**
- * Load an object from the repository
+ * Read an object from the repository
  *
  * @param repoPath - Path to .e3 repository
  * @param hash - SHA256 hash of the object
- * @param extension - File extension (e.g., '.beast2', '.east')
  * @returns Object data
  */
-export async function loadObject(
+export async function objectRead(
   repoPath: string,
-  hash: string,
-  extension: string = '.beast2'
+  hash: string
 ): Promise<Uint8Array> {
+  const extension = '.beast2';
   const dirName = hash.slice(0, 2);
   const fileName = hash.slice(2) + extension;
 
@@ -156,20 +196,92 @@ export async function loadObject(
 }
 
 /**
- * Compute task ID from IR hash, argument hashes, and runtime
+ * Check if an object exists in the repository
  *
- * task_id = SHA256(ir_hash + ":" + arg1_hash + ":" + arg2_hash + ... + [":" + runtime])
+ * @param repoPath - Path to .e3 repository
+ * @param hash - SHA256 hash of the object
+ * @returns true if object exists
  */
-export function computeTaskId(
-  irHash: string,
-  argsHashes: string[],
-  runtime?: string
-): string {
-  const components = [irHash, ...argsHashes];
-  if (runtime) {
-    components.push(runtime);
+export async function objectExists(
+  repoPath: string,
+  hash: string
+): Promise<boolean> {
+  const filePath = objectPath(repoPath, hash);
+
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get the filesystem path for an object
+ *
+ * @param repoPath - Path to .e3 repository
+ * @param hash - SHA256 hash of the object
+ * @returns Filesystem path: objects/<hash[0..2]>/<hash[2..]>.beast2
+ */
+export function objectPath(repoPath: string, hash: string): string {
+  const dirName = hash.slice(0, 2);
+  const fileName = hash.slice(2) + '.beast2';
+  return path.join(repoPath, 'objects', dirName, fileName);
+}
+
+/**
+ * Get the minimum unambiguous prefix length for an object hash.
+ *
+ * Scans the object store to find the shortest prefix of the given hash
+ * that uniquely identifies it among all stored objects.
+ *
+ * @param repoPath - Path to .e3 repository
+ * @param hash - Full SHA256 hash of the object
+ * @param minLength - Minimum prefix length to return (default: 4)
+ * @returns Minimum unambiguous prefix length
+ */
+export async function objectAbbrev(
+  repoPath: string,
+  hash: string,
+  minLength: number = 4
+): Promise<number> {
+  const objectsDir = path.join(repoPath, 'objects');
+  const targetPrefix = hash.slice(0, 2);
+
+  // Collect all hashes that share the same 2-char prefix directory
+  const hashes: string[] = [];
+
+  try {
+    const dirPath = path.join(objectsDir, targetPrefix);
+    const entries = await fs.readdir(dirPath);
+
+    for (const entry of entries) {
+      if (entry.endsWith('.beast2') && !entry.includes('.partial')) {
+        // Reconstruct full hash: dir prefix + filename without extension
+        const fullHash = targetPrefix + entry.slice(0, -7); // remove '.beast2'
+        hashes.push(fullHash);
+      }
+    }
+  } catch {
+    // Directory doesn't exist - hash is unique at minimum length
+    return minLength;
   }
 
-  const taskKey = components.join(':');
-  return crypto.createHash('sha256').update(taskKey).digest('hex');
+  // Find minimum length that disambiguates from all other hashes
+  let length = minLength;
+
+  while (length < hash.length) {
+    const prefix = hash.slice(0, length);
+    const conflicts = hashes.filter(
+      (h) => h !== hash && h.startsWith(prefix)
+    );
+
+    if (conflicts.length === 0) {
+      return length;
+    }
+
+    length++;
+  }
+
+  return hash.length;
 }

@@ -8,11 +8,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   computeHash,
-  computeHashFromStream,
-  storeObject,
-  storeObjectFromStream,
-  loadObject,
-  computeTaskId,
+  objectWrite,
+  objectWriteStream,
+  objectRead,
+  objectExists,
+  objectPath,
+  objectAbbrev,
 } from './objects.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
 
@@ -71,56 +72,17 @@ describe('objects', () => {
     });
   });
 
-  describe('computeHashFromStream', () => {
-    it('computes hash from stream', async () => {
-      const data = new Uint8Array([1, 2, 3]);
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(data);
-          controller.close();
-        },
-      });
-
-      const result = await computeHashFromStream(stream);
-
-      assert.strictEqual(result.hash, '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81');
-      assert.strictEqual(result.data.length, 1);
-      assert.deepStrictEqual(result.data[0], data);
-    });
-
-    it('handles chunked stream', async () => {
-      const chunk1 = new Uint8Array([1, 2]);
-      const chunk2 = new Uint8Array([3]);
-
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(chunk1);
-          controller.enqueue(chunk2);
-          controller.close();
-        },
-      });
-
-      const result = await computeHashFromStream(stream);
-
-      // Should produce same hash as [1, 2, 3]
-      assert.strictEqual(result.hash, '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81');
-      assert.strictEqual(result.data.length, 2);
-      assert.deepStrictEqual(result.data[0], chunk1);
-      assert.deepStrictEqual(result.data[1], chunk2);
-    });
-  });
-
-  describe('storeObject', () => {
+  describe('objectWrite', () => {
     it('stores and returns hash', async () => {
       const data = new Uint8Array([1, 2, 3]);
-      const hash = await storeObject(testRepo, data, '.beast2');
+      const hash = await objectWrite(testRepo, data);
 
       assert.strictEqual(hash, '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81');
     });
 
     it('creates correct directory structure', async () => {
       const data = new Uint8Array([1, 2, 3]);
-      const hash = await storeObject(testRepo, data, '.beast2');
+      const hash = await objectWrite(testRepo, data);
 
       const dirName = hash.slice(0, 2);
       const fileName = hash.slice(2) + '.beast2';
@@ -130,23 +92,11 @@ describe('objects', () => {
       assert.deepStrictEqual(new Uint8Array(stored), data);
     });
 
-    it('uses provided extension', async () => {
-      const data = new Uint8Array([1, 2, 3]);
-      const hash = await storeObject(testRepo, data, '.east');
-
-      const dirName = hash.slice(0, 2);
-      const fileName = hash.slice(2) + '.east';
-      const filePath = join(testRepo, 'objects', dirName, fileName);
-
-      const stored = readFileSync(filePath);
-      assert.deepStrictEqual(new Uint8Array(stored), data);
-    });
-
     it('deduplicates identical data', async () => {
       const data = new Uint8Array([1, 2, 3]);
 
-      const hash1 = await storeObject(testRepo, data, '.beast2');
-      const hash2 = await storeObject(testRepo, data, '.beast2');
+      const hash1 = await objectWrite(testRepo, data);
+      const hash2 = await objectWrite(testRepo, data);
 
       assert.strictEqual(hash1, hash2);
 
@@ -159,31 +109,14 @@ describe('objects', () => {
       assert.deepStrictEqual(new Uint8Array(stored), data);
     });
 
-    it('stores different extensions separately', async () => {
-      const data = new Uint8Array([1, 2, 3]);
-
-      const hash1 = await storeObject(testRepo, data, '.beast2');
-      const hash2 = await storeObject(testRepo, data, '.east');
-
-      assert.strictEqual(hash1, hash2); // Same hash
-
-      // Both files should exist
-      const dirName = hash1.slice(0, 2);
-      const file1 = join(testRepo, 'objects', dirName, hash1.slice(2) + '.beast2');
-      const file2 = join(testRepo, 'objects', dirName, hash2.slice(2) + '.east');
-
-      assert.doesNotThrow(() => readFileSync(file1));
-      assert.doesNotThrow(() => readFileSync(file2));
-    });
-
-    it.skip('handles concurrent writes to same hash', async () => {
+    it('handles concurrent writes to same hash', async () => {
       const data = new Uint8Array([1, 2, 3]);
 
       // Concurrent writes
       const [hash1, hash2, hash3] = await Promise.all([
-        storeObject(testRepo, data, '.beast2'),
-        storeObject(testRepo, data, '.beast2'),
-        storeObject(testRepo, data, '.beast2'),
+        objectWrite(testRepo, data),
+        objectWrite(testRepo, data),
+        objectWrite(testRepo, data),
       ]);
 
       assert.strictEqual(hash1, hash2);
@@ -200,7 +133,7 @@ describe('objects', () => {
 
     it('stores empty data', async () => {
       const data = new Uint8Array([]);
-      const hash = await storeObject(testRepo, data, '.beast2');
+      const hash = await objectWrite(testRepo, data);
 
       assert.strictEqual(hash, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
     });
@@ -209,14 +142,14 @@ describe('objects', () => {
       const data = new Uint8Array(1024 * 1024); // 1MB
       data.fill(42);
 
-      const hash = await storeObject(testRepo, data, '.beast2');
-      const loaded = await loadObject(testRepo, hash, '.beast2');
+      const hash = await objectWrite(testRepo, data);
+      const loaded = await objectRead(testRepo, hash);
 
       assert.deepStrictEqual(new Uint8Array(loaded), data);
     });
   });
 
-  describe('storeObjectFromStream', () => {
+  describe('objectWriteStream', () => {
     it('stores stream and returns hash', async () => {
       const data = new Uint8Array([1, 2, 3]);
       const stream = new ReadableStream({
@@ -226,7 +159,7 @@ describe('objects', () => {
         },
       });
 
-      const hash = await storeObjectFromStream(testRepo, stream, '.beast2');
+      const hash = await objectWriteStream(testRepo, stream);
 
       assert.strictEqual(hash, '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81');
     });
@@ -243,8 +176,8 @@ describe('objects', () => {
         },
       });
 
-      const hash = await storeObjectFromStream(testRepo, stream, '.beast2');
-      const loaded = await loadObject(testRepo, hash, '.beast2');
+      const hash = await objectWriteStream(testRepo, stream);
+      const loaded = await objectRead(testRepo, hash);
 
       // Should reconstruct [1, 2, 3]
       assert.deepStrictEqual(new Uint8Array(loaded), new Uint8Array([1, 2, 3]));
@@ -253,8 +186,8 @@ describe('objects', () => {
     it('deduplicates stream with existing object', async () => {
       const data = new Uint8Array([1, 2, 3]);
 
-      // Store via regular storeObject first
-      const hash1 = await storeObject(testRepo, data, '.beast2');
+      // Store via regular objectWrite first
+      const hash1 = await objectWrite(testRepo, data);
 
       // Store same data via stream
       const stream = new ReadableStream({
@@ -264,27 +197,18 @@ describe('objects', () => {
         },
       });
 
-      const hash2 = await storeObjectFromStream(testRepo, stream, '.beast2');
+      const hash2 = await objectWriteStream(testRepo, stream);
 
       assert.strictEqual(hash1, hash2);
     });
   });
 
-  describe('loadObject', () => {
+  describe('objectRead', () => {
     it('loads stored object', async () => {
       const data = new Uint8Array([1, 2, 3]);
-      const hash = await storeObject(testRepo, data, '.beast2');
+      const hash = await objectWrite(testRepo, data);
 
-      const loaded = await loadObject(testRepo, hash, '.beast2');
-
-      assert.deepStrictEqual(new Uint8Array(loaded), data);
-    });
-
-    it('loads object with different extension', async () => {
-      const data = new Uint8Array([4, 5, 6]);
-      const hash = await storeObject(testRepo, data, '.east');
-
-      const loaded = await loadObject(testRepo, hash, '.east');
+      const loaded = await objectRead(testRepo, hash);
 
       assert.deepStrictEqual(new Uint8Array(loaded), data);
     });
@@ -293,109 +217,116 @@ describe('objects', () => {
       const fakeHash = 'a'.repeat(64);
 
       await assert.rejects(
-        async () => await loadObject(testRepo, fakeHash, '.beast2'),
-        /Object not found/
-      );
-    });
-
-    it('throws on wrong extension', async () => {
-      const data = new Uint8Array([1, 2, 3]);
-      const hash = await storeObject(testRepo, data, '.beast2');
-
-      // Try to load with wrong extension
-      await assert.rejects(
-        async () => await loadObject(testRepo, hash, '.east'),
+        async () => await objectRead(testRepo, fakeHash),
         /Object not found/
       );
     });
 
     it('round-trips correctly', async () => {
       const original = new Uint8Array([7, 8, 9, 10, 11]);
-      const hash = await storeObject(testRepo, original, '.beast2');
-      const loaded = await loadObject(testRepo, hash, '.beast2');
+      const hash = await objectWrite(testRepo, original);
+      const loaded = await objectRead(testRepo, hash);
 
       assert.deepStrictEqual(new Uint8Array(loaded), original);
     });
   });
 
-  describe('computeTaskId', () => {
-    it('computes task ID from IR and args', () => {
-      const irHash = 'a'.repeat(64);
-      const argsHashes = ['b'.repeat(64), 'c'.repeat(64)];
+  describe('objectExists', () => {
+    it('returns true for existing object', async () => {
+      const data = new Uint8Array([1, 2, 3]);
+      const hash = await objectWrite(testRepo, data);
 
-      const taskId = computeTaskId(irHash, argsHashes);
+      const exists = await objectExists(testRepo, hash);
 
-      assert.strictEqual(typeof taskId, 'string');
-      assert.strictEqual(taskId.length, 64);
+      assert.strictEqual(exists, true);
     });
 
-    it('produces same ID for same inputs', () => {
-      const irHash = 'a'.repeat(64);
-      const argsHashes = ['b'.repeat(64)];
+    it('returns false for non-existent object', async () => {
+      const fakeHash = 'a'.repeat(64);
 
-      const taskId1 = computeTaskId(irHash, argsHashes);
-      const taskId2 = computeTaskId(irHash, argsHashes);
+      const exists = await objectExists(testRepo, fakeHash);
 
-      assert.strictEqual(taskId1, taskId2);
+      assert.strictEqual(exists, false);
+    });
+  });
+
+  describe('objectPath', () => {
+    it('returns correct path', () => {
+      const hash = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
+      const path = objectPath(testRepo, hash);
+
+      assert.ok(path.endsWith('objects/03/9058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81.beast2'));
     });
 
-    it('produces different ID for different IR', () => {
-      const argsHashes = ['b'.repeat(64)];
+    it('matches actual stored location', async () => {
+      const data = new Uint8Array([1, 2, 3]);
+      const hash = await objectWrite(testRepo, data);
 
-      const taskId1 = computeTaskId('a'.repeat(64), argsHashes);
-      const taskId2 = computeTaskId('c'.repeat(64), argsHashes);
+      const path = objectPath(testRepo, hash);
+      const stored = readFileSync(path);
 
-      assert.notStrictEqual(taskId1, taskId2);
+      assert.deepStrictEqual(new Uint8Array(stored), data);
+    });
+  });
+
+  describe('objectAbbrev', () => {
+    it('returns minLength for single object', async () => {
+      const data = new Uint8Array([1, 2, 3]);
+      const hash = await objectWrite(testRepo, data);
+
+      const abbrevLen = await objectAbbrev(testRepo, hash);
+
+      assert.strictEqual(abbrevLen, 4); // default minLength
     });
 
-    it('produces different ID for different args', () => {
-      const irHash = 'a'.repeat(64);
+    it('respects custom minLength', async () => {
+      const data = new Uint8Array([1, 2, 3]);
+      const hash = await objectWrite(testRepo, data);
 
-      const taskId1 = computeTaskId(irHash, ['b'.repeat(64)]);
-      const taskId2 = computeTaskId(irHash, ['c'.repeat(64)]);
+      const abbrevLen = await objectAbbrev(testRepo, hash, 8);
 
-      assert.notStrictEqual(taskId1, taskId2);
+      assert.strictEqual(abbrevLen, 8);
     });
 
-    it('handles no arguments', () => {
-      const irHash = 'a'.repeat(64);
-      const taskId = computeTaskId(irHash, []);
+    it('returns minLength for non-existent hash', async () => {
+      const fakeHash = 'a'.repeat(64);
 
-      assert.strictEqual(typeof taskId, 'string');
-      assert.strictEqual(taskId.length, 64);
+      const abbrevLen = await objectAbbrev(testRepo, fakeHash);
+
+      assert.strictEqual(abbrevLen, 4);
     });
 
-    it('handles multiple arguments', () => {
-      const irHash = 'a'.repeat(64);
-      const argsHashes = ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)];
+    it('increases length when objects share prefix', async () => {
+      // Store multiple objects - some may share prefix characters
+      const hashes: string[] = [];
+      for (let i = 0; i < 100; i++) {
+        const data = new Uint8Array([i, i + 1, i + 2, i + 3]);
+        const hash = await objectWrite(testRepo, data);
+        hashes.push(hash);
+      }
 
-      const taskId = computeTaskId(irHash, argsHashes);
+      // For each hash, verify abbrev length is sufficient
+      for (const hash of hashes) {
+        const abbrevLen = await objectAbbrev(testRepo, hash);
+        const prefix = hash.slice(0, abbrevLen);
 
-      assert.strictEqual(typeof taskId, 'string');
-      assert.strictEqual(taskId.length, 64);
+        // Count how many hashes share this prefix
+        const matching = hashes.filter((h) => h.startsWith(prefix));
+        assert.strictEqual(matching.length, 1, `Prefix ${prefix} should be unique`);
+      }
     });
 
-    it('includes runtime when provided', () => {
-      const irHash = 'a'.repeat(64);
-      const argsHashes = ['b'.repeat(64)];
+    it('returns full length when all chars needed', async () => {
+      // This is hard to test naturally, but we can verify the logic
+      // by checking that length increases appropriately
+      const data1 = new Uint8Array([1, 2, 3]);
+      const hash1 = await objectWrite(testRepo, data1);
 
-      const taskId1 = computeTaskId(irHash, argsHashes, 'node');
-      const taskId2 = computeTaskId(irHash, argsHashes, 'python');
-      const taskId3 = computeTaskId(irHash, argsHashes); // No runtime
-
-      assert.notStrictEqual(taskId1, taskId2);
-      assert.notStrictEqual(taskId1, taskId3);
-      assert.notStrictEqual(taskId2, taskId3);
-    });
-
-    it('produces consistent ID with runtime', () => {
-      const irHash = 'a'.repeat(64);
-      const argsHashes = ['b'.repeat(64)];
-
-      const taskId1 = computeTaskId(irHash, argsHashes, 'node');
-      const taskId2 = computeTaskId(irHash, argsHashes, 'node');
-
-      assert.strictEqual(taskId1, taskId2);
+      // Store object with same first 2 chars (same directory)
+      // Finding a collision is hard, so we just verify the function works
+      const abbrevLen = await objectAbbrev(testRepo, hash1);
+      assert.ok(abbrevLen >= 4);
+      assert.ok(abbrevLen <= hash1.length);
     });
   });
 });

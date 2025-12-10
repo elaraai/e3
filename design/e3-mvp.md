@@ -137,9 +137,7 @@ An e3 repository is a directory containing configuration, content-addressed stor
 │       └── output                    # Contains: f2e847... → objects/f2/e847...
 │
 └── workspaces/                       # Stateful dataset namespaces
-    └── production/
-        ├── package                   # Contains: acme-forecast/0.21.1
-        └── root                      # Contains: d4e5f6... → DataObject (struct)
+    └── production.beast2             # Workspace state (deployment + data root)
 ```
 
 ### Directory Reference
@@ -196,17 +194,27 @@ Execution identity = hash(task_hash, input_hashes...). Same inputs → same exec
 
 #### `workspaces/`
 
-Stateful namespaces where you work with data. Each workspace has:
+Stateful namespaces where you work with data. Each workspace is stored as a single `.beast2` file (`workspaces/<name>.beast2`) containing the workspace state:
 
-- `package` - Ref to the deployed package (e.g., `acme-forecast/0.21.1`)
-- `root` - Ref to the root DataObject (a struct matching package's dataset schema)
+```ts
+type WorkspaceState = {
+  packageName: string;      // Name of deployed package
+  packageVersion: string;   // Version of deployed package
+  packageHash: string;      // Hash of package object at deploy time (immutable)
+  deployedAt: Date;         // UTC datetime of deployment
+  rootHash: string;         // Current root data tree hash
+  rootUpdatedAt: Date;      // UTC datetime of last root update
+};
+```
+
+An empty file indicates an undeployed workspace (created but no package deployed yet).
 
 Workspaces follow the "template" defined by their package: the tasks determine what computations run and how datasets connect. But the actual data values can differ between workspaces.
 
 The workspace root is a tree structure (like a git commit's root tree) enabling:
 - **Atomic updates**: Swap one ref to update entire workspace
 - **Structural sharing**: Unchanged subtrees keep the same hash
-- **Fast cloning**: Duplicate a workspace by copying two refs
+- **Fast cloning**: Duplicate a workspace by copying the state file
 
 ### Refs Pattern
 
@@ -216,7 +224,7 @@ Most files outside `objects/` are refs - text files containing a SHA256 hash:
 $ cat packages/acme-forecast/0.21.1
 3a8f2b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a
 
-$ cat workspaces/production/root
+$ cat executions/c4f9a2.../output
 d4e5f6789abc0123456789abcdef0123456789abcdef0123456789abcdef0123
 ```
 
@@ -228,6 +236,7 @@ This indirection enables:
 The exceptions are:
 - `e3.east` - Configuration, not a ref
 - `executions/<hash>/*.txt` - Log files streamed during execution
+- `workspaces/<name>.beast2` - Binary state file (not a simple ref)
 
 ### Object Types
 
@@ -311,8 +320,7 @@ The more dynamic types will allow for data partitioning and dataflow patterns li
 
 **Roots:**
 - `packages/<name>/<version>` → PackageObject hash
-- `workspaces/<ws>/package` → `<name>/<version>` (resolved via packages/)
-- `workspaces/<ws>/root` → DataObject hash (workspace data tree)
+- `workspaces/<ws>.beast2` → Contains packageHash and rootHash
 - `executions/<hash>/output` → DataObject hash
 
 **Object references:**

@@ -234,7 +234,7 @@ export async function export_(pkg: PackageDef<Record<string, unknown>>, outputPa
 
   // Write the package ref at packages/<name>/<version>
   const refPath = `packages/${pkg.name}/${pkg.version}`;
-  zipfile.addBuffer(Buffer.from(packageHash + '\n'), refPath);
+  zipfile.addBuffer(Buffer.from(packageHash + '\n'), refPath, { mtime: DETERMINISTIC_MTIME });
 
   // Finalize and write zip to disk
   await new Promise<void>((resolve, reject) => {
@@ -251,6 +251,11 @@ export async function export_(pkg: PackageDef<Record<string, unknown>>, outputPa
 }
 
 /**
+ * Fixed mtime for deterministic zip output (Unix epoch)
+ */
+const DETERMINISTIC_MTIME = new Date(0);
+
+/**
  * Adds an object to the zip file at the content-addressed path.
  *
  * @param zipfile - The zip file to add to
@@ -260,6 +265,6 @@ export async function export_(pkg: PackageDef<Record<string, unknown>>, outputPa
 export function addObject(zipfile: yazl.ZipFile, data: Buffer): string {
   const hash = createHash('sha256').update(data).digest('hex');
   const path = `objects/${hash.slice(0, 2)}/${hash.slice(2)}.beast2`;
-  zipfile.addBuffer(data, path);
+  zipfile.addBuffer(data, path, { mtime: DETERMINISTIC_MTIME });
   return hash;
 }
