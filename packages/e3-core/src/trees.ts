@@ -23,6 +23,7 @@ import {
   encodeBeast2For,
   StructType,
   type EastType,
+  type EastTypeValue,
 } from '@elaraai/east';
 import { DataRefType, PackageObjectType, WorkspaceStateType, type DataRef, type Structure, type TreePath, type WorkspaceState } from '@elaraai/e3-types';
 import { objectRead, objectWrite } from './objects.js';
@@ -126,15 +127,18 @@ export async function datasetRead(
  *
  * @param repoPath - Path to .e3 repository
  * @param value - The value to encode
- * @param type - The East type for encoding
+ * @param type - The East type for encoding (EastType or EastTypeValue)
  * @returns Hash of the written dataset value
  */
 export async function datasetWrite(
   repoPath: string,
   value: unknown,
-  type: EastType
+  type: EastType | EastTypeValue
 ): Promise<string> {
-  const encoder = encodeBeast2For(type);
+  // encodeBeast2For accepts both EastType and EastTypeValue, but TypeScript
+  // overloads don't support union types directly. Cast to EastTypeValue since
+  // that's the more general case and the runtime handles both.
+  const encoder = encodeBeast2For(type as EastTypeValue);
   const data = encoder(value);
   return objectWrite(repoPath, data);
 }
@@ -339,7 +343,7 @@ export async function packageGetDataset(
  * @param ws - Workspace name
  * @param treePath - Path to the dataset
  * @param value - The new value to write
- * @param type - The East type for encoding the value
+ * @param type - The East type for encoding the value (EastType or EastTypeValue)
  * @throws If workspace not deployed, path invalid, or path points to a tree
  */
 export async function workspaceSetDataset(
@@ -347,7 +351,7 @@ export async function workspaceSetDataset(
   ws: string,
   treePath: TreePath,
   value: unknown,
-  type: EastType
+  type: EastType | EastTypeValue
 ): Promise<void> {
   if (treePath.length === 0) {
     throw new Error('Cannot set dataset at root path - root is always a tree');

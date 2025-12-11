@@ -34,5 +34,4 @@ export function initCommand(repoArg: string): void {
   console.log('  packages/     Package references');
   console.log('  workspaces/   Workspace state');
   console.log('  executions/   Task execution cache');
-  console.log('  e3.beast2     Repository configuration');
 }

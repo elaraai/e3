@@ -9,7 +9,7 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   repoInit,
@@ -49,15 +49,15 @@ describe('repository', () => {
       assert.strictEqual(existsSync(join(e3Dir, 'workspaces')), true);
     });
 
-    it('creates empty config file', () => {
+    it('does not create any config file', () => {
       const result = repoInit(testDir);
 
       assert.strictEqual(result.success, true);
 
       const e3Dir = join(testDir, '.e3');
-      const configPath = join(e3Dir, 'e3.east');
-      assert.strictEqual(existsSync(configPath), true);
-      assert.strictEqual(readFileSync(configPath, 'utf-8'), '');
+      // No config file should be created - runner config is in tasks
+      assert.strictEqual(existsSync(join(e3Dir, 'e3.east')), false);
+      assert.strictEqual(existsSync(join(e3Dir, 'e3.beast2')), false);
     });
 
     it('returns e3Dir path in result', () => {

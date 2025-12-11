@@ -27,12 +27,10 @@ export async function startCommand(
     const repoPath = resolveRepo(repoArg);
     const concurrency = options.concurrency ? parseInt(options.concurrency, 10) : 4;
 
-    if (options.filter) {
-      // TODO: Implement filter support
-      console.log(`Warning: --filter is not yet implemented, running all tasks`);
-    }
-
     console.log(`Starting tasks in workspace: ${ws}`);
+    if (options.filter) {
+      console.log(`Filter: ${options.filter}`);
+    }
     console.log(`Concurrency: ${concurrency}`);
     if (options.force) {
       console.log('Force: re-executing all tasks');
@@ -42,6 +40,7 @@ export async function startCommand(
     const result = await dataflowExecute(repoPath, ws, {
       concurrency,
       force: options.force,
+      filter: options.filter,
       onTaskStart: (name) => {
         console.log(`  [START] ${name}`);
       },

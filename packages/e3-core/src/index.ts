@@ -85,6 +85,7 @@ export {
   packageGetTask,
   workspaceListTasks,
   workspaceGetTask,
+  workspaceGetTaskHash,
 } from './tasks.js';
 
 // Execution operations

@@ -8,7 +8,6 @@ A cut-down "version 1" plan for e3.
 ```
 ┌───────────────────────────────────────────────────────┐
 │  . (your e3 repository directory)                     │
-│  ├── e3.east           # Project configuration        │
 │  ├── objects/          # Content-addressed storage    │
 │  ├── packages/         # Installed packages (refs)    │
 │  ├── executions/       # Execution state and results  │
@@ -30,7 +29,7 @@ e3 is agnostic to how code and packages are authored. You might create packages 
 
 **Packages** are an immutable bundle of e3 objects - task objects, data structure, and initial values.
 
-**Runners** are programs that can execute e3 tasks (e.g. our JavaScript interpreter or Julia compiler, or a completely custom program). They are defined by CLI commands in the repository config.
+**Runners** are programs that can execute e3 tasks (e.g. our Python interpreter `east-py` or Julia compiler). Each task object specifies its runner and the command template to execute it.
 
 **Task objects** define a computation: a runner key plus paths to input and output datasets. For East tasks, the first input path points to the function IR (at `tasks.{name}.function_ir`), and the remaining inputs are the function arguments. Input/output types are inferred from the package's structure at those paths.
 
@@ -107,14 +106,12 @@ $ e3 workspace deploy . analysis acme-forecast@0.21.1-a3f8b2c1
 
 ## Repository Structure
 
-An e3 repository is a directory containing configuration, content-addressed storage, and refs. Most files outside `objects/` are **refs** - small text files containing a SHA256 hash pointing to an object.
+An e3 repository is a directory containing content-addressed storage and refs. Most files outside `objects/` are **refs** - small text files containing a SHA256 hash pointing to an object.
 
 ### Example Repository
 
 ```
 ~/data/client-abc/                    # Your e3 repository
-├── e3.east                           # Config (registries, settings)
-│
 ├── objects/                          # Content-addressed storage (all data lives here)
 │   ├── 3a/
 │   │   └── 8f2b...                   # A package object
@@ -141,35 +138,6 @@ An e3 repository is a directory containing configuration, content-addressed stor
 ```
 
 ### Directory Reference
-
-#### `e3.east`
-
-Configuration files consist of arrays of semicolon-separated values.
-Generally these are variants allowing optional configuration of different settings and forward-compatibility as new options are added.
-The complete configuration struct is formed by merging these with the "default" config struct.
-
-The `.runners` option lets you configure how any given runner is executed in your environment.
-It turns a list of "tokens" into a list of `exec` arguments (command followed by command-line arguments).
-
-```east
-[
-    .runners {
-        "east-node": [.literal "east-node", .input_paths, .output_path],
-        "east-py": [.literal "east-py", .literal "run", .literal "--std", .literal "--io", .inputs [.literal "--input", .input_path], .output_path],
-        "custom-ml": [.literal "uv", .literal "run", .literal "/home/user/dev/ml/script.py", .input_paths, .output_path],
-    },
-
-    // can add this later:
-
-    // .registries = {
-    //     "default": "https://packages.east-lang.org",
-    //     "acme": "https://packages.acme.internal",
-    //     "staging": "file:../staging,
-    // },
-]
-```
-
-Note that e3 will martial the inputs into a scratch space for the task
 
 #### `objects/`
 
@@ -234,7 +202,6 @@ This indirection enables:
 - **Easy diffing**: Compare ref values to detect changes
 
 The exceptions are:
-- `e3.east` - Configuration, not a ref
 - `executions/<hash>/*.txt` - Log files streamed during execution
 - `workspaces/<name>.beast2` - Binary state file (not a simple ref)
 
@@ -556,7 +523,7 @@ Input/output types are inferred from the package's structure at those paths - th
 
 ### Runner command configuration
 
-These construct the components to `exec` when executing a runner, defined in the e3.east configuration file.
+Each task object includes a `command` field that specifies how to execute the runner. The command is a template with placeholders for input and output paths.
 
 ```ts
 type CommandPart = VariantType<{
@@ -569,6 +536,8 @@ type CommandPart = VariantType<{
     output_path: NullType, // Path where output should be written
 }>;
 ```
+
+This allows each task to define exactly how its runner should be invoked, without needing a central repository configuration file.
 
 ### The East CLI
 

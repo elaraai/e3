@@ -2,9 +2,7 @@
  * e3 convert command - Transform data between .east, .json, and .beast2 formats
  */
 
-import { render } from 'ink';
 import * as fs from 'fs/promises';
-import { Error as ErrorMessage } from '../ui/index.js';
 import {
   decodeBeast2,
   printFor,
@@ -224,11 +222,7 @@ export async function convertFile(
   const result = await convertCore(actualInputPath, toFormat, outputPath, typeSpec, fromFormat);
 
   if (!result.success) {
-    render(
-      <ErrorMessage
-        message={`Failed to convert: ${result.error?.message}`}
-      />
-    );
+    console.error(`Error: Failed to convert: ${result.error?.message}`);
     process.exit(1);
   }
 

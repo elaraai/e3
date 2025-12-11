@@ -14,9 +14,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "composite": true,
-    "incremental": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "react"
+    "incremental": true
   },
   "include": [
     "src/**/*"

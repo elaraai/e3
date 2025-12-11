@@ -132,6 +132,31 @@ export async function workspaceListTasks(
 }
 
 /**
+ * Get task hash from a workspace.
+ *
+ * @param repoPath - Path to .e3 repository
+ * @param ws - Workspace name
+ * @param taskName - Name of the task
+ * @returns The hash of the TaskObject
+ * @throws If workspace not deployed or task not found
+ */
+export async function workspaceGetTaskHash(
+  repoPath: string,
+  ws: string,
+  taskName: string
+): Promise<string> {
+  const pkg = await getWorkspacePackageObject(repoPath, ws);
+  const taskHash = pkg.tasks.get(taskName);
+
+  if (!taskHash) {
+    const available = Array.from(pkg.tasks.keys()).join(', ');
+    throw new Error(`Task '${taskName}' not found in workspace ${ws}. Available: ${available || '(none)'}`);
+  }
+
+  return taskHash;
+}
+
+/**
  * Get task details from a workspace.
  *
  * Tasks are defined by the deployed package.
@@ -147,14 +172,7 @@ export async function workspaceGetTask(
   ws: string,
   taskName: string
 ): Promise<TaskObject> {
-  const pkg = await getWorkspacePackageObject(repoPath, ws);
-  const taskHash = pkg.tasks.get(taskName);
-
-  if (!taskHash) {
-    const available = Array.from(pkg.tasks.keys()).join(', ');
-    throw new Error(`Task '${taskName}' not found in workspace ${ws}. Available: ${available || '(none)'}`);
-  }
-
+  const taskHash = await workspaceGetTaskHash(repoPath, ws, taskName);
   const taskData = await objectRead(repoPath, taskHash);
   const decoder = decodeBeast2For(TaskObjectType);
   return decoder(Buffer.from(taskData));

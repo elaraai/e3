@@ -209,7 +209,7 @@ interface ExecutionResult {
 
 3. **Read task object**: Decode TaskObject from `taskHash`
 
-4. **Resolve runner**: Look up `task.runner` in repository config (`e3.east`)
+4. **Resolve runner**: Get the command template from the task object's `command` field
 
 5. **Create scratch directory**: `<tmpdir>/e3-exec-<execId>/`
 

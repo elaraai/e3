@@ -19,6 +19,8 @@ import { listCommand } from './commands/list.js';
 import { getCommand } from './commands/get.js';
 import { setCommand } from './commands/set.js';
 import { startCommand } from './commands/start.js';
+import { runCommand } from './commands/run.js';
+import { logsCommand } from './commands/logs.js';
 import { statusCommand } from './commands/status.js';
 import { gcCommand } from './commands/gc.js';
 import { convertCommand } from './commands/convert.js';
@@ -139,9 +141,17 @@ program
 program
   .command('set <repo> <path> <file>')
   .description('Set dataset value from file (ws.path.to.dataset)')
+  .option('--type <typespec>', 'Type specification in .east format (required for .json/.csv files)')
   .action(setCommand);
 
 // Execution commands
+program
+  .command('run <repo> <task> [inputs...]')
+  .description('Run task ad-hoc (task format: pkg/task or pkg@version/task)')
+  .option('-o, --output <path>', 'Output file path')
+  .option('--force', 'Force re-execution even if cached')
+  .action(runCommand);
+
 program
   .command('start <repo> <ws>')
   .description('Execute tasks in a workspace')
@@ -149,6 +159,12 @@ program
   .option('--concurrency <n>', 'Max concurrent tasks', '4')
   .option('--force', 'Force re-execution even if cached')
   .action(startCommand);
+
+program
+  .command('logs <repo> <path>')
+  .description('View task logs (path format: ws or ws.taskName)')
+  .option('--follow', 'Follow log output')
+  .action(logsCommand);
 
 // Utility commands
 program

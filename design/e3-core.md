@@ -9,10 +9,9 @@ This document specifies the fundamental operations on an e3 repository. These op
 Create a new e3 repository at `path`.
 
 Creates:
-- `e3.east` (empty config)
 - `objects/`
 - `packages/`
-- `tasks/`
+- `executions/`
 - `workspaces/`
 
 ### `gc(repo: Repo) → Result<GcStats, Error>`

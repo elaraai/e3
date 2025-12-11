@@ -20,7 +20,6 @@ export interface InitRepositoryResult {
  * Initialize a new e3 repository
  *
  * Creates:
- * - e3.east (empty config)
  * - objects/
  * - packages/
  * - executions/
@@ -45,9 +44,6 @@ export function repoInit(repoPath: string): InitRepositoryResult {
   try {
     // Create main .e3 directory
     fs.mkdirSync(e3Dir, { recursive: true });
-
-    // Create empty config file
-    fs.writeFileSync(path.join(e3Dir, 'e3.east'), '');
 
     // Create objects directory (content-addressed storage)
     fs.mkdirSync(path.join(e3Dir, 'objects'), { recursive: true });

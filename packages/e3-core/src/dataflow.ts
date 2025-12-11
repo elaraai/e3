@@ -108,6 +108,8 @@ export interface DataflowOptions {
   concurrency?: number;
   /** Force re-execution even if cached (default: false) */
   force?: boolean;
+  /** Filter to run only specific task(s) by exact name */
+  filter?: string;
   /** Callback when a task starts */
   onTaskStart?: (name: string) => void;
   /** Callback when a task completes */
@@ -251,6 +253,19 @@ export async function dataflowExecute(
   // Build dependency graph
   const { taskNodes, taskDependents } = await buildDependencyGraph(repoPath, ws);
 
+  // Apply filter if specified
+  const filteredTaskNames = options.filter
+    ? new Set([options.filter])
+    : null;
+
+  // Validate filter
+  if (filteredTaskNames && options.filter && !taskNodes.has(options.filter)) {
+    const available = Array.from(taskNodes.keys()).join(', ');
+    throw new Error(
+      `Task '${options.filter}' not found in workspace. Available: ${available || '(none)'}`
+    );
+  }
+
   // Track execution state
   const results: TaskExecutionResult[] = [];
   let executed = 0;
@@ -265,9 +280,12 @@ export async function dataflowExecute(
   const inProgress = new Set<string>();
 
   // Initialize ready queue with tasks that have no unresolved dependencies
+  // and pass the filter (if any)
   for (const [taskName, node] of taskNodes) {
     if (node.unresolvedCount === 0) {
-      readyQueue.push(taskName);
+      if (!filteredTaskNames || filteredTaskNames.has(taskName)) {
+        readyQueue.push(taskName);
+      }
     }
   }
 
@@ -369,6 +387,9 @@ export async function dataflowExecute(
     for (const depName of dependents) {
       if (completed.has(depName) || inProgress.has(depName)) continue;
 
+      // Skip dependents not in the filter
+      if (filteredTaskNames && !filteredTaskNames.has(depName)) continue;
+
       const depNode = taskNodes.get(depName)!;
       depNode.unresolvedCount--;
 
@@ -383,6 +404,9 @@ export async function dataflowExecute(
     const dependents = taskDependents.get(taskName) ?? new Set();
     for (const depName of dependents) {
       if (completed.has(depName) || inProgress.has(depName)) continue;
+
+      // Skip dependents not in the filter
+      if (filteredTaskNames && !filteredTaskNames.has(depName)) continue;
 
       // Recursively skip
       completed.add(depName);
