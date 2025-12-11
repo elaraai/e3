@@ -19,6 +19,11 @@ import { decodeBeast2For } from '@elaraai/east';
 import { PackageObjectType } from '@elaraai/e3-types';
 import type { PackageObject } from '@elaraai/e3-types';
 import { objectWrite, objectRead } from './objects.js';
+import {
+  PackageNotFoundError,
+  PackageInvalidError,
+  isNotFoundError,
+} from './errors.js';
 
 /**
  * Result of importing a package
@@ -99,7 +104,7 @@ export async function packageImport(
   }
 
   if (!packageName || !packageVersion || !packageHash) {
-    throw new Error('Invalid package: missing package ref');
+    throw new PackageInvalidError('missing package ref');
   }
 
   return {
@@ -118,6 +123,7 @@ export async function packageImport(
  * @param repoPath - Path to .e3 repository
  * @param name - Package name
  * @param version - Package version
+ * @throws {PackageNotFoundError} If package doesn't exist
  */
 export async function packageRemove(
   repoPath: string,
@@ -125,7 +131,14 @@ export async function packageRemove(
   version: string
 ): Promise<void> {
   const refPath = path.join(repoPath, 'packages', name, version);
-  await fs.unlink(refPath);
+  try {
+    await fs.unlink(refPath);
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      throw new PackageNotFoundError(name, version);
+    }
+    throw err;
+  }
 
   // Try to remove the package name directory if empty
   const packageDir = path.join(repoPath, 'packages', name);
@@ -174,6 +187,7 @@ export async function packageList(
  * @param name - Package name
  * @param version - Package version
  * @returns PackageObject hash
+ * @throws {PackageNotFoundError} If package doesn't exist
  */
 export async function packageResolve(
   repoPath: string,
@@ -181,8 +195,15 @@ export async function packageResolve(
   version: string
 ): Promise<string> {
   const refPath = path.join(repoPath, 'packages', name, version);
-  const content = await fs.readFile(refPath, 'utf-8');
-  return content.trim();
+  try {
+    const content = await fs.readFile(refPath, 'utf-8');
+    return content.trim();
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      throw new PackageNotFoundError(name, version);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -192,6 +213,7 @@ export async function packageResolve(
  * @param name - Package name
  * @param version - Package version
  * @returns Parsed PackageObject
+ * @throws {PackageNotFoundError} If package doesn't exist
  */
 export async function packageRead(
   repoPath: string,

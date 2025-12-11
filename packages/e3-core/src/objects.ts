@@ -9,6 +9,7 @@ import * as crypto from 'crypto';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { createWriteStream } from 'fs';
+import { ObjectNotFoundError, isNotFoundError } from './errors.js';
 
 /**
  * Calculate SHA256 hash of data
@@ -177,6 +178,7 @@ export async function objectWriteStream(
  * @param repoPath - Path to .e3 repository
  * @param hash - SHA256 hash of the object
  * @returns Object data
+ * @throws {ObjectNotFoundError} If object not found
  */
 export async function objectRead(
   repoPath: string,
@@ -190,8 +192,11 @@ export async function objectRead(
 
   try {
     return await fs.readFile(filePath);
-  } catch {
-    throw new Error(`Object not found: ${hash}`);
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      throw new ObjectNotFoundError(hash);
+    }
+    throw err;
   }
 }
 

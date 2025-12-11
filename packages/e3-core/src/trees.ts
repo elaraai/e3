@@ -28,6 +28,12 @@ import {
 import { DataRefType, PackageObjectType, WorkspaceStateType, type DataRef, type Structure, type TreePath, type WorkspaceState } from '@elaraai/e3-types';
 import { objectRead, objectWrite } from './objects.js';
 import { packageRead } from './packages.js';
+import {
+  WorkspaceNotFoundError,
+  WorkspaceNotDeployedError,
+  DatasetNotFoundError,
+  isNotFoundError,
+} from './errors.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -493,7 +499,8 @@ async function writeWorkspaceState(repoPath: string, ws: string, state: Workspac
 
 /**
  * Read workspace state from file.
- * @throws If workspace doesn't exist or is not deployed
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace exists but not deployed
  */
 async function readWorkspaceState(repoPath: string, ws: string): Promise<WorkspaceState> {
   const stateFile = path.join(repoPath, 'workspaces', `${ws}.beast2`);
@@ -501,13 +508,14 @@ async function readWorkspaceState(repoPath: string, ws: string): Promise<Workspa
   try {
     const data = await fs.readFile(stateFile);
     if (data.length === 0) {
-      throw new Error(`Workspace not deployed: ${ws}`);
+      throw new WorkspaceNotDeployedError(ws);
     }
     const decoder = decodeBeast2For(WorkspaceStateType);
     return decoder(data);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`Workspace not found: ${ws}`);
+    if (err instanceof WorkspaceNotDeployedError) throw err;
+    if (isNotFoundError(err)) {
+      throw new WorkspaceNotFoundError(ws);
     }
     throw err;
   }

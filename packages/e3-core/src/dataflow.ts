@@ -22,6 +22,7 @@ import { decodeBeast2For } from '@elaraai/east';
 import {
   PackageObjectType,
   TaskObjectType,
+  WorkspaceStateType,
   pathToString,
   type TaskObject,
   type TreePath,
@@ -37,6 +38,14 @@ import {
   workspaceGetDatasetHash,
   workspaceSetDatasetByHash,
 } from './trees.js';
+import {
+  E3Error,
+  WorkspaceNotFoundError,
+  WorkspaceNotDeployedError,
+  TaskNotFoundError,
+  DataflowError,
+  isNotFoundError,
+} from './errors.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -126,15 +135,22 @@ export interface DataflowOptions {
 
 /**
  * Read workspace state from file.
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace has no package deployed
  */
 async function readWorkspaceState(repoPath: string, ws: string) {
-  const { decodeBeast2For } = await import('@elaraai/east');
-  const { WorkspaceStateType } = await import('@elaraai/e3-types');
-
   const stateFile = path.join(repoPath, 'workspaces', `${ws}.beast2`);
-  const data = await fs.readFile(stateFile);
+  let data: Buffer;
+  try {
+    data = await fs.readFile(stateFile);
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      throw new WorkspaceNotFoundError(ws);
+    }
+    throw err;
+  }
   if (data.length === 0) {
-    throw new Error(`Workspace not deployed: ${ws}`);
+    throw new WorkspaceNotDeployedError(ws);
   }
   const decoder = decodeBeast2For(WorkspaceStateType);
   return decoder(data);
@@ -239,6 +255,10 @@ async function buildDependencyGraph(
  * @param ws - Workspace name
  * @param options - Execution options
  * @returns Result of the dataflow execution
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace has no package deployed
+ * @throws {TaskNotFoundError} If filter specifies a task that doesn't exist
+ * @throws {DataflowError} If execution fails for other reasons
  */
 export async function dataflowExecute(
   repoPath: string,
@@ -248,8 +268,20 @@ export async function dataflowExecute(
   const startTime = Date.now();
   const concurrency = options.concurrency ?? 4;
 
-  // Build dependency graph
-  const { taskNodes, taskDependents } = await buildDependencyGraph(repoPath, ws);
+  let taskNodes: Map<string, TaskNode>;
+  let taskDependents: Map<string, Set<string>>;
+
+  try {
+    // Build dependency graph
+    const graph = await buildDependencyGraph(repoPath, ws);
+    taskNodes = graph.taskNodes;
+    taskDependents = graph.taskDependents;
+  } catch (err) {
+    // Re-throw E3Errors as-is
+    if (err instanceof E3Error) throw err;
+    // Wrap unexpected errors
+    throw new DataflowError(`Failed to build dependency graph: ${err instanceof Error ? err.message : err}`);
+  }
 
   // Apply filter if specified
   const filteredTaskNames = options.filter
@@ -258,10 +290,7 @@ export async function dataflowExecute(
 
   // Validate filter
   if (filteredTaskNames && options.filter && !taskNodes.has(options.filter)) {
-    const available = Array.from(taskNodes.keys()).join(', ');
-    throw new Error(
-      `Task '${options.filter}' not found in workspace. Available: ${available || '(none)'}`
-    );
+    throw new TaskNotFoundError(options.filter);
   }
 
   // Track execution state
@@ -369,6 +398,7 @@ export async function dataflowExecute(
       taskResult.error = result.error ?? undefined;
     } else if (result.state === 'failed') {
       taskResult.exitCode = result.exitCode ?? undefined;
+      taskResult.error = result.error ?? undefined;
     }
 
     // On success, update the workspace with the output
@@ -525,6 +555,9 @@ export async function dataflowExecute(
  * @param repoPath - Path to .e3 repository
  * @param ws - Workspace name
  * @returns Graph information
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace has no package deployed
+ * @throws {DataflowError} If graph building fails for other reasons
  */
 export async function dataflowGetGraph(
   repoPath: string,
@@ -538,7 +571,17 @@ export async function dataflowGetGraph(
     dependsOn: string[];
   }>;
 }> {
-  const { taskNodes, outputToTask } = await buildDependencyGraph(repoPath, ws);
+  let taskNodes: Map<string, TaskNode>;
+  let outputToTask: Map<string, string>;
+
+  try {
+    const graph = await buildDependencyGraph(repoPath, ws);
+    taskNodes = graph.taskNodes;
+    outputToTask = graph.outputToTask;
+  } catch (err) {
+    if (err instanceof E3Error) throw err;
+    throw new DataflowError(`Failed to build dependency graph: ${err instanceof Error ? err.message : err}`);
+  }
 
   const tasks: Array<{
     name: string;

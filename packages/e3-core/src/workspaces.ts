@@ -24,6 +24,12 @@ import { PackageObjectType, WorkspaceStateType } from '@elaraai/e3-types';
 import type { PackageObject, WorkspaceState } from '@elaraai/e3-types';
 import { objectRead, objectWrite } from './objects.js';
 import { packageResolve, packageRead } from './packages.js';
+import {
+  WorkspaceNotFoundError,
+  WorkspaceNotDeployedError,
+  WorkspaceExistsError,
+  isNotFoundError,
+} from './errors.js';
 
 /**
  * Get the path to a workspace's state file.
@@ -53,26 +59,51 @@ async function writeState(repoPath: string, name: string, state: WorkspaceState)
 }
 
 /**
- * Read workspace state, or null if workspace doesn't exist or is not deployed.
- * An empty file indicates an undeployed workspace.
+ * Read workspace state.
+ * Returns { exists: false } if workspace doesn't exist.
+ * Returns { exists: true, deployed: false } if workspace exists but not deployed.
+ * Returns { exists: true, deployed: true, state } if workspace is deployed.
  */
-async function readState(repoPath: string, name: string): Promise<WorkspaceState | null> {
+async function readState(
+  repoPath: string,
+  name: string
+): Promise<
+  | { exists: false }
+  | { exists: true; deployed: false }
+  | { exists: true; deployed: true; state: WorkspaceState }
+> {
   const stateFile = statePath(repoPath, name);
 
   try {
     const data = await fs.readFile(stateFile);
     // Empty file means workspace exists but is not deployed
     if (data.length === 0) {
-      return null;
+      return { exists: true, deployed: false };
     }
     const decoder = decodeBeast2For(WorkspaceStateType);
-    return decoder(data);
+    return { exists: true, deployed: true, state: decoder(data) };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return null;
+    if (isNotFoundError(err)) {
+      return { exists: false };
     }
     throw err;
   }
+}
+
+/**
+ * Read workspace state, throwing if workspace doesn't exist or is not deployed.
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
+ */
+async function readStateOrThrow(repoPath: string, name: string): Promise<WorkspaceState> {
+  const result = await readState(repoPath, name);
+  if (!result.exists) {
+    throw new WorkspaceNotFoundError(name);
+  }
+  if (!result.deployed) {
+    throw new WorkspaceNotDeployedError(name);
+  }
+  return result.state;
 }
 
 /**
@@ -83,6 +114,7 @@ async function readState(repoPath: string, name: string): Promise<WorkspaceState
  *
  * @param repoPath - Path to .e3 repository
  * @param name - Workspace name
+ * @throws {WorkspaceExistsError} If workspace already exists
  */
 export async function workspaceCreate(
   repoPath: string,
@@ -93,9 +125,10 @@ export async function workspaceCreate(
   // Check if workspace already exists
   try {
     await fs.access(stateFile);
-    throw new Error(`Workspace already exists: ${name}`);
+    throw new WorkspaceExistsError(name);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if (err instanceof WorkspaceExistsError) throw err;
+    if (!isNotFoundError(err)) {
       throw err;
     }
   }
@@ -116,13 +149,21 @@ export async function workspaceCreate(
  *
  * @param repoPath - Path to .e3 repository
  * @param name - Workspace name
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  */
 export async function workspaceRemove(
   repoPath: string,
   name: string
 ): Promise<void> {
   const stateFile = statePath(repoPath, name);
-  await fs.unlink(stateFile);
+  try {
+    await fs.unlink(stateFile);
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      throw new WorkspaceNotFoundError(name);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -156,13 +197,17 @@ export async function workspaceList(
  *
  * @param repoPath - Path to .e3 repository
  * @param name - Workspace name
- * @returns Workspace state, or null if not deployed
+ * @returns Workspace state, or null if workspace doesn't exist or is not deployed
  */
 export async function workspaceGetState(
   repoPath: string,
   name: string
 ): Promise<WorkspaceState | null> {
-  return readState(repoPath, name);
+  const result = await readState(repoPath, name);
+  if (!result.exists || !result.deployed) {
+    return null;
+  }
+  return result.state;
 }
 
 /**
@@ -171,16 +216,14 @@ export async function workspaceGetState(
  * @param repoPath - Path to .e3 repository
  * @param name - Workspace name
  * @returns Package name, version, and hash
- * @throws If workspace is not deployed
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
  */
 export async function workspaceGetPackage(
   repoPath: string,
   name: string
 ): Promise<{ name: string; version: string; hash: string }> {
-  const state = await readState(repoPath, name);
-  if (state === null) {
-    throw new Error(`Workspace not deployed: ${name}`);
-  }
+  const state = await readStateOrThrow(repoPath, name);
   return {
     name: state.packageName,
     version: state.packageVersion,
@@ -194,16 +237,14 @@ export async function workspaceGetPackage(
  * @param repoPath - Path to .e3 repository
  * @param name - Workspace name
  * @returns Root tree object hash
- * @throws If workspace is not deployed
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
  */
 export async function workspaceGetRoot(
   repoPath: string,
   name: string
 ): Promise<string> {
-  const state = await readState(repoPath, name);
-  if (state === null) {
-    throw new Error(`Workspace not deployed: ${name}`);
-  }
+  const state = await readStateOrThrow(repoPath, name);
   return state.rootHash;
 }
 
@@ -213,17 +254,15 @@ export async function workspaceGetRoot(
  * @param repoPath - Path to .e3 repository
  * @param name - Workspace name
  * @param hash - New root tree object hash
- * @throws If workspace is not deployed
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
  */
 export async function workspaceSetRoot(
   repoPath: string,
   name: string,
   hash: string
 ): Promise<void> {
-  const state = await readState(repoPath, name);
-  if (state === null) {
-    throw new Error(`Workspace not deployed: ${name}`);
-  }
+  const state = await readStateOrThrow(repoPath, name);
 
   const newState: WorkspaceState = {
     ...state,
@@ -298,7 +337,8 @@ const DETERMINISTIC_MTIME = new Date(0);
  * @param outputName - Package name (default: deployed package name)
  * @param version - Package version (default: <pkgVersion>-<rootHash[0..8]>)
  * @returns Export result with package info
- * @throws If workspace is not deployed
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
  */
 export async function workspaceExport(
   repoPath: string,
@@ -310,10 +350,7 @@ export async function workspaceExport(
   const partialPath = `${zipPath}.partial`;
 
   // Get workspace state
-  const state = await readState(repoPath, name);
-  if (state === null) {
-    throw new Error(`Workspace not deployed: ${name}`);
-  }
+  const state = await readStateOrThrow(repoPath, name);
 
   // Read the deployed package object using the stored hash
   const deployedPkgData = await objectRead(repoPath, state.packageHash);

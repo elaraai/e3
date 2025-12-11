@@ -22,6 +22,7 @@ import {
   packageRead,
 } from './packages.js';
 import { objectRead } from './objects.js';
+import { PackageNotFoundError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir, zipEqual } from './test-helpers.js';
 
 describe('packages', () => {
@@ -177,7 +178,7 @@ describe('packages', () => {
     it('throws for non-existent package', async () => {
       await assert.rejects(
         async () => await packageResolve(testRepo, 'nonexistent', '1.0.0'),
-        /ENOENT/
+        PackageNotFoundError
       );
     });
   });
@@ -204,7 +205,7 @@ describe('packages', () => {
     it('throws for non-existent package', async () => {
       await assert.rejects(
         async () => await packageRemove(testRepo, 'nonexistent', '1.0.0'),
-        /ENOENT/
+        PackageNotFoundError
       );
     });
 
@@ -299,7 +300,7 @@ describe('packages', () => {
 
       await assert.rejects(
         async () => await packageExport(testRepo, 'nonexistent', '1.0.0', exportZip),
-        /ENOENT/
+        PackageNotFoundError
       );
     });
   });

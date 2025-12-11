@@ -18,6 +18,7 @@ import type { WorkspaceState } from '@elaraai/e3-types';
 import { repoGc } from './gc.js';
 import { objectWrite, objectRead } from './objects.js';
 import { packageImport, packageRemove } from './packages.js';
+import { ObjectNotFoundError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
 
 describe('gc', () => {
@@ -65,7 +66,7 @@ describe('gc', () => {
       // Verify object is gone
       await assert.rejects(
         async () => await objectRead(testRepo, hash),
-        /Object not found/
+        ObjectNotFoundError
       );
     });
 
@@ -206,7 +207,7 @@ describe('gc', () => {
 
       await assert.rejects(
         async () => await objectRead(testRepo, hash),
-        /Object not found/
+        ObjectNotFoundError
       );
     });
   });
@@ -303,7 +304,7 @@ describe('gc', () => {
       await objectRead(testRepo, hashB);
       await assert.rejects(
         async () => await objectRead(testRepo, hashD),
-        /Object not found/
+        ObjectNotFoundError
       );
     });
   });

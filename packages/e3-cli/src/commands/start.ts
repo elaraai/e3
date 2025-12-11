@@ -65,7 +65,9 @@ export async function startCommand(
       console.log('Failed tasks:');
       for (const task of result.tasks) {
         if (task.state === 'failed') {
-          console.log(`  ${task.name}: exit code ${task.exitCode}`);
+          const exitInfo = task.exitCode != null ? `exit code ${task.exitCode}` : 'spawn failed';
+          const errorInfo = task.error ? ` - ${task.error}` : '';
+          console.log(`  ${task.name}: ${exitInfo}${errorInfo}`);
         } else if (task.state === 'error') {
           console.log(`  ${task.name}: ${task.error}`);
         }

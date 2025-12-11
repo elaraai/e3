@@ -27,6 +27,7 @@ import {
   type TaskObject,
 } from '@elaraai/e3-types';
 import { computeHash, objectRead, objectWrite } from './objects.js';
+import { ExecutionCorruptError, isNotFoundError } from './errors.js';
 
 // ============================================================================
 // Execution Identity
@@ -73,6 +74,7 @@ export function executionPath(
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @returns ExecutionStatus or null if execution doesn't exist
+ * @throws {ExecutionCorruptError} If status file exists but cannot be decoded
  */
 export async function executionGet(
   repoPath: string,
@@ -82,12 +84,21 @@ export async function executionGet(
   const execDir = executionPath(repoPath, taskHash, inHash);
   const statusPath = path.join(execDir, 'status.beast2');
 
+  let data: Buffer;
   try {
-    const data = await fs.readFile(statusPath);
+    data = await fs.readFile(statusPath);
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      return null;
+    }
+    throw err;
+  }
+
+  try {
     const decoder = decodeBeast2For(ExecutionStatusType);
     return decoder(data);
-  } catch {
-    return null;
+  } catch (err) {
+    throw new ExecutionCorruptError(taskHash, inHash, err instanceof Error ? err : new Error(String(err)));
   }
 }
 
@@ -110,8 +121,11 @@ export async function executionGetOutput(
   try {
     const content = await fs.readFile(outputPath, 'utf-8');
     return content.trim();
-  } catch {
-    return null;
+  } catch (err) {
+    if (isNotFoundError(err)) {
+      return null;
+    }
+    throw err;
   }
 }
 
@@ -584,7 +598,7 @@ export async function taskExecute(
         inputHashes,
         startedAt: new Date(startTime),
         completedAt: new Date(),
-        exitCode: BigInt(result.exitCode ?? -1),
+        exitCode: BigInt(result?.exitCode ?? -1),
       });
       const encoder = encodeBeast2For(ExecutionStatusType);
       await fs.writeFile(path.join(execDir, 'status.beast2'), encoder(status));
@@ -670,8 +684,8 @@ async function runCommand(
   const status: ExecutionStatus = variant('running', {
     inputHashes,
     startedAt: new Date(),
-    pid: BigInt(child.pid!),
-    pidStartTime: BigInt(pidStartTime),
+    pid: BigInt(child.pid ?? -1),
+    pidStartTime: BigInt(pidStartTime ?? -1),
     bootId,
   });
   const encoder = encodeBeast2For(ExecutionStatusType);

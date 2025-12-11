@@ -120,3 +120,37 @@ export {
   type DataflowResult,
   type TaskExecutionResult,
 } from './dataflow.js';
+
+// Errors
+export {
+  // Base
+  E3Error,
+  // Repository
+  RepositoryNotFoundError,
+  // Workspace
+  WorkspaceNotFoundError,
+  WorkspaceNotDeployedError,
+  WorkspaceExistsError,
+  // Package
+  PackageNotFoundError,
+  PackageInvalidError,
+  PackageExistsError,
+  // Dataset
+  DatasetNotFoundError,
+  // Task
+  TaskNotFoundError,
+  // Object
+  ObjectNotFoundError,
+  ObjectCorruptError,
+  // Execution
+  ExecutionCorruptError,
+  // Dataflow
+  DataflowError,
+  // Generic
+  PermissionDeniedError,
+  // Helpers
+  isNotFoundError,
+  isPermissionError,
+  isExistsError,
+  wrapError,
+} from './errors.js';

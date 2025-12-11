@@ -15,6 +15,7 @@ import {
   objectPath,
   objectAbbrev,
 } from './objects.js';
+import { ObjectNotFoundError } from './errors.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
 
 describe('objects', () => {
@@ -218,7 +219,7 @@ describe('objects', () => {
 
       await assert.rejects(
         async () => await objectRead(testRepo, fakeHash),
-        /Object not found/
+        ObjectNotFoundError
       );
     });
 

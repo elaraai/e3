@@ -25,6 +25,10 @@ import {
   workspaceExport,
 } from './workspaces.js';
 import { packageImport, packageResolve, packageRead } from './packages.js';
+import {
+  WorkspaceNotFoundError,
+  WorkspaceNotDeployedError,
+} from './errors.js';
 import { objectWrite } from './objects.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
 
@@ -88,7 +92,7 @@ describe('workspaces', () => {
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
         async () => await workspaceRemove(testRepo, 'nonexistent'),
-        /ENOENT/
+        WorkspaceNotFoundError
       );
     });
 
@@ -232,7 +236,7 @@ describe('workspaces', () => {
 
       await assert.rejects(
         async () => await workspaceGetPackage(testRepo, 'empty'),
-        /not deployed/
+        WorkspaceNotDeployedError
       );
     });
   });
@@ -297,7 +301,7 @@ describe('workspaces', () => {
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
         async () => await workspaceGetRoot(testRepo, 'nonexistent'),
-        /not deployed/
+        WorkspaceNotFoundError
       );
     });
 
@@ -306,7 +310,7 @@ describe('workspaces', () => {
 
       await assert.rejects(
         async () => await workspaceGetRoot(testRepo, 'empty'),
-        /not deployed/
+        WorkspaceNotDeployedError
       );
     });
   });
@@ -427,7 +431,7 @@ describe('workspaces', () => {
 
       await assert.rejects(
         async () => await workspaceExport(testRepo, 'empty', exportZip),
-        /not deployed/
+        WorkspaceNotDeployedError
       );
     });
   });

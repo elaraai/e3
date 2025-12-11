@@ -24,6 +24,8 @@ import {
   EastTypeType,
   type EastTypeValue,
   type StructTypeValue,
+  parseInferred,
+  toEastTypeValue,
 } from '@elaraai/east';
 import { resolveRepo, parseDatasetPath, formatError, exitError } from '../utils.js';
 
@@ -96,11 +98,9 @@ export async function setCommand(
           type = providedType;
         } else {
           // Use parseInferred for type inference from .east syntax
-          const { parseInferred } = await import('@elaraai/east');
           const [parsedType, parsedValue] = parseInferred(content);
           // parseInferred returns EastType, but we need EastTypeValue
           // Use toEastTypeValue to convert
-          const { toEastTypeValue } = await import('@elaraai/east');
           value = parsedValue;
           type = toEastTypeValue(parsedType);
         }

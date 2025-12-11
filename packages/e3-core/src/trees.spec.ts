@@ -16,6 +16,7 @@ import type { DataRef, Structure } from '@elaraai/e3-types';
 import { treeRead, treeWrite, datasetRead, datasetWrite, packageListTree, packageGetDataset, workspaceListTree, workspaceGetDataset, workspaceSetDataset } from './trees.js';
 import { packageImport } from './packages.js';
 import { workspaceCreate, workspaceDeploy } from './workspaces.js';
+import { WorkspaceNotFoundError, WorkspaceNotDeployedError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
 
 describe('trees', () => {
@@ -486,7 +487,7 @@ describe('trees', () => {
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
         async () => await workspaceListTree(testRepo, 'nonexistent', []),
-        /not found/
+        WorkspaceNotFoundError
       );
     });
 
@@ -495,7 +496,7 @@ describe('trees', () => {
 
       await assert.rejects(
         async () => await workspaceListTree(testRepo, 'empty', []),
-        /not deployed/
+        WorkspaceNotDeployedError
       );
     });
 
@@ -585,7 +586,7 @@ describe('trees', () => {
         async () => await workspaceGetDataset(testRepo, 'nonexistent', [
           variant('field', 'inputs'),
         ]),
-        /not found/
+        WorkspaceNotFoundError
       );
     });
 
@@ -596,7 +597,7 @@ describe('trees', () => {
         async () => await workspaceGetDataset(testRepo, 'empty', [
           variant('field', 'inputs'),
         ]),
-        /not deployed/
+        WorkspaceNotDeployedError
       );
     });
   });
@@ -733,7 +734,7 @@ describe('trees', () => {
         async () => await workspaceSetDataset(testRepo, 'nonexistent', [
           variant('field', 'inputs'),
         ], 'value', StringType),
-        /not found/
+        WorkspaceNotFoundError
       );
     });
 
@@ -744,7 +745,7 @@ describe('trees', () => {
         async () => await workspaceSetDataset(testRepo, 'empty', [
           variant('field', 'inputs'),
         ], 'value', StringType),
-        /not deployed/
+        WorkspaceNotDeployedError
       );
     });
   });

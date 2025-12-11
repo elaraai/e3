@@ -15,6 +15,7 @@ import e3 from '@elaraai/e3';
 import { packageListTasks, packageGetTask, workspaceListTasks, workspaceGetTask } from './tasks.js';
 import { packageImport } from './packages.js';
 import { workspaceCreate, workspaceDeploy } from './workspaces.js';
+import { TaskNotFoundError, WorkspaceNotFoundError, WorkspaceNotDeployedError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
 
 describe('tasks', () => {
@@ -73,7 +74,7 @@ describe('tasks', () => {
       );
     });
 
-    it('error message lists available tasks', async () => {
+    it('throws TaskNotFoundError for non-existent task', async () => {
       const myInput = e3.input('value', StringType, 'test');
       const pkg = e3.package('empty-tasks', '1.0.0', myInput);
       const zipPath = join(tempDir, 'empty-tasks.zip');
@@ -82,7 +83,7 @@ describe('tasks', () => {
 
       await assert.rejects(
         async () => await packageGetTask(testRepo, 'empty-tasks', '1.0.0', 'nonexistent'),
-        /\(none\)/
+        TaskNotFoundError
       );
     });
   });
@@ -104,7 +105,7 @@ describe('tasks', () => {
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
         async () => await workspaceListTasks(testRepo, 'nonexistent'),
-        /not found/
+        WorkspaceNotFoundError
       );
     });
 
@@ -113,7 +114,7 @@ describe('tasks', () => {
 
       await assert.rejects(
         async () => await workspaceListTasks(testRepo, 'empty'),
-        /not deployed/
+        WorkspaceNotDeployedError
       );
     });
   });
@@ -136,7 +137,7 @@ describe('tasks', () => {
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
         async () => await workspaceGetTask(testRepo, 'nonexistent', 'task'),
-        /not found/
+        WorkspaceNotFoundError
       );
     });
 
@@ -145,7 +146,7 @@ describe('tasks', () => {
 
       await assert.rejects(
         async () => await workspaceGetTask(testRepo, 'empty', 'task'),
-        /not deployed/
+        WorkspaceNotDeployedError
       );
     });
   });

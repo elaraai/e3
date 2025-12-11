@@ -23,6 +23,12 @@ import {
 } from '@elaraai/e3-types';
 import { objectRead } from './objects.js';
 import { packageRead } from './packages.js';
+import {
+  TaskNotFoundError,
+  WorkspaceNotFoundError,
+  WorkspaceNotDeployedError,
+  isNotFoundError,
+} from './errors.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -56,7 +62,8 @@ export async function packageListTasks(
  * @param version - Package version
  * @param taskName - Name of the task
  * @returns The TaskObject containing runner, inputs, and output
- * @throws If package or task not found
+ * @throws {PackageNotFoundError} If package not found
+ * @throws {TaskNotFoundError} If task not found in package
  */
 export async function packageGetTask(
   repoPath: string,
@@ -68,8 +75,7 @@ export async function packageGetTask(
   const taskHash = pkg.tasks.get(taskName);
 
   if (!taskHash) {
-    const available = Array.from(pkg.tasks.keys()).join(', ');
-    throw new Error(`Task '${taskName}' not found in package ${name}@${version}. Available: ${available || '(none)'}`);
+    throw new TaskNotFoundError(taskName);
   }
 
   const taskData = await objectRead(repoPath, taskHash);
@@ -83,7 +89,8 @@ export async function packageGetTask(
 
 /**
  * Read workspace state from file.
- * @throws If workspace doesn't exist or is not deployed
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace exists but not deployed
  */
 async function readWorkspaceState(repoPath: string, ws: string) {
   const stateFile = path.join(repoPath, 'workspaces', `${ws}.beast2`);
@@ -91,13 +98,14 @@ async function readWorkspaceState(repoPath: string, ws: string) {
   try {
     const data = await fs.readFile(stateFile);
     if (data.length === 0) {
-      throw new Error(`Workspace not deployed: ${ws}`);
+      throw new WorkspaceNotDeployedError(ws);
     }
     const decoder = decodeBeast2For(WorkspaceStateType);
     return decoder(data);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`Workspace not found: ${ws}`);
+    if (err instanceof WorkspaceNotDeployedError) throw err;
+    if (isNotFoundError(err)) {
+      throw new WorkspaceNotFoundError(ws);
     }
     throw err;
   }
@@ -138,7 +146,9 @@ export async function workspaceListTasks(
  * @param ws - Workspace name
  * @param taskName - Name of the task
  * @returns The hash of the TaskObject
- * @throws If workspace not deployed or task not found
+ * @throws {WorkspaceNotFoundError} If workspace not found
+ * @throws {WorkspaceNotDeployedError} If workspace not deployed
+ * @throws {TaskNotFoundError} If task not found
  */
 export async function workspaceGetTaskHash(
   repoPath: string,
@@ -149,8 +159,7 @@ export async function workspaceGetTaskHash(
   const taskHash = pkg.tasks.get(taskName);
 
   if (!taskHash) {
-    const available = Array.from(pkg.tasks.keys()).join(', ');
-    throw new Error(`Task '${taskName}' not found in workspace ${ws}. Available: ${available || '(none)'}`);
+    throw new TaskNotFoundError(taskName);
   }
 
   return taskHash;
