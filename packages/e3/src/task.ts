@@ -186,7 +186,7 @@ export function task<Name extends string, Inputs extends Array<DatasetDef>, Outp
     [ArrayType(StringType), StringType],
     ArrayType(StringType),
     ($, input_paths, output_path) => {
-      const command = $.let(config?.runner ?? ['east-py', 'run', '--std', '--io'], ArrayType(StringType));
+      const command = $.let(config?.runner ?? ['east-py', 'run'], ArrayType(StringType));
 
       // Function argument paths
       const i = $.let(1n);

@@ -527,7 +527,7 @@ Each task object includes a `command` field that specifies how to execute the ru
 
 ```ts
 type CommandPart = VariantType<{
-    literal: StringType,     // Literal string: "east-py", "run", "--std"
+    literal: StringType,     // Literal string: "east-py", "run"
     input_path: NullType,    // Path to "next" input (e.g. first)
     inputs: ArrayType<VariantType<{ // For each remaining input
         literal: StringType, // Literal string: "--input"
