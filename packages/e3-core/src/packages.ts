@@ -16,8 +16,8 @@ import * as path from 'path';
 import yauzl from 'yauzl';
 import yazl from 'yazl';
 import { decodeBeast2For } from '@elaraai/east';
-import { PackageObjectType, DataRefType } from '@elaraai/e3-types';
-import type { PackageObject, DataRef } from '@elaraai/e3-types';
+import { PackageObjectType } from '@elaraai/e3-types';
+import type { PackageObject } from '@elaraai/e3-types';
 import { objectWrite, objectRead } from './objects.js';
 
 /**
@@ -255,21 +255,6 @@ export async function packageExport(
     zipfile.addBuffer(Buffer.from(data), zipPath, { mtime: DETERMINISTIC_MTIME });
   };
 
-  // Helper to recursively collect objects from a DataRef
-  const collectDataRef = async (ref: DataRef): Promise<void> => {
-    if (ref.type === 'value') {
-      await addObject(ref.value);
-    } else if (ref.type === 'tree') {
-      await addObject(ref.value);
-      // Load and parse tree object to find children
-      const treeData = await objectRead(repoPath, ref.value);
-      // Tree objects are structs with DataRef fields - we need to decode them
-      // Since we don't know the exact structure, we scan for hash patterns
-      await collectTreeChildren(treeData);
-    }
-    // 'unassigned' and 'null' have no objects to collect
-  };
-
   // Helper to collect children from a tree object
   // Tree objects are encoded as structs with DataRef fields
   const collectTreeChildren = async (treeData: Uint8Array): Promise<void> => {
@@ -353,10 +338,6 @@ export async function packageExport(
 // ============================================================================
 // Zip file helpers using yauzl
 // ============================================================================
-
-interface ZipFile {
-  close(): void;
-}
 
 interface ZipEntry {
   fileName: string;

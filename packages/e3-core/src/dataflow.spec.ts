@@ -11,12 +11,11 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { variant, StringType, encodeBeast2For, StructType } from '@elaraai/east';
+import { variant, StringType, ArrayType, encodeBeast2For, StructType, East, IRType } from '@elaraai/east';
 import {
   TaskObjectType,
   PackageObjectType,
   DataRefType,
-  type CommandPart,
   type TreePath,
   type Structure,
   type DataRef,
@@ -24,11 +23,8 @@ import {
 import {
   dataflowExecute,
   dataflowGetGraph,
-  type TaskExecutionResult,
 } from './dataflow.js';
-import { configWrite } from './executions.js';
 import { objectWrite } from './objects.js';
-import { packageImport } from './packages.js';
 import { workspaceDeploy } from './workspaces.js';
 import { workspaceGetDataset, workspaceSetDataset } from './trees.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
@@ -44,12 +40,48 @@ describe('dataflow', () => {
     removeTestRepo(testRepo);
   });
 
+  /**
+   * Helper to create a command IR object.
+   *
+   * Creates an East FunctionIR: (inputs: Array<String>, output: String) -> Array<String>
+   * that returns the provided command parts as a literal array.
+   */
+  async function createCommandIr(repoPath: string, parts: string[]): Promise<string> {
+    // Build an East function that returns the command array
+    // The function signature is: (inputs: Array<String>, output: String) -> Array<String>
+    const commandFn = East.function(
+      [ArrayType(StringType), StringType],
+      ArrayType(StringType),
+      ($, inputs, output) => {
+        // Build the result array, substituting inputs[i] and output as needed
+        const result: (string | ReturnType<typeof inputs.get>)[] = [];
+        for (const part of parts) {
+          if (part === '{input}' || part === '{input0}') {
+            result.push(inputs.get(0n));
+          } else if (part.match(/^\{input(\d+)\}$/)) {
+            const idx = BigInt(part.match(/^\{input(\d+)\}$/)![1]);
+            result.push(inputs.get(idx));
+          } else if (part === '{output}') {
+            result.push(output);
+          } else {
+            result.push(part);
+          }
+        }
+        return result;
+      }
+    );
+
+    const ir = commandFn.toIR().ir;
+    const encoder = encodeBeast2For(IRType);
+    return objectWrite(repoPath, encoder(ir));
+  }
+
   // Helper to create a package with tasks
   async function createPackageWithTasks(
     repoPath: string,
     tasks: Array<{
       name: string;
-      runner: string;
+      command: string[];  // Command parts with placeholders
       inputs: TreePath[];
       output: TreePath;
     }>,
@@ -60,8 +92,11 @@ describe('dataflow', () => {
     const tasksMap = new Map<string, string>();
 
     for (const t of tasks) {
+      // Create command IR for this task
+      const commandIrHash = await createCommandIr(repoPath, t.command);
+
       const taskObj = {
-        runner: t.runner,
+        commandIr: commandIrHash,
         inputs: t.inputs,
         output: t.output,
       };
@@ -144,8 +179,8 @@ describe('dataflow', () => {
       await createPackageWithTasks(
         testRepo,
         [
-          { name: 'task-a', runner: 'copy', inputs: [inputPath], output: middlePath },
-          { name: 'task-b', runner: 'copy', inputs: [middlePath], output: outputPath },
+          { name: 'task-a', command: ['cp', '{input}', '{output}'], inputs: [inputPath], output: middlePath },
+          { name: 'task-b', command: ['cp', '{input}', '{output}'], inputs: [middlePath], output: outputPath },
         ],
         structure
       );
@@ -166,15 +201,6 @@ describe('dataflow', () => {
 
   describe('dataflowExecute', () => {
     it('executes single task', async () => {
-      // Configure runner
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('copy', [
-        variant('literal', 'cp'),
-        variant('input_path', null),
-        variant('output_path', null),
-      ]);
-      await configWrite(testRepo, { runners });
-
       // Create package with one task
       const structure: Structure = {
         type: 'struct',
@@ -193,7 +219,7 @@ describe('dataflow', () => {
 
       await createPackageWithTasks(
         testRepo,
-        [{ name: 'copy-task', runner: 'copy', inputs: [inputPath], output: outputPath }],
+        [{ name: 'copy-task', command: ['cp', '{input}', '{output}'], inputs: [inputPath], output: outputPath }],
         structure,
         {
           input: {
@@ -221,15 +247,6 @@ describe('dataflow', () => {
     });
 
     it('executes task chain in order', async () => {
-      // Configure runner
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('copy', [
-        variant('literal', 'cp'),
-        variant('input_path', null),
-        variant('output_path', null),
-      ]);
-      await configWrite(testRepo, { runners });
-
       // Create package with A -> B chain
       const structure: Structure = {
         type: 'struct',
@@ -251,8 +268,8 @@ describe('dataflow', () => {
       await createPackageWithTasks(
         testRepo,
         [
-          { name: 'task-a', runner: 'copy', inputs: [inputPath], output: middlePath },
-          { name: 'task-b', runner: 'copy', inputs: [middlePath], output: outputPath },
+          { name: 'task-a', command: ['cp', '{input}', '{output}'], inputs: [inputPath], output: middlePath },
+          { name: 'task-b', command: ['cp', '{input}', '{output}'], inputs: [middlePath], output: outputPath },
         ],
         structure,
         {
@@ -283,20 +300,6 @@ describe('dataflow', () => {
     });
 
     it('handles task failure with fail-fast', async () => {
-      // Configure runners
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('fail', [
-        variant('literal', 'bash'),
-        variant('literal', '-c'),
-        variant('literal', 'exit 1'),
-      ]);
-      runners.set('copy', [
-        variant('literal', 'cp'),
-        variant('input_path', null),
-        variant('output_path', null),
-      ]);
-      await configWrite(testRepo, { runners });
-
       // Create package with A (fails) -> B (should be skipped)
       const structure: Structure = {
         type: 'struct',
@@ -318,8 +321,8 @@ describe('dataflow', () => {
       await createPackageWithTasks(
         testRepo,
         [
-          { name: 'task-a', runner: 'fail', inputs: [inputPath], output: middlePath },
-          { name: 'task-b', runner: 'copy', inputs: [middlePath], output: outputPath },
+          { name: 'task-a', command: ['bash', '-c', 'exit 1'], inputs: [inputPath], output: middlePath },
+          { name: 'task-b', command: ['cp', '{input}', '{output}'], inputs: [middlePath], output: outputPath },
         ],
         structure,
         {
@@ -350,15 +353,6 @@ describe('dataflow', () => {
     });
 
     it('caches successful task results', async () => {
-      // Configure runner
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('copy', [
-        variant('literal', 'cp'),
-        variant('input_path', null),
-        variant('output_path', null),
-      ]);
-      await configWrite(testRepo, { runners });
-
       // Create package
       const structure: Structure = {
         type: 'struct',
@@ -376,7 +370,7 @@ describe('dataflow', () => {
 
       await createPackageWithTasks(
         testRepo,
-        [{ name: 'copy-task', runner: 'copy', inputs: [inputPath], output: outputPath }],
+        [{ name: 'copy-task', command: ['cp', '{input}', '{output}'], inputs: [inputPath], output: outputPath }],
         structure,
         {
           input: {
@@ -400,18 +394,6 @@ describe('dataflow', () => {
     });
 
     it('respects concurrency limit', async () => {
-      // Configure a slow runner
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('slow-copy', [
-        variant('literal', 'bash'),
-        variant('literal', '-c'),
-        variant('literal', 'sleep 0.1; cp "$1" "$2"'),
-        variant('literal', '--'),
-        variant('input_path', null),
-        variant('output_path', null),
-      ]);
-      await configWrite(testRepo, { runners });
-
       // Create package with 4 parallel tasks
       const structure: Structure = {
         type: 'struct',
@@ -429,13 +411,16 @@ describe('dataflow', () => {
       const inputEncoder = encodeBeast2For(StringType);
       const inputHash = await objectWrite(testRepo, inputEncoder('parallel test'));
 
+      // Use a slow command
+      const slowCopyCmd = ['bash', '-c', 'sleep 0.1; cp "$1" "$2"', '--', '{input}', '{output}'];
+
       await createPackageWithTasks(
         testRepo,
         [
-          { name: 'task-1', runner: 'slow-copy', inputs: [inputPath], output: [variant('field', 'out1')] },
-          { name: 'task-2', runner: 'slow-copy', inputs: [inputPath], output: [variant('field', 'out2')] },
-          { name: 'task-3', runner: 'slow-copy', inputs: [inputPath], output: [variant('field', 'out3')] },
-          { name: 'task-4', runner: 'slow-copy', inputs: [inputPath], output: [variant('field', 'out4')] },
+          { name: 'task-1', command: slowCopyCmd, inputs: [inputPath], output: [variant('field', 'out1')] },
+          { name: 'task-2', command: slowCopyCmd, inputs: [inputPath], output: [variant('field', 'out2')] },
+          { name: 'task-3', command: slowCopyCmd, inputs: [inputPath], output: [variant('field', 'out3')] },
+          { name: 'task-4', command: slowCopyCmd, inputs: [inputPath], output: [variant('field', 'out4')] },
         ],
         structure,
         {

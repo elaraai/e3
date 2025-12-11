@@ -9,7 +9,7 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { existsSync, writeFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { StringType, encodeBeast2For } from '@elaraai/east';
 import e3 from '@elaraai/e3';
@@ -370,7 +370,7 @@ describe('gc', () => {
     it('ignores undeployed workspaces', async () => {
       // Store an orphaned object
       const data = new Uint8Array([11, 22, 33]);
-      const hash = await objectWrite(testRepo, data);
+      await objectWrite(testRepo, data);
 
       // Create empty workspace file (undeployed)
       const wsDir = join(testRepo, 'workspaces');

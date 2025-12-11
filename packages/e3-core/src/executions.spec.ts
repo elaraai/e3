@@ -11,8 +11,8 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { variant, StringType, encodeBeast2For } from '@elaraai/east';
-import { TaskObjectType, type CommandPart } from '@elaraai/e3-types';
+import { variant, StringType, ArrayType, encodeBeast2For, East, IRType } from '@elaraai/east';
+import { TaskObjectType } from '@elaraai/e3-types';
 import {
   inputsHash,
   executionPath,
@@ -21,11 +21,9 @@ import {
   executionList,
   executionListForTask,
   executionReadLog,
-  configRead,
-  configWrite,
   taskExecute,
 } from './executions.js';
-import { objectWrite, computeHash } from './objects.js';
+import { objectWrite } from './objects.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
 
 describe('executions', () => {
@@ -38,6 +36,42 @@ describe('executions', () => {
   afterEach(() => {
     removeTestRepo(testRepo);
   });
+
+  /**
+   * Helper to create a command IR object.
+   *
+   * Creates an East FunctionIR: (inputs: Array<String>, output: String) -> Array<String>
+   * that returns the provided command parts as a literal array.
+   */
+  async function createCommandIr(repoPath: string, parts: string[]): Promise<string> {
+    // Build an East function that returns the command array
+    // The function signature is: (inputs: Array<String>, output: String) -> Array<String>
+    const commandFn = East.function(
+      [ArrayType(StringType), StringType],
+      ArrayType(StringType),
+      ($, inputs, output) => {
+        // Build the result array, substituting inputs[i] and output as needed
+        const result: (string | ReturnType<typeof inputs.get>)[] = [];
+        for (const part of parts) {
+          if (part === '{input}' || part === '{input0}') {
+            result.push(inputs.get(0n));
+          } else if (part.match(/^\{input(\d+)\}$/)) {
+            const idx = BigInt(part.match(/^\{input(\d+)\}$/)![1]);
+            result.push(inputs.get(idx));
+          } else if (part === '{output}') {
+            result.push(output);
+          } else {
+            result.push(part);
+          }
+        }
+        return result;
+      }
+    );
+
+    const ir = commandFn.toIR().ir;
+    const encoder = encodeBeast2For(IRType);
+    return objectWrite(repoPath, encoder(ir));
+  }
 
   describe('inputsHash', () => {
     it('computes consistent hash for same inputs', () => {
@@ -213,37 +247,11 @@ describe('executions', () => {
     });
   });
 
-  describe('configRead and configWrite', () => {
-    it('reads empty config from empty file', async () => {
-      const config = await configRead(testRepo);
-      assert.ok(config.runners instanceof Map);
-      assert.strictEqual(config.runners.size, 0);
-    });
-
-    it('round-trips config', async () => {
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('test-runner', [
-        variant('literal', 'echo'),
-        variant('literal', 'hello'),
-      ]);
-
-      await configWrite(testRepo, { runners });
-      const config = await configRead(testRepo);
-
-      assert.strictEqual(config.runners.size, 1);
-      assert.ok(config.runners.has('test-runner'));
-      const parts = config.runners.get('test-runner')!;
-      assert.strictEqual(parts.length, 2);
-      assert.strictEqual(parts[0].type, 'literal');
-      assert.strictEqual(parts[0].value, 'echo');
-    });
-  });
-
   describe('taskExecute', () => {
-    it('returns error for missing runner', async () => {
-      // Create a task object with unknown runner
+    it('returns error for missing command IR', async () => {
+      // Create a task object with non-existent command IR hash
       const task = {
-        runner: 'nonexistent-runner',
+        commandIr: 'a'.repeat(64), // Non-existent hash
         inputs: [],
         output: [],
       };
@@ -253,22 +261,20 @@ describe('executions', () => {
       const result = await taskExecute(testRepo, taskHash, []);
 
       assert.strictEqual(result.state, 'error');
-      assert.ok(result.error?.includes('Runner not configured'));
+      assert.ok(result.error?.includes('Failed to evaluate command IR'));
     });
 
-    it('executes simple cp runner successfully', async () => {
-      // Configure a runner that copies input to output
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('copy', [
-        variant('literal', 'cp'),
-        variant('input_path', null),
-        variant('output_path', null),
+    it('executes simple cp command successfully', async () => {
+      // Create command IR: cp {input} {output}
+      const commandIrHash = await createCommandIr(testRepo, [
+        'cp',
+        '{input}',
+        '{output}',
       ]);
-      await configWrite(testRepo, { runners });
 
       // Create a task object
       const task = {
-        runner: 'copy',
+        commandIr: commandIrHash,
         inputs: [[variant('field', 'test')]],
         output: [variant('field', 'output')],
       };
@@ -291,18 +297,16 @@ describe('executions', () => {
     });
 
     it('caches successful executions', async () => {
-      // Configure runner
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('copy', [
-        variant('literal', 'cp'),
-        variant('input_path', null),
-        variant('output_path', null),
+      // Create command IR
+      const commandIrHash = await createCommandIr(testRepo, [
+        'cp',
+        '{input}',
+        '{output}',
       ]);
-      await configWrite(testRepo, { runners });
 
       // Create task
       const task = {
-        runner: 'copy',
+        commandIr: commandIrHash,
         inputs: [[variant('field', 'test')]],
         output: [variant('field', 'output')],
       };
@@ -327,18 +331,16 @@ describe('executions', () => {
     });
 
     it('force bypasses cache', async () => {
-      // Configure runner
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('copy', [
-        variant('literal', 'cp'),
-        variant('input_path', null),
-        variant('output_path', null),
+      // Create command IR
+      const commandIrHash = await createCommandIr(testRepo, [
+        'cp',
+        '{input}',
+        '{output}',
       ]);
-      await configWrite(testRepo, { runners });
 
       // Create task
       const task = {
-        runner: 'copy',
+        commandIr: commandIrHash,
         inputs: [[variant('field', 'test')]],
         output: [variant('field', 'output')],
       };
@@ -360,21 +362,19 @@ describe('executions', () => {
     });
 
     it('captures stdout and stderr', async () => {
-      // Configure a runner that echoes to both streams
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('echo-both', [
-        variant('literal', 'bash'),
-        variant('literal', '-c'),
-        variant('literal', 'echo stdout; echo stderr >&2; cp "$1" "$2"'),
-        variant('literal', '--'),
-        variant('input_path', null),
-        variant('output_path', null),
+      // Create command IR that echoes to both streams
+      const commandIrHash = await createCommandIr(testRepo, [
+        'bash',
+        '-c',
+        'echo stdout; echo stderr >&2; cp "$1" "$2"',
+        '--',
+        '{input}',
+        '{output}',
       ]);
-      await configWrite(testRepo, { runners });
 
       // Create task
       const task = {
-        runner: 'echo-both',
+        commandIr: commandIrHash,
         inputs: [[variant('field', 'test')]],
         output: [variant('field', 'output')],
       };
@@ -410,18 +410,16 @@ describe('executions', () => {
     });
 
     it('handles failed commands', async () => {
-      // Configure a runner that fails
-      const runners = new Map<string, CommandPart[]>();
-      runners.set('fail', [
-        variant('literal', 'bash'),
-        variant('literal', '-c'),
-        variant('literal', 'exit 42'),
+      // Create command IR that fails
+      const commandIrHash = await createCommandIr(testRepo, [
+        'bash',
+        '-c',
+        'exit 42',
       ]);
-      await configWrite(testRepo, { runners });
 
       // Create task
       const task = {
-        runner: 'fail',
+        commandIr: commandIrHash,
         inputs: [],
         output: [variant('field', 'output')],
       };

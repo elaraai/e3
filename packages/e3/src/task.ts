@@ -11,8 +11,8 @@
  * - `.tasks.${name}.output` - The output dataset (public)
  */
 
-import type { EastType, FunctionExpr, FunctionIR } from '@elaraai/east';
-import { Expr, variant, VariantType, StructType, ArrayType, StringType, RecursiveType } from '@elaraai/east';
+import type { BlockBuilder, EastType, ExprType, FunctionExpr, FunctionIR } from '@elaraai/east';
+import { Expr, variant, ArrayType, StringType, East, IRType } from '@elaraai/east';
 import type { DatasetDef, DataTreeDef, TaskDef } from './types.js';
 
 /**
@@ -26,22 +26,6 @@ export const tasksTree: DataTreeDef = {
   path: [variant('field', 'tasks')],
   deps: new Set(),
 };
-
-/**
- * East type for FunctionIR.
- *
- * This is a recursive variant type representing compiled East functions.
- * Used for storing task implementations in the data tree.
- */
-const IRType = RecursiveType(self => VariantType({
-  Function: StructType({
-    inputs: ArrayType(StructType({ name: StringType, type: self })),
-    output: self,
-    body: self,
-  }),
-  // Simplified - the full IR type has many more variants
-  // but for storage purposes we just need the structure to serialize
-})) as EastType;
 
 /**
  * Creates a subtree for a task at `.tasks.${name}`.
@@ -108,7 +92,6 @@ function createOutputDataset<Name extends string, Output extends EastType>(
  */
 function collectDeps(
   taskTree: DataTreeDef,
-  functionIRDataset: DatasetDef,
   outputDataset: DatasetDef,
   inputs: DatasetDef[],
 ): Set<DataTreeDef | DatasetDef | TaskDef> {
@@ -119,9 +102,6 @@ function collectDeps(
 
   // Include the task's subtree
   deps.add(taskTree);
-
-  // Include the function_ir dataset
-  deps.add(functionIRDataset);
 
   // Include all input datasets and their deps
   for (const input of inputs) {
@@ -138,7 +118,7 @@ function collectDeps(
 }
 
 /**
- * Defines a task.
+ * Defines a task that runs an East function to produce an output dataset.
  *
  * Tasks read from input datasets and produce an output dataset.
  * When input datasets change, the task re-runs automatically.
@@ -154,6 +134,8 @@ function collectDeps(
  * @param inputs - Input datasets to read from
  * @param fn - Implementation function
  * @returns A TaskDef with `.output` for chaining
+ * 
+ * @see {@link customTask} for defining tasks with custom command logic (e.g. performing non-East operations).
  *
  * @example
  * ```ts
@@ -177,6 +159,9 @@ export function task<Name extends string, Inputs extends Array<DatasetDef>, Outp
   name: Name,
   inputs: Inputs,
   fn: FunctionExpr<{ [K in keyof Inputs]: NoInfer<Inputs>[K] extends DatasetDef<infer T> ? T : never }, Output>,
+  config?: {
+    runner?: string[],
+  }
 ): TaskDef<Output, [variant<'field', 'tasks'>, variant<'field', Name>, variant<'field', 'output'>]> {
   const ir = fn.toIR().ir;
   const outputType = Expr.type(fn).output;
@@ -187,16 +172,95 @@ export function task<Name extends string, Inputs extends Array<DatasetDef>, Outp
   // Create the function_ir dataset (private, holds the IR)
   const functionIRDataset = createFunctionIRDataset(name, taskTree, ir);
 
+  // The first input is the FunctionIR to execute
+  const input_datasets = [
+    functionIRDataset,
+    ...inputs
+  ];
+
   // Create the output dataset
   const output = createOutputDataset(name, taskTree, outputType);
 
-  return {
+  // Build the command for our east-py runner
+  const commandFn = East.function(
+    [ArrayType(StringType), StringType],
+    ArrayType(StringType),
+    ($, input_paths, output_path) => {
+      const command = $.let(config?.runner ?? ['east-py', 'run', '--std', '--io'], ArrayType(StringType));
+
+      // Function argument paths
+      const i = $.let(1n);
+      $.while(East.less(i, input_paths.size()), $ => {
+        $(command.pushLast("-i"));
+        $(command.pushLast(input_paths.get(i)));
+        $.assign(i, i.add(1n));
+      });
+
+      // Output path
+      $(command.pushLast('-o'))
+      $(command.pushLast(output_path))
+
+      // Function IR is the first input
+      $(command.pushLast(input_paths.get(0n)))
+
+      $.return(command);
+    }
+  );
+
+  const taskDef: TaskDef<Output, [variant<'field', 'tasks'>, variant<'field', Name>, variant<'field', 'output'>]> = {
     kind: 'task',
     name,
-    runner: 'east-node',
+    command: commandFn.toIR().ir,
+    inputs: input_datasets,
+    output,
+    deps: collectDeps(taskTree, output, input_datasets),
+  };
+
+  // Add the task to the output's deps so downstream tasks collect this task's deps
+  output.deps.add(taskDef);
+
+  return taskDef;
+}
+
+export function customTask<Name extends string, Inputs extends Array<DatasetDef>, Output extends EastType>(
+  name: Name,
+  inputs: Inputs,
+  outputType: Output,
+  command: ($: BlockBuilder<StringType>, input_paths: ExprType<ArrayType<StringType>>, output_path: ExprType<StringType>) => Expr<StringType> | void,
+  _config?: object,
+): TaskDef<Output, [variant<'field', 'tasks'>, variant<'field', Name>, variant<'field', 'output'>]> {
+
+  // Create the task's subtree at .tasks.${name}
+  const taskTree = createTaskTree(name);
+
+  // Create the output dataset
+  const output = createOutputDataset(name, taskTree, outputType);
+
+  // Build the user's bash script string
+  const bashCommandFn = East.function(
+    [ArrayType(StringType), StringType],
+    StringType,
+    command
+  );
+
+  // Build the command to execute this in bash
+  const commandFn = East.function(
+    [ArrayType(StringType), StringType],
+    ArrayType(StringType),
+    ($, input_paths, output_path) => ["bash", "-c", bashCommandFn(input_paths, output_path)]
+  );
+
+  const taskDef: TaskDef<Output, [variant<'field', 'tasks'>, variant<'field', Name>, variant<'field', 'output'>]> = {
+    kind: 'task',
+    name,
+    command: commandFn.toIR().ir,
     inputs,
     output,
-    deps: collectDeps(taskTree, functionIRDataset, output, inputs),
-    fn: ir,
+    deps: collectDeps(taskTree, output, inputs),
   };
+
+  // Add the task to the output's deps so downstream tasks collect this task's deps
+  output.deps.add(taskDef);
+
+  return taskDef;
 }

@@ -68,16 +68,14 @@ export interface TaskDef<TOutput extends EastType = EastType, Path extends TreeP
   readonly kind: 'task';
   /** Task name */
   readonly name: string;
-  /** Runner to execute this task (e.g., "east-node") */
-  readonly runner: string;
+  /** Command construction function */
+  readonly command: FunctionIR;
   /** Input datasets this task reads from */
   readonly inputs: DatasetDef[];
   /** Output dataset this task writes to (at `.outputs.${name}`) */
   readonly output: DatasetDef<TOutput, Path>;
   /** Dependencies: all trees, datasets and tasks this task depends on */
   readonly deps: Set<DataTreeDef | DatasetDef | TaskDef>;
-  /** The implementation function (compiled to IR) */
-  readonly fn: FunctionIR;
 }
 
 /**

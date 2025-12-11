@@ -5,18 +5,23 @@
  * Dual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.
  */
 
-import { Command } from 'commander';
-import { initRepository } from './commands/init.js';
-import { runTask } from './commands/run.js';
-import { getTaskStatus } from './commands/status.js';
-import { getTaskOutput } from './commands/get.js';
-import { listTasks } from './commands/list.js';
-import { showLog } from './commands/log.js';
-import { convertFile } from './commands/convert.js';
-import { viewData } from './commands/view.js';
-import { getRepository } from './repo.js';
+/**
+ * e3 CLI - East Execution Engine command-line interface
+ *
+ * All commands take a repository path as the first argument (`.` for current directory).
+ */
 
-// TODO install commander-completions or similar for bash completions
+import { Command } from 'commander';
+import { initCommand } from './commands/init.js';
+import { packageCommand } from './commands/package.js';
+import { workspaceCommand } from './commands/workspace.js';
+import { listCommand } from './commands/list.js';
+import { getCommand } from './commands/get.js';
+import { setCommand } from './commands/set.js';
+import { startCommand } from './commands/start.js';
+import { statusCommand } from './commands/status.js';
+import { gcCommand } from './commands/gc.js';
+import { convertCommand } from './commands/convert.js';
 
 const program = new Command();
 
@@ -25,81 +30,134 @@ program
   .description('East Execution Engine - Execute tasks across multiple runtimes')
   .version('0.0.1-alpha.0');
 
+// Repository commands
 program
-  .command('init [path]')
+  .command('init <repo>')
   .description('Initialize a new e3 repository')
-  .action(async (path) => {
-    await initRepository(path);
-  });
+  .action(initCommand);
 
 program
-  .command('run <name> <ir> [args...]')
-  .description('Submit a task for execution')
-  .option('--e3-dir <path>', 'Path to e3 repository')
-  .action(async (name, ir, args, options) => {
-    const repoPath = getRepository(options.e3Dir);
-    await runTask(repoPath, name, ir, args || [], 'node');
-  });
+  .command('status <repo>')
+  .description('Show repository status (packages, workspaces)')
+  .action(statusCommand);
 
 program
-  .command('status <name>')
-  .description('Get status of a task')
-  .option('--e3-dir <path>', 'Path to e3 repository')
-  .action(async (name, options) => {
-    const repoPath = getRepository(options.e3Dir);
-    await getTaskStatus(repoPath, name);
-  });
+  .command('gc <repo>')
+  .description('Remove unreferenced objects')
+  .option('--dry-run', 'Report what would be deleted without deleting')
+  .option('--min-age <ms>', 'Minimum file age in ms before deletion', '60000')
+  .action(gcCommand);
+
+// Package commands
+program
+  .command('package')
+  .description('Package operations')
+  .addCommand(
+    new Command('import')
+      .description('Import package from .zip file')
+      .argument('<repo>', 'Repository path')
+      .argument('<zipPath>', 'Path to .zip file')
+      .action(packageCommand.import)
+  )
+  .addCommand(
+    new Command('export')
+      .description('Export package to .zip file')
+      .argument('<repo>', 'Repository path')
+      .argument('<pkg>', 'Package name[@version]')
+      .argument('<zipPath>', 'Output .zip path')
+      .action(packageCommand.export)
+  )
+  .addCommand(
+    new Command('list')
+      .description('List installed packages')
+      .argument('<repo>', 'Repository path')
+      .action(packageCommand.list)
+  )
+  .addCommand(
+    new Command('remove')
+      .description('Remove a package')
+      .argument('<repo>', 'Repository path')
+      .argument('<pkg>', 'Package name[@version]')
+      .action(packageCommand.remove)
+  );
+
+// Workspace commands
+program
+  .command('workspace')
+  .description('Workspace operations')
+  .addCommand(
+    new Command('create')
+      .description('Create an empty workspace')
+      .argument('<repo>', 'Repository path')
+      .argument('<name>', 'Workspace name')
+      .action(workspaceCommand.create)
+  )
+  .addCommand(
+    new Command('deploy')
+      .description('Deploy a package to a workspace')
+      .argument('<repo>', 'Repository path')
+      .argument('<ws>', 'Workspace name')
+      .argument('<pkg>', 'Package name[@version]')
+      .action(workspaceCommand.deploy)
+  )
+  .addCommand(
+    new Command('export')
+      .description('Export workspace as a package')
+      .argument('<repo>', 'Repository path')
+      .argument('<ws>', 'Workspace name')
+      .argument('<zipPath>', 'Output .zip path')
+      .option('--name <name>', 'Package name (default: deployed package name)')
+      .option('--version <version>', 'Package version (default: auto-generated)')
+      .action(workspaceCommand.export)
+  )
+  .addCommand(
+    new Command('list')
+      .description('List workspaces')
+      .argument('<repo>', 'Repository path')
+      .action(workspaceCommand.list)
+  )
+  .addCommand(
+    new Command('remove')
+      .description('Remove a workspace')
+      .argument('<repo>', 'Repository path')
+      .argument('<ws>', 'Workspace name')
+      .action(workspaceCommand.remove)
+  );
+
+// Dataset commands
+program
+  .command('list <repo> [path]')
+  .description('List workspaces or tree contents at path (ws.path.to.tree)')
+  .action(listCommand);
 
 program
-  .command('get <refOrHash>')
-  .description('Get output of a completed task or any object by hash')
-  .option('-f, --format <format>', 'Output format (east, json)', 'east')
-  .option('--e3-dir <path>', 'Path to e3 repository')
-  .action(async (refOrHash, options) => {
-    const repoPath = getRepository(options.e3Dir);
-    await getTaskOutput(repoPath, refOrHash, options.format);
-  });
+  .command('get <repo> <path>')
+  .description('Get dataset value at path (ws.path.to.dataset)')
+  .option('-f, --format <format>', 'Output format: east, json, beast2', 'east')
+  .action(getCommand);
 
 program
-  .command('list')
-  .description('List all task refs')
-  .option('--e3-dir <path>', 'Path to e3 repository')
-  .action(async (options) => {
-    const repoPath = getRepository(options.e3Dir);
-    await listTasks(repoPath);
-  });
+  .command('set <repo> <path> <file>')
+  .description('Set dataset value from file (ws.path.to.dataset)')
+  .action(setCommand);
 
+// Execution commands
 program
-  .command('log <refOrHash>')
-  .description('Show commit history for a task')
-  .option('--e3-dir <path>', 'Path to e3 repository')
-  .action(async (refOrHash, options) => {
-    const repoPath = getRepository(options.e3Dir);
-    await showLog(repoPath, refOrHash);
-  });
+  .command('start <repo> <ws>')
+  .description('Execute tasks in a workspace')
+  .option('--filter <pattern>', 'Only run tasks matching pattern')
+  .option('--concurrency <n>', 'Max concurrent tasks', '4')
+  .option('--force', 'Force re-execution even if cached')
+  .action(startCommand);
 
+// Utility commands
 program
   .command('convert [input]')
-  .description('Convert between .east, .json, and .beast2 formats (reads from stdin if no input file)')
-  .option('--from <format>', 'Input format: east, json, or beast2 (default: auto-detect)')
-  .option('--to <format>', 'Output format: east, json, beast2, or type (default: east)', 'east')
+  .description('Convert between .east, .json, and .beast2 formats')
+  .option('--from <format>', 'Input format: east, json, beast2 (default: auto-detect)')
+  .option('--to <format>', 'Output format: east, json, beast2', 'east')
   .option('-o, --output <path>', 'Output file path (default: stdout)')
-  .option('--type <typespec>', 'Type specification in .east format (required for .json, optional for .east)')
-  .action(async (input, options) => {
-    await convertFile(input, options.to, options.output, options.type, options.from);
-  });
-
-program
-  .command('view [input]')
-  .description('Interactive data viewer for East values (reads from stdin if no input file)')
-  .option('--from <format>', 'Input format: east, json, or beast2 (default: auto-detect)')
-  .option('-f, --fullscreen', 'Start in fullscreen tree mode (detail pane minimized)')
-  .action(async (input, options) => {
-    await viewData(input, options.from, options.fullscreen);
-  });
-
-// TODO: Add additional commands
-// - e3 logs <name> [--follow]
-// - e3 gc
+  .option('--type <typespec>', 'Type specification in .east format')
+  .action(convertCommand);
 
 program.parse();

@@ -15,7 +15,7 @@
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import yazl from 'yazl';
-import { variant, encodeBeast2For, StructType, printIdentifier, SortedMap, toEastTypeValue } from '@elaraai/east';
+import { variant, encodeBeast2For, StructType, printIdentifier, SortedMap, toEastTypeValue, IRType } from '@elaraai/east';
 import type { Structure, PackageObject, DataRef, TaskObject } from '@elaraai/e3-types';
 import { DataRefType, PackageObjectType, TaskObjectType } from '@elaraai/e3-types';
 import type { PackageDef, PackageItem } from './types.js';
@@ -142,20 +142,18 @@ export async function export_(pkg: PackageDef<Record<string, unknown>>, outputPa
     } else if (item.kind === "task") {
       // Tasks are serialized and written immediately
 
-      // Build input paths: first is function_ir, rest are input datasets
-      const functionIrPath = [
-        variant('field', 'tasks'),
-        variant('field', item.name),
-        variant('field', 'function_ir'),
-      ];
-      const inputPaths = [
-        functionIrPath,
-        ...item.inputs.map(input => input.path),
-      ];
+      // Build input paths from the task definition
+      // Note: e3.task() includes function_ir in inputs, e3.customTask() does not
+      const inputPaths = item.inputs.map(input => input.path);
+
+      // Serialize command IR
+      const commandIrEncoder = encodeBeast2For(IRType);
+      const commandIrData = commandIrEncoder(item.command);
+      const commandIrHash = addObject(zipfile, Buffer.from(commandIrData));
 
       // Build TaskObject
       const taskObject: TaskObject = {
-        runner: item.runner,
+        commandIr: commandIrHash,
         inputs: inputPaths,
         output: item.output.path,
       };

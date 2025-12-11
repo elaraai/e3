@@ -17,7 +17,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdirSync } from 'node:fs';
-import { convertCore } from './convert.js';
+import { convertCore } from './convert.impl.js';
 import { createTestDir, removeTestDir, writeTestFile } from '../cli-test-helpers.js';
 
 describe('convert command', () => {

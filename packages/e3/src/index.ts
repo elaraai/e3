@@ -54,7 +54,7 @@ import type {
   TaskDef,
 } from './types.js';
 import { input } from './input.js';
-import { task } from './task.js';
+import { task, customTask } from './task.js';
 import { package_ } from './package.js';
 import { export_ } from './export.js';
 
@@ -76,6 +76,7 @@ export type {
 const e3 = {
   input,
   task,
+  customTask,
   package: package_,
   export: export_,
 };
@@ -83,7 +84,7 @@ const e3 = {
 export default e3;
 
 // Also export individual functions for tree-shaking
-export { input, task, package_ as package, export_ as export };
+export { input, task, customTask, package_ as package, export_ as export };
 
 // Singleton tree definitions
 export { inputsTree } from './input.js';

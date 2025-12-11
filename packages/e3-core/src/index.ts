@@ -101,9 +101,8 @@ export {
   executionReadLog,
   type LogReadOptions,
   type LogChunk,
-  // Config
-  configRead,
-  configWrite,
+  // Command IR evaluation
+  evaluateCommandIr,
   // Process detection
   isProcessAlive,
   // Execution

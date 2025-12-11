@@ -11,7 +11,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { StringType } from '@elaraai/east';
+import { StringType, IntegerType, East } from '@elaraai/east';
 import e3 from '@elaraai/e3';
 import {
   packageImport,
@@ -19,9 +19,10 @@ import {
   packageRemove,
   packageList,
   packageResolve,
+  packageRead,
 } from './packages.js';
 import { objectRead } from './objects.js';
-import { createTestRepo, removeTestRepo, createTempDir, removeTempDir, zipEqual, readZipEntries } from './test-helpers.js';
+import { createTestRepo, removeTestRepo, createTempDir, removeTempDir, zipEqual } from './test-helpers.js';
 
 describe('packages', () => {
   let testRepo: string;
@@ -300,6 +301,176 @@ describe('packages', () => {
         async () => await packageExport(testRepo, 'nonexistent', '1.0.0', exportZip),
         /ENOENT/
       );
+    });
+  });
+
+  describe('packages with tasks', () => {
+    it('imports and reads package with single East task', async () => {
+      // Create package with a single task
+      const input_x = e3.input('x', IntegerType, 10n);
+      const task_double = e3.task(
+        'double',
+        [input_x],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.multiply(2n)
+        )
+      );
+
+      const pkg = e3.package('single-task', '1.0.0', task_double);
+      const zipPath = join(tempDir, 'single-task.zip');
+      await e3.export(pkg, zipPath);
+
+      // Import and read
+      const importResult = await packageImport(testRepo, zipPath);
+      assert.strictEqual(importResult.name, 'single-task');
+      assert.strictEqual(importResult.version, '1.0.0');
+
+      // Read the package object to verify tasks are present
+      const pkgObject = await packageRead(testRepo, 'single-task', '1.0.0');
+      assert.strictEqual(pkgObject.tasks.size, 1);
+      assert.ok(pkgObject.tasks.has('double'), 'Should have double task');
+    });
+
+    it('imports and reads package with two tasks (simpler than diamond)', async () => {
+      // Simpler test: two independent tasks to isolate the issue
+      const input_a = e3.input('a', IntegerType, 10n);
+      const input_b = e3.input('b', IntegerType, 5n);
+
+      const task_left = e3.task(
+        'left',
+        [input_a],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, a) => a.multiply(2n)
+        )
+      );
+
+      const task_right = e3.task(
+        'right',
+        [input_b],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, b) => b.multiply(3n)
+        )
+      );
+
+      const pkg = e3.package('two-task-test', '1.0.0', task_left, task_right);
+      const zipPath = join(tempDir, 'two-task.zip');
+      await e3.export(pkg, zipPath);
+
+      // Import
+      const importResult = await packageImport(testRepo, zipPath);
+      assert.strictEqual(importResult.name, 'two-task-test');
+      assert.strictEqual(importResult.version, '1.0.0');
+
+      // Read the package object
+      const pkgObject = await packageRead(testRepo, 'two-task-test', '1.0.0');
+
+      // Should have both tasks
+      assert.strictEqual(pkgObject.tasks.size, 2);
+      assert.ok(pkgObject.tasks.has('left'), 'Should have left task');
+      assert.ok(pkgObject.tasks.has('right'), 'Should have right task');
+    });
+
+    it('imports and reads package with diamond dependency (multiple tasks)', async () => {
+      // Create diamond dependency pattern:
+      // input_a, input_b -> task_left, task_right -> task_merge
+      const input_a = e3.input('a', IntegerType, 10n);
+      const input_b = e3.input('b', IntegerType, 5n);
+
+      const task_left = e3.task(
+        'left',
+        [input_a, input_b],
+        East.function(
+          [IntegerType, IntegerType],
+          IntegerType,
+          ($, a, b) => a.add(b)
+        )
+      );
+
+      const task_right = e3.task(
+        'right',
+        [input_a, input_b],
+        East.function(
+          [IntegerType, IntegerType],
+          IntegerType,
+          ($, a, b) => a.multiply(b)
+        )
+      );
+
+      const task_merge = e3.task(
+        'merge',
+        [task_left.output, task_right.output],
+        East.function(
+          [IntegerType, IntegerType],
+          IntegerType,
+          ($, left, right) => left.add(right)
+        )
+      );
+
+      const pkg = e3.package('diamond-test', '1.0.0', task_merge);
+      const zipPath = join(tempDir, 'diamond.zip');
+      await e3.export(pkg, zipPath);
+
+      // Import
+      const importResult = await packageImport(testRepo, zipPath);
+      assert.strictEqual(importResult.name, 'diamond-test');
+      assert.strictEqual(importResult.version, '1.0.0');
+
+      // Read the package object
+      const pkgObject = await packageRead(testRepo, 'diamond-test', '1.0.0');
+
+      // Should have all 3 tasks
+      assert.strictEqual(pkgObject.tasks.size, 3);
+      assert.ok(pkgObject.tasks.has('left'), 'Should have left task');
+      assert.ok(pkgObject.tasks.has('right'), 'Should have right task');
+      assert.ok(pkgObject.tasks.has('merge'), 'Should have merge task');
+
+      // Verify task hashes are present (tasks Map contains name -> hash)
+      const mergeTaskHash = pkgObject.tasks.get('merge')!;
+      assert.ok(typeof mergeTaskHash === 'string', 'Task hash should be a string');
+      assert.strictEqual(mergeTaskHash.length, 64, 'Task hash should be 64 chars (SHA256)');
+    });
+
+    it('roundtrip export of package with tasks preserves content', async () => {
+      const input_x = e3.input('x', IntegerType, 10n);
+      const task_double = e3.task(
+        'double',
+        [input_x],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.multiply(2n)
+        )
+      );
+
+      const pkg = e3.package('task-roundtrip', '1.0.0', task_double);
+      const originalZip = join(tempDir, 'task-original.zip');
+      await e3.export(pkg, originalZip);
+      await packageImport(testRepo, originalZip);
+
+      // Export from repo
+      const exportedZip = join(tempDir, 'task-exported.zip');
+      await packageExport(testRepo, 'task-roundtrip', '1.0.0', exportedZip);
+
+      // Import into second repo
+      const testRepo2 = createTestRepo();
+      try {
+        const result = await packageImport(testRepo2, exportedZip);
+        assert.strictEqual(result.name, 'task-roundtrip');
+        assert.strictEqual(result.version, '1.0.0');
+
+        // Verify tasks are preserved
+        const pkgObject = await packageRead(testRepo2, 'task-roundtrip', '1.0.0');
+        assert.strictEqual(pkgObject.tasks.size, 1);
+        assert.ok(pkgObject.tasks.has('double'));
+      } finally {
+        removeTestRepo(testRepo2);
+      }
     });
   });
 });

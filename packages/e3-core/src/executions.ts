@@ -18,13 +18,11 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { createWriteStream } from 'fs';
 import { tmpdir } from 'os';
-import { decodeBeast2For, encodeBeast2For, variant } from '@elaraai/east';
+import { decodeBeast2For, encodeBeast2For, variant, EastIR, IRType } from '@elaraai/east';
+import type { FunctionIR } from '@elaraai/east';
 import {
   ExecutionStatusType,
   type ExecutionStatus,
-  ConfigType,
-  type Config,
-  type CommandPart,
   TaskObjectType,
   type TaskObject,
 } from '@elaraai/e3-types';
@@ -261,43 +259,54 @@ export async function executionReadLog(
 }
 
 // ============================================================================
-// Configuration
+// Command IR Evaluation
 // ============================================================================
 
 /**
- * Read repository configuration from e3.east
+ * Evaluate command IR to get exec args.
+ *
+ * The IR is an East function: (inputs: Array<String>, output: String) -> Array<String>
  *
  * @param repoPath - Path to .e3 repository
- * @returns Config object, or empty config if file is empty/missing
+ * @param commandIrHash - Hash of the IR object
+ * @param inputPaths - Paths to staged input files
+ * @param outputPath - Path where output should be written
+ * @returns Array of strings to exec
  */
-export async function configRead(repoPath: string): Promise<Config> {
-  const configPath = path.join(repoPath, 'e3.east');
+export async function evaluateCommandIr(
+  repoPath: string,
+  commandIrHash: string,
+  inputPaths: string[],
+  outputPath: string
+): Promise<string[]> {
+  const irData = await objectRead(repoPath, commandIrHash);
 
   try {
-    const data = await fs.readFile(configPath);
-    if (data.length === 0) {
-      return { runners: new Map() };
-    }
-    const decoder = decodeBeast2For(ConfigType);
-    return decoder(data);
-  } catch {
-    return { runners: new Map() };
-  }
-}
+    // Decode the IR from beast2 format
+    const decoder = decodeBeast2For(IRType);
+    const ir = decoder(Buffer.from(irData)) as FunctionIR;
 
-/**
- * Write repository configuration to e3.east
- *
- * @param repoPath - Path to .e3 repository
- * @param config - Config object to write
- */
-export async function configWrite(
-  repoPath: string,
-  config: Config
-): Promise<void> {
-  const configPath = path.join(repoPath, 'e3.east');
-  const encoder = encodeBeast2For(ConfigType);
-  await fs.writeFile(configPath, encoder(config));
+    // Create EastIR wrapper and compile it (no platform functions needed)
+    const eastIr = new EastIR<[string[], string], string[]>(ir);
+    const compiledFn = eastIr.compile([]);
+
+    // Execute the compiled function with inputPaths and outputPath
+    const result = compiledFn(inputPaths, outputPath);
+
+    // Validate result is an array of strings
+    if (!Array.isArray(result)) {
+      throw new Error(`Command IR returned ${typeof result}, expected array`);
+    }
+    for (const item of result) {
+      if (typeof item !== 'string') {
+        throw new Error(`Command IR returned array containing ${typeof item}, expected strings`);
+      }
+    }
+
+    return result;
+  } catch (err) {
+    throw new Error(`Failed to evaluate command IR: ${err}`);
+  }
 }
 
 // ============================================================================
@@ -401,8 +410,9 @@ export interface ExecutionResult {
  * 1. Computes the execution identity from task + inputs
  * 2. Checks cache (unless force=true)
  * 3. Marshals inputs to a scratch directory
- * 4. Runs the task command
- * 5. Stores the output and updates status
+ * 4. Evaluates command IR to get exec args
+ * 5. Runs the command
+ * 6. Stores the output and updates status
  *
  * @param repoPath - Path to .e3 repository
  * @param taskHash - Hash of the task object
@@ -457,22 +467,7 @@ export async function taskExecute(
     };
   }
 
-  // Step 3: Read config and resolve runner
-  const config = await configRead(repoPath);
-  const runnerCommand = config.runners.get(task.runner);
-  if (!runnerCommand) {
-    return {
-      inputsHash: inHash,
-      cached: false,
-      state: 'error',
-      outputHash: null,
-      exitCode: null,
-      duration: Date.now() - startTime,
-      error: `Runner not configured: ${task.runner}`,
-    };
-  }
-
-  // Step 4: Create scratch directory
+  // Step 3: Create scratch directory
   const scratchDir = path.join(
     tmpdir(),
     `e3-exec-${taskHash.slice(0, 8)}-${inHash.slice(0, 8)}-${Date.now()}`
@@ -480,7 +475,7 @@ export async function taskExecute(
   await fs.mkdir(scratchDir, { recursive: true });
 
   try {
-    // Step 5: Marshal inputs to scratch dir
+    // Step 4: Marshal inputs to scratch dir
     const inputPaths: string[] = [];
     for (let i = 0; i < inputHashes.length; i++) {
       const inputPath = path.join(scratchDir, `input-${i}.beast2`);
@@ -489,9 +484,22 @@ export async function taskExecute(
       inputPaths.push(inputPath);
     }
 
-    // Step 6: Construct command from runner template
+    // Step 5: Evaluate command IR to get exec args
     const outputPath = path.join(scratchDir, 'output.beast2');
-    const args = expandCommand(runnerCommand, inputPaths, outputPath);
+    let args: string[];
+    try {
+      args = await evaluateCommandIr(repoPath, task.commandIr, inputPaths, outputPath);
+    } catch (err) {
+      return {
+        inputsHash: inHash,
+        cached: false,
+        state: 'error',
+        outputHash: null,
+        exitCode: null,
+        duration: Date.now() - startTime,
+        error: `Failed to evaluate command IR: ${err}`,
+      };
+    }
 
     if (args.length === 0) {
       return {
@@ -501,19 +509,17 @@ export async function taskExecute(
         outputHash: null,
         exitCode: null,
         duration: Date.now() - startTime,
-        error: 'Runner command is empty',
+        error: 'Command IR produced empty command',
       };
     }
 
-    // Step 7: Create execution directory
+    // Step 6: Create execution directory
     await fs.mkdir(execDir, { recursive: true });
 
-    // Step 8: Write initial "running" status
-    const pid = process.pid; // Will be updated after spawn
+    // Step 7: Get boot ID for crash detection
     const bootId = await getBootId();
-    const pidStartTime = await getPidStartTime(pid);
 
-    // Step 9: Execute command
+    // Step 8: Execute command
     const result = await runCommand(
       args,
       execDir,
@@ -522,7 +528,7 @@ export async function taskExecute(
       options
     );
 
-    // Step 10: Handle result
+    // Step 9: Handle result
     if (result.exitCode === 0) {
       // Success - read and store output
       try {
@@ -601,44 +607,6 @@ export async function taskExecute(
       // Ignore cleanup errors
     }
   }
-}
-
-/**
- * Expand a runner command template into actual arguments
- */
-function expandCommand(
-  parts: CommandPart[],
-  inputPaths: string[],
-  outputPath: string
-): string[] {
-  const args: string[] = [];
-  let inputIndex = 0;
-
-  for (const part of parts) {
-    if (part.type === 'literal') {
-      args.push(part.value);
-    } else if (part.type === 'input_path') {
-      if (inputIndex < inputPaths.length) {
-        args.push(inputPaths[inputIndex++]);
-      }
-    } else if (part.type === 'inputs') {
-      // Expand pattern for all remaining inputs
-      while (inputIndex < inputPaths.length) {
-        for (const inputPart of part.value) {
-          if (inputPart.type === 'literal') {
-            args.push(inputPart.value);
-          } else if (inputPart.type === 'input_path') {
-            args.push(inputPaths[inputIndex]);
-          }
-        }
-        inputIndex++;
-      }
-    } else if (part.type === 'output_path') {
-      args.push(outputPath);
-    }
-  }
-
-  return args;
 }
 
 /**

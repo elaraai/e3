@@ -50,18 +50,30 @@ export function package_<TItems extends (PackageItem | PackageDef<any>)[]>(
   version: string,
   ...items: TItems
 ): PackageDef<MergeDatasets<TItems>> {
-  // First collect everything in a temporary set
+  // Recursively collect all items and their transitive dependencies
   const all_items = new Set<PackageItem>();
+  const visited = new Set<PackageItem>();
+
+  function collect(item: PackageItem): void {
+    if (visited.has(item)) return;
+    visited.add(item);
+
+    // First collect all dependencies recursively
+    for (const dep of item.deps) {
+      collect(dep);
+    }
+
+    // Then add this item (ensures topological order)
+    all_items.add(item);
+  }
+
   for (const item of items) {
     if (item.kind === "package") {
       for (const dep of item.contents) {
         all_items.add(dep);
       }
     } else {
-      for (const dep of item.deps) {
-        all_items.add(dep);
-      }
-      all_items.add(item);
+      collect(item);
     }
   }
 

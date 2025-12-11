@@ -8,16 +8,17 @@
  *
  * This package defines the East types used for serializing e3 objects:
  * - Data references and tree structures
- * - Task definitions (runner, input/output paths)
+ * - Task definitions (command IR, input/output paths)
  * - Package objects
  * - Data structure and paths
- * - Repository configuration
+ * - Workspace state
+ * - Execution status
  *
  * Terminology:
  * - **Dataset**: A location holding a value (leaf node)
  * - **Tree**: A location containing other locations (branch node)
  * - **Structure**: The shape of the data tree
- * - **Task**: A computation with runner and input/output paths
+ * - **Task**: A computation with command IR and input/output paths
  * - **Path**: An address in the data tree
  */
 
@@ -63,19 +64,6 @@ export {
   PackageDatasetsType,
   type PackageDatasets,
 } from './package.js';
-
-// Configuration
-export {
-  InputPartType,
-  type InputPart,
-  CommandPartType,
-  type CommandPart,
-  RunnersConfigType,
-  type RunnersConfig,
-  ConfigType,
-  type Config,
-  emptyConfig,
-} from './config.js';
 
 // Workspace state
 export {

@@ -29,8 +29,9 @@ import {
 import { objectRead } from './objects.js';
 import {
   taskExecute,
+  executionGetOutput,
+  inputsHash,
   type ExecuteOptions,
-  type ExecutionResult,
 } from './executions.js';
 import {
   workspaceGetDatasetHash,
@@ -248,7 +249,7 @@ export async function dataflowExecute(
   const concurrency = options.concurrency ?? 4;
 
   // Build dependency graph
-  const { taskNodes, outputToTask, taskDependents } = await buildDependencyGraph(repoPath, ws);
+  const { taskNodes, taskDependents } = await buildDependencyGraph(repoPath, ws);
 
   // Track execution state
   const results: TaskExecutionResult[] = [];
@@ -270,11 +271,41 @@ export async function dataflowExecute(
     }
   }
 
-  // Check if the task's output is already assigned (no execution needed)
-  async function isTaskOutputAssigned(taskName: string): Promise<boolean> {
+  // Check if the task has a valid cached execution for current inputs
+  // Returns the output hash if cached, null if re-execution is needed
+  async function getCachedOutput(taskName: string): Promise<string | null> {
     const node = taskNodes.get(taskName)!;
-    const { refType, hash } = await workspaceGetDatasetHash(repoPath, ws, node.outputPath);
-    return refType === 'value' && hash !== null;
+
+    // Gather current input hashes
+    const currentInputHashes: string[] = [];
+    for (const inputPath of node.inputPaths) {
+      const { refType, hash } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
+      if (refType !== 'value' || hash === null) {
+        // Input not assigned, can't be cached
+        return null;
+      }
+      currentInputHashes.push(hash);
+    }
+
+    // Check if there's a cached execution for these inputs
+    const inHash = inputsHash(currentInputHashes);
+    const cachedOutputHash = await executionGetOutput(repoPath, node.hash, inHash);
+
+    if (cachedOutputHash === null) {
+      // No cached execution for current inputs
+      return null;
+    }
+
+    // Also verify the workspace output matches the cached output
+    // (in case the workspace was modified outside of execution)
+    const { refType, hash: wsOutputHash } = await workspaceGetDatasetHash(repoPath, ws, node.outputPath);
+    if (refType !== 'value' || wsOutputHash !== cachedOutputHash) {
+      // Workspace output doesn't match cached output, need to re-execute
+      // (or update workspace with cached value)
+      return null;
+    }
+
+    return cachedOutputHash;
   }
 
   // Execute a single task
@@ -389,10 +420,10 @@ export async function dataflowExecute(
 
         if (completed.has(taskName) || inProgress.has(taskName)) continue;
 
-        // Check if output is already assigned (skip execution)
-        const outputAssigned = await isTaskOutputAssigned(taskName);
-        if (outputAssigned && !options.force) {
-          // Output already exists, treat as cached success
+        // Check if there's a valid cached execution for current inputs
+        const cachedOutputHash = await getCachedOutput(taskName);
+        if (cachedOutputHash !== null && !options.force) {
+          // Valid cached execution exists for current inputs
           completed.add(taskName);
           cached++;
           const result: TaskExecutionResult = {
@@ -485,7 +516,7 @@ export async function dataflowGetGraph(
     dependsOn: string[];
   }>;
 }> {
-  const { taskNodes, outputToTask, taskDependents } = await buildDependencyGraph(repoPath, ws);
+  const { taskNodes, outputToTask } = await buildDependencyGraph(repoPath, ws);
 
   const tasks: Array<{
     name: string;
