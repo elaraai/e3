@@ -203,14 +203,12 @@ async function buildDependencyGraph(
       const producerTask = outputToTask.get(inputPathStr);
 
       if (producerTask) {
-        // This input comes from another task's output
+        // This input comes from another task's output.
+        // The task cannot run until the producer task completes,
+        // regardless of whether the output is currently assigned
+        // (it might be stale from a previous run).
         taskDependents.get(producerTask)!.add(taskName);
-
-        // Check if the input is currently unassigned
-        const { refType } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
-        if (refType === 'unassigned') {
-          node.unresolvedCount++;
-        }
+        node.unresolvedCount++;
       }
       // If not produced by a task, it's an external input - check if assigned
       else {
