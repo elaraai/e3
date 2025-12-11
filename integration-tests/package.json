@@ -1,6 +1,6 @@
 {
   "name": "e3-integration-tests",
-  "version": "0.0.1-alpha.0",
+  "version": "0.0.1-beta.0",
   "private": true,
   "type": "module",
   "description": "Integration tests for e3 - tests CLI and runner together",

@@ -1,6 +1,6 @@
 {
   "name": "@elaraai/e3",
-  "version": "0.0.1-alpha.0",
+  "version": "0.0.1-beta.0",
   "private": true,
   "description": "East Execution Engine - Monorepo for e3 packages",
   "type": "module",
