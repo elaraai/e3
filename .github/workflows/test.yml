@@ -19,12 +19,12 @@ jobs:
 
     steps:
       - name: Checkout e3 repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: e3
 
       - name: Checkout East repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: elaraai/East
           path: East

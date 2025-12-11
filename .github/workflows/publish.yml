@@ -44,7 +44,7 @@ jobs:
       contents: write  # Need write to push version bump and tag
       id-token: write  # Required for npm trusted publishers (OIDC)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
