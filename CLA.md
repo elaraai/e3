@@ -12,7 +12,7 @@ You hereby grant to the Company and to recipients of software distributed by the
 
 ## Relicensing Rights
 
-You grant the Company the right to license Your Contributions under any license terms, including but not limited to commercial licenses, in addition to the open source license under which the project is distributed.
+You grant the Company the right to license Your Contributions under any license terms, including but not limited to commercial licenses, in addition to the licenses under which the project is distributed.
 
 ## Your Representations
 

@@ -1,15 +1,6 @@
 # @elaraai/e3-core
 
-Programmatic API for e3 (East Execution Engine) repository operations.
-
-## Overview
-
-`e3-core` is the filesystem-based business logic layer for e3, similar to `libgit2` for git. It provides a clean programmatic API with no UI dependencies (no commander, no ink), making it suitable for:
-
-- Building custom CLI tools
-- Integration with other Node.js applications
-- Testing and automation
-- Alternative interfaces (web, desktop, etc.)
+Core library for e3 repository operations, similar to libgit2 for git.
 
 ## Installation
 
@@ -17,169 +8,69 @@ Programmatic API for e3 (East Execution Engine) repository operations.
 npm install @elaraai/e3-core
 ```
 
+## Overview
+
+Pure business logic with no UI dependencies. Use this to build custom tools, integrations, or alternative interfaces on top of e3.
+
 ## API
 
-### Repository Management
+### Repository
 
 ```typescript
-import {
-  initRepository,
-  findRepository,
-  getRepository,
-  isValidRepository,
-  setTaskRef,
-  deleteTaskRef,
-  listTaskRefs,
-} from '@elaraai/e3-core';
+import { initRepository, findRepository, getRepository } from '@elaraai/e3-core';
 
-// Initialize a new repository
-const result = initRepository('/path/to/project');
-if (!result.success) {
-  console.error(result.error);
-}
-
-// Find existing repository
+initRepository('/path/to/project');
 const repoPath = findRepository();  // Searches cwd and parents
-
-// Get repository or throw
-const repoPath = getRepository();  // Throws if not found
-
-// Manage task refs
-await setTaskRef(repoPath, 'my-task', taskId);
-await deleteTaskRef(repoPath, 'my-task');
-const refs = await listTaskRefs(repoPath);
 ```
 
-### Object Storage
+### Objects
 
 ```typescript
-import {
-  storeObject,
-  loadObject,
-  computeHash,
-  computeTaskId,
-} from '@elaraai/e3-core';
+import { storeObject, loadObject, computeTaskId } from '@elaraai/e3-core';
 
-// Store data
-const data = new TextEncoder().encode('hello world');
-const hash = await storeObject(repoPath, data, '.txt');
-
-// Load data
-const loadedData = await loadObject(repoPath, hash, '.txt');
-
-// Compute task ID from IR and args
-const taskId = computeTaskId(irHash, [arg1Hash, arg2Hash]);
+const hash = await storeObject(repoPath, data, '.beast2');
+const data = await loadObject(repoPath, hash, '.beast2');
+const taskId = computeTaskId(irHash, argsHashes);
 ```
 
 ### Commits
 
 ```typescript
-import {
-  createNewTaskCommit,
-  createTaskDoneCommit,
-  createTaskErrorCommit,
-  loadCommit,
-} from '@elaraai/e3-core';
+import { createNewTaskCommit, createTaskDoneCommit, loadCommit } from '@elaraai/e3-core';
 
-// Create commits
-const commitHash = await createNewTaskCommit(
-  repoPath,
-  taskId,
-  irHash,
-  argsHashes,
-  'node',
-  null  // parent commit
-);
-
-const doneCommit = await createTaskDoneCommit(
-  repoPath,
-  parentHash,
-  resultHash,
-  'node',
-  executionTimeUs
-);
-
-// Load commit
+const commitHash = await createNewTaskCommit(repoPath, taskId, irHash, argsHashes, 'node', null);
 const commit = await loadCommit(repoPath, commitHash);
 ```
 
-### Task State
+### Tasks
 
 ```typescript
-import {
-  updateTaskState,
-  getTaskState,
-  listTasks,
-} from '@elaraai/e3-core';
+import { updateTaskState, getTaskState, listTasks } from '@elaraai/e3-core';
 
-// Update task to point to latest commit
 await updateTaskState(repoPath, taskId, commitHash);
-
-// Get current commit for task
-const currentCommit = await getTaskState(repoPath, taskId);
-
-// List all tasks
-const taskIds = await listTasks(repoPath);
+const commit = await getTaskState(repoPath, taskId);
+const tasks = await listTasks(repoPath);
 ```
 
-### Resolution
+### Refs
 
 ```typescript
-import {
-  resolveToTaskId,
-  resolveToCommit,
-  resolveObjectHash,
-} from '@elaraai/e3-core';
+import { setTaskRef, deleteTaskRef, listTaskRefs, resolveToTaskId } from '@elaraai/e3-core';
 
-// Resolve ref or partial hash to task ID
+await setTaskRef(repoPath, 'my-task', taskId);
 const taskId = await resolveToTaskId(repoPath, 'my-task');
-const taskId = await resolveToTaskId(repoPath, 'abc123');  // partial hash
-
-// Resolve to latest commit
-const commitHash = await resolveToCommit(repoPath, 'my-task');
-
-// Resolve partial object hash
-const fullHash = await resolveObjectHash(repoPath, 'ab12');
 ```
 
-### Format Utilities
+## Related Repos
 
-```typescript
-import {
-  loadIR,
-  loadValue,
-  irToBeast2,
-  valueToBeast2,
-  formatEast,
-  parseEast,
-} from '@elaraai/e3-core';
+- **[east](https://github.com/elaraai/east)** - East language core
+- **[east-node](https://github.com/elaraai/east-node)** - Node.js runtime and platform functions
+- **[east-py](https://github.com/elaraai/east-py)** - Python runtime and data science
 
-// Load IR from .east, .json, or .beast2 file
-const ir = await loadIR('./function.east');
+## About Elara
 
-// Convert IR to Beast2
-const beast2Data = irToBeast2(ir);
-
-// Load/encode values
-const value = await loadValue('./arg.east', IntegerType);
-const encoded = valueToBeast2(value, IntegerType);
-```
-
-## Architecture
-
-`e3-core` contains pure business logic with minimal dependencies:
-
-- `@elaraai/east` - East IR and encoding/decoding
-- `@elaraai/e3-types` - Shared type definitions
-- Node.js built-ins (`fs`, `crypto`, `path`)
-
-It does **not** depend on:
-- `commander` (CLI framework)
-- `ink` (terminal UI)
-- Any UI/presentation libraries
-
-This makes it suitable as a library for building tools on top of e3.
+e3 is developed by [Elara AI](https://elaraai.com/), an AI-powered platform that creates economic digital twins of businesses. e3 powers the execution layer of Elara solutions, enabling durable and efficient execution of East programs across multiple runtimes.
 
 ## License
 
-UNLICENSED
+BSL 1.1. See [LICENSE.md](./LICENSE.md).

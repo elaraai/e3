@@ -7,7 +7,7 @@ Thank you for your interest in contributing! We welcome contributions from the c
 Before we can accept your contribution, you must sign our Contributor License Agreement (CLA). This agreement gives Elara AI Pty Ltd the right to use and relicense your contributions, including under commercial licenses, while you retain ownership of your contribution.
 
 **Why do we require a CLA?**
-This project is dual-licensed under AGPL-3.0 and commercial licenses. The CLA allows us to offer commercial licenses to users who wish to use this software in proprietary applications.
+This project uses a combination of open source and commercial licenses (including BSL 1.1 and dual AGPL-3.0/Commercial). The CLA allows us to offer commercial licenses and to relicense contributions as needed.
 
 ### Signing the CLA
 

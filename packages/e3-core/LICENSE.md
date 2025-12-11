@@ -6,7 +6,7 @@ Copyright (c) 2025 Elara AI Pty Ltd
 
 **Licensor:** Elara AI Pty Ltd
 
-**Licensed Work:** e3 (East Execution Engine)
+**Licensed Work:** @elaraai/e3-core
 
 **Change Date:** Four years from the date of each release
 

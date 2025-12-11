@@ -6,14 +6,18 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "integration-tests"
+    "integration-tests",
+    "test"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "clean": "npm run clean --workspaces --if-present && rm -rf node_modules"
+    "clean": "npm run clean --workspaces --if-present && rm -rf node_modules",
+    "fuzz": "npm run fuzz --workspace=e3-fuzz",
+    "fuzz:quick": "npm run fuzz:quick --workspace=e3-fuzz",
+    "fuzz:stress": "npm run fuzz:stress --workspace=e3-fuzz"
   },
   "keywords": [
     "east",

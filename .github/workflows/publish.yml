@@ -1,0 +1,234 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'prerelease'
+        type: choice
+        options:
+          - prerelease   # 0.0.1-alpha.7 -> 0.0.1-alpha.8 (npm tag: alpha)
+          - prepatch     # 0.0.1-alpha.8 -> 0.0.2-alpha.0 (npm tag: alpha)
+          - preminor     # 0.0.1-alpha.8 -> 0.1.0-alpha.0 (npm tag: alpha)
+          - premajor     # 0.0.1-alpha.8 -> 1.0.0-alpha.0 (npm tag: alpha)
+          - patch        # 0.0.1 -> 0.0.2 (npm tag: latest)
+          - minor        # 0.0.1 -> 0.1.0 (npm tag: latest)
+          - major        # 0.0.1 -> 1.0.0 (npm tag: latest)
+      publish_e3_types:
+        description: 'Publish @elaraai/e3-types'
+        required: true
+        default: true
+        type: boolean
+      publish_e3_core:
+        description: 'Publish @elaraai/e3-core'
+        required: true
+        default: true
+        type: boolean
+      publish_e3:
+        description: 'Publish @elaraai/e3'
+        required: true
+        default: true
+        type: boolean
+      publish_e3_cli:
+        description: 'Publish @elaraai/e3-cli'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Need write to push version bump and tag
+      id-token: write  # Required for npm trusted publishers (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all packages
+        run: npm run build
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+      - name: Determine npm tag
+        id: npm_tag
+        run: |
+          if [[ "${{ inputs.release_type }}" == pre* ]]; then
+            echo "tag=alpha" >> $GITHUB_OUTPUT
+            echo "preid=alpha" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "preid=" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Bump versions in all selected packages
+      - name: Bump e3-types version
+        if: ${{ inputs.publish_e3_types }}
+        id: version_types
+        working-directory: packages/e3-types
+        run: |
+          if [[ "${{ inputs.release_type }}" == pre* ]]; then
+            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version)
+          else
+            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version)
+          fi
+          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Bump e3-core version
+        if: ${{ inputs.publish_e3_core }}
+        id: version_core
+        working-directory: packages/e3-core
+        run: |
+          if [[ "${{ inputs.release_type }}" == pre* ]]; then
+            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version)
+          else
+            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version)
+          fi
+          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Bump e3 version
+        if: ${{ inputs.publish_e3 }}
+        id: version_e3
+        working-directory: packages/e3
+        run: |
+          if [[ "${{ inputs.release_type }}" == pre* ]]; then
+            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version)
+          else
+            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version)
+          fi
+          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Bump e3-cli version
+        if: ${{ inputs.publish_e3_cli }}
+        id: version_cli
+        working-directory: packages/e3-cli
+        run: |
+          if [[ "${{ inputs.release_type }}" == pre* ]]; then
+            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version)
+          else
+            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version)
+          fi
+          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
+      # Commit all version bumps
+      - name: Commit version bumps
+        run: |
+          git add -A
+          PACKAGES=""
+          if [[ "${{ inputs.publish_e3_types }}" == "true" ]]; then
+            PACKAGES="${PACKAGES} e3-types@${{ steps.version_types.outputs.new_version }}"
+          fi
+          if [[ "${{ inputs.publish_e3_core }}" == "true" ]]; then
+            PACKAGES="${PACKAGES} e3-core@${{ steps.version_core.outputs.new_version }}"
+          fi
+          if [[ "${{ inputs.publish_e3 }}" == "true" ]]; then
+            PACKAGES="${PACKAGES} e3@${{ steps.version_e3.outputs.new_version }}"
+          fi
+          if [[ "${{ inputs.publish_e3_cli }}" == "true" ]]; then
+            PACKAGES="${PACKAGES} e3-cli@${{ steps.version_cli.outputs.new_version }}"
+          fi
+          git commit -m "chore: bump versions -${PACKAGES}" || echo "No changes to commit"
+
+      # Create tags for each package
+      - name: Create tags
+        run: |
+          if [[ "${{ inputs.publish_e3_types }}" == "true" ]]; then
+            git tag "e3-types-${{ steps.version_types.outputs.new_version }}"
+          fi
+          if [[ "${{ inputs.publish_e3_core }}" == "true" ]]; then
+            git tag "e3-core-${{ steps.version_core.outputs.new_version }}"
+          fi
+          if [[ "${{ inputs.publish_e3 }}" == "true" ]]; then
+            git tag "e3-${{ steps.version_e3.outputs.new_version }}"
+          fi
+          if [[ "${{ inputs.publish_e3_cli }}" == "true" ]]; then
+            git tag "e3-cli-${{ steps.version_cli.outputs.new_version }}"
+          fi
+
+      - name: Push changes and tags
+        run: git push origin HEAD --tags
+
+      # Publish npm packages in dependency order
+      - name: Publish @elaraai/e3-types
+        if: ${{ inputs.publish_e3_types }}
+        run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
+        working-directory: packages/e3-types
+
+      - name: Publish @elaraai/e3-core
+        if: ${{ inputs.publish_e3_core }}
+        run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
+        working-directory: packages/e3-core
+
+      - name: Publish @elaraai/e3
+        if: ${{ inputs.publish_e3 }}
+        run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
+        working-directory: packages/e3
+
+      - name: Publish @elaraai/e3-cli
+        if: ${{ inputs.publish_e3_cli }}
+        run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
+        working-directory: packages/e3-cli
+
+      # Create GitHub releases
+      - name: Create GitHub Release for e3-types
+        if: ${{ inputs.publish_e3_types }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: e3-types-${{ steps.version_types.outputs.new_version }}
+          name: "@elaraai/e3-types ${{ steps.version_types.outputs.new_version }}"
+          generate_release_notes: true
+          prerelease: ${{ steps.npm_tag.outputs.prerelease == 'true' }}
+
+      - name: Create GitHub Release for e3-core
+        if: ${{ inputs.publish_e3_core }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: e3-core-${{ steps.version_core.outputs.new_version }}
+          name: "@elaraai/e3-core ${{ steps.version_core.outputs.new_version }}"
+          generate_release_notes: true
+          prerelease: ${{ steps.npm_tag.outputs.prerelease == 'true' }}
+
+      - name: Create GitHub Release for e3
+        if: ${{ inputs.publish_e3 }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: e3-${{ steps.version_e3.outputs.new_version }}
+          name: "@elaraai/e3 ${{ steps.version_e3.outputs.new_version }}"
+          generate_release_notes: true
+          prerelease: ${{ steps.npm_tag.outputs.prerelease == 'true' }}
+
+      - name: Create GitHub Release for e3-cli
+        if: ${{ inputs.publish_e3_cli }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: e3-cli-${{ steps.version_cli.outputs.new_version }}
+          name: "@elaraai/e3-cli ${{ steps.version_cli.outputs.new_version }}"
+          generate_release_notes: true
+          prerelease: ${{ steps.npm_tag.outputs.prerelease == 'true' }}

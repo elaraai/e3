@@ -1,7 +1,7 @@
 # e3 - East Execution Engine
 # Top-level Makefile for building all components
 
-.PHONY: all build test clean install dev help lint link unlink
+.PHONY: all build test clean install dev help lint link unlink fuzz fuzz-quick fuzz-stress fuzz-build set-east-version
 
 # Default target
 all: build
@@ -18,6 +18,9 @@ help:
 	@echo "  make dev            - Install dependencies and build for development"
 	@echo "  make link           - Link e3 CLI to PATH (makes 'e3' command available)"
 	@echo "  make unlink         - Unlink e3 CLI from PATH"
+	@echo "  make fuzz           - Run fuzz tests (100 iterations)"
+	@echo "  make fuzz-quick     - Run quick fuzz tests (1 iteration, all scenarios)"
+	@echo "  make fuzz-stress    - Run stress fuzz tests (1000 iterations)"
 
 # Install all dependencies (using npm workspaces)
 install:
@@ -73,3 +76,34 @@ unlink:
 	@echo "Unlinking e3 CLI from PATH..."
 	cd packages/e3-cli && npm unlink -g @elaraai/e3-cli || true
 	@echo "✓ e3 CLI has been unlinked"
+
+# Build fuzz tests
+fuzz-build:
+	@echo "Building fuzz tests..."
+	npm run build --workspace=e3-fuzz
+
+# Run fuzz tests (100 iterations)
+fuzz: fuzz-build
+	@echo "Running fuzz tests..."
+	npm run fuzz --workspace=e3-fuzz
+
+# Run quick fuzz tests (10 iterations)
+fuzz-quick: fuzz-build
+	@echo "Running quick fuzz tests..."
+	npm run fuzz:quick --workspace=e3-fuzz
+
+# Run stress fuzz tests (1000 iterations)
+fuzz-stress: fuzz-build
+	@echo "Running stress fuzz tests..."
+	npm run fuzz:stress --workspace=e3-fuzz
+
+
+# Update @elaraai/east version across all packages
+# Usage: make set-east-version VERSION=0.0.1-beta.1
+set-east-version:
+ifndef VERSION
+	$(error VERSION is required. Usage: make set-east-version VERSION=0.0.1-beta.1)
+endif
+	@echo "Updating @elaraai/east to version $(VERSION)..."
+	@find . -name "package.json" -exec sed -i 's/"@elaraai\/east": "[^"]*"/"@elaraai\/east": "^$(VERSION)"/g' {} \;
+	@echo "Done. Run 'npm install' to update dependencies."
