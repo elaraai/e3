@@ -144,4 +144,132 @@ describe('signal handling', () => {
       assert.ok(indicatesAbort, `Output should indicate abort. Got: ${output}`);
     });
   });
+
+  describe('workspace locking', () => {
+    it('rejects deploy while dataflow is running', async () => {
+      const input = e3.input('input', StringType, 'hello');
+
+      const slowTask = e3.customTask(
+        'slow',
+        [input],
+        StringType,
+        ($, inputs, output) => East.str`sleep 10 && cp ${inputs.get(0n)} ${output}`
+      );
+
+      const pkg = e3.package('lock-test', '1.0.0', slowTask);
+
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'lock-test@1.0.0'], testDir);
+
+      // Start a slow task
+      const startProc = spawnE3Command(['start', repoDir, 'ws'], testDir);
+
+      // Wait for task to start
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Try to deploy while dataflow is running - should fail with lock error
+      const deployResult = await runE3Command(
+        ['workspace', 'deploy', repoDir, 'ws', 'lock-test@1.0.0'],
+        testDir
+      );
+
+      // Should fail with lock error message
+      const output = deployResult.stdout + deployResult.stderr;
+      assert.ok(
+        output.toLowerCase().includes('lock') || deployResult.exitCode !== 0,
+        `Deploy should fail due to lock. Got: exitCode=${deployResult.exitCode}, output=${output}`
+      );
+
+      // Clean up - abort the running task
+      startProc.kill('SIGINT');
+      await startProc.result;
+    });
+
+    it('rejects remove while dataflow is running', async () => {
+      const input = e3.input('input', StringType, 'hello');
+
+      const slowTask = e3.customTask(
+        'slow',
+        [input],
+        StringType,
+        ($, inputs, output) => East.str`sleep 10 && cp ${inputs.get(0n)} ${output}`
+      );
+
+      const pkg = e3.package('lock-test-2', '1.0.0', slowTask);
+
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'lock-test-2@1.0.0'], testDir);
+
+      // Start a slow task
+      const startProc = spawnE3Command(['start', repoDir, 'ws'], testDir);
+
+      // Wait for task to start
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Try to remove while dataflow is running - should fail with lock error
+      const removeResult = await runE3Command(
+        ['workspace', 'remove', repoDir, 'ws'],
+        testDir
+      );
+
+      // Should fail with lock error message
+      const output = removeResult.stdout + removeResult.stderr;
+      assert.ok(
+        output.toLowerCase().includes('lock') || removeResult.exitCode !== 0,
+        `Remove should fail due to lock. Got: exitCode=${removeResult.exitCode}, output=${output}`
+      );
+
+      // Clean up - abort the running task
+      startProc.kill('SIGINT');
+      await startProc.result;
+    });
+
+    it('rejects start while another start is running', async () => {
+      const input = e3.input('input', StringType, 'hello');
+
+      const slowTask = e3.customTask(
+        'slow',
+        [input],
+        StringType,
+        ($, inputs, output) => East.str`sleep 10 && cp ${inputs.get(0n)} ${output}`
+      );
+
+      const pkg = e3.package('lock-test-3', '1.0.0', slowTask);
+
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'lock-test-3@1.0.0'], testDir);
+
+      // Start first dataflow
+      const startProc1 = spawnE3Command(['start', repoDir, 'ws'], testDir);
+
+      // Wait for task to start
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Try to start another dataflow - should fail with lock error
+      const startResult2 = await runE3Command(['start', repoDir, 'ws'], testDir);
+
+      // Should fail with lock error message
+      const output = startResult2.stdout + startResult2.stderr;
+      assert.ok(
+        output.toLowerCase().includes('lock') || startResult2.exitCode !== 0,
+        `Second start should fail due to lock. Got: exitCode=${startResult2.exitCode}, output=${output}`
+      );
+
+      // Clean up - abort the running task
+      startProc1.kill('SIGINT');
+      await startProc1.result;
+    });
+  });
 });

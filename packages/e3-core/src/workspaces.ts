@@ -30,6 +30,7 @@ import {
   WorkspaceExistsError,
   isNotFoundError,
 } from './errors.js';
+import { acquireWorkspaceLock } from './workspaceLock.js';
 
 /**
  * Get the path to a workspace's state file.
@@ -147,22 +148,32 @@ export async function workspaceCreate(
  *
  * Objects remain until repoGc is run.
  *
+ * Acquires a workspace lock to prevent removing a workspace while a dataflow
+ * is running. Throws WorkspaceLockError if the workspace is currently locked.
+ *
  * @param repoPath - Path to .e3 repository
  * @param name - Workspace name
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceLockError} If workspace is locked by another process
  */
 export async function workspaceRemove(
   repoPath: string,
   name: string
 ): Promise<void> {
-  const stateFile = statePath(repoPath, name);
+  // Acquire lock to prevent removing while dataflow is running
+  const lock = await acquireWorkspaceLock(repoPath, name);
   try {
-    await fs.unlink(stateFile);
-  } catch (err) {
-    if (isNotFoundError(err)) {
-      throw new WorkspaceNotFoundError(name);
+    const stateFile = statePath(repoPath, name);
+    try {
+      await fs.unlink(stateFile);
+    } catch (err) {
+      if (isNotFoundError(err)) {
+        throw new WorkspaceNotFoundError(name);
+      }
+      throw err;
     }
-    throw err;
+  } finally {
+    lock.release();
   }
 }
 
@@ -279,10 +290,15 @@ export async function workspaceSetRoot(
  * Creates the workspace if it doesn't exist. Writes state file atomically
  * containing deployment info and root hash.
  *
+ * Acquires a workspace lock to prevent conflicts with running dataflows
+ * or concurrent deploys. Throws WorkspaceLockError if the workspace is
+ * currently locked by another process.
+ *
  * @param repoPath - Path to .e3 repository
  * @param name - Workspace name
  * @param pkgName - Package name
  * @param pkgVersion - Package version
+ * @throws {WorkspaceLockError} If workspace is locked by another process
  */
 export async function workspaceDeploy(
   repoPath: string,
@@ -290,21 +306,28 @@ export async function workspaceDeploy(
   pkgName: string,
   pkgVersion: string
 ): Promise<void> {
-  // Resolve package hash and read package object
-  const packageHash = await packageResolve(repoPath, pkgName, pkgVersion);
-  const pkg = await packageRead(repoPath, pkgName, pkgVersion);
+  // Acquire workspace lock to prevent conflicts with running dataflows
+  // or concurrent deploys
+  const lock = await acquireWorkspaceLock(repoPath, name);
+  try {
+    // Resolve package hash and read package object
+    const packageHash = await packageResolve(repoPath, pkgName, pkgVersion);
+    const pkg = await packageRead(repoPath, pkgName, pkgVersion);
 
-  const now = new Date();
-  const state: WorkspaceState = {
-    packageName: pkgName,
-    packageVersion: pkgVersion,
-    packageHash,
-    deployedAt: now,
-    rootHash: pkg.data.value,
-    rootUpdatedAt: now,
-  };
+    const now = new Date();
+    const state: WorkspaceState = {
+      packageName: pkgName,
+      packageVersion: pkgVersion,
+      packageHash,
+      deployedAt: now,
+      rootHash: pkg.data.value,
+      rootUpdatedAt: now,
+    };
 
-  await writeState(repoPath, name, state);
+    await writeState(repoPath, name, state);
+  } finally {
+    lock.release();
+  }
 }
 
 /**

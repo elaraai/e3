@@ -12,7 +12,7 @@
  *   e3 start . my-workspace --force
  */
 
-import { dataflowExecute, DataflowAbortedError, type TaskExecutionResult } from '@elaraai/e3-core';
+import { dataflowExecute, DataflowAbortedError, type TaskExecutionResult, WorkspaceLockError } from '@elaraai/e3-core';
 import { resolveRepo, formatError, exitError } from '../utils.js';
 
 /**
@@ -97,6 +97,10 @@ export async function startCommand(
         console.log(`  Completed before abort: ${completed}`);
       }
       process.exit(130); // Standard exit code for SIGINT (128 + 2)
+    } else if (err instanceof WorkspaceLockError) {
+      console.log('');
+      console.log(`Workspace is locked by another process with PID: ${err.holder?.pid ?? 'unknown'}`);
+      process.exit(1);
     }
     exitError(formatError(err));
   }

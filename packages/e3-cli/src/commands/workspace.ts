@@ -14,6 +14,7 @@ import {
   workspaceList,
   workspaceRemove,
   workspaceGetState,
+  WorkspaceLockError,
 } from '@elaraai/e3-core';
 import { resolveRepo, parsePackageSpec, formatError, exitError } from '../utils.js';
 
@@ -45,6 +46,11 @@ export const workspaceCommand = {
 
       console.log(`Deployed ${name}@${version} to workspace: ${ws}`);
     } catch (err) {
+      if (err instanceof WorkspaceLockError) {
+        console.log('');
+        console.log(`Workspace is locked by another process with PID: ${err.holder?.pid ?? 'unknown'}`);
+        process.exit(1);
+      }
       exitError(formatError(err));
     }
   },
@@ -109,6 +115,11 @@ export const workspaceCommand = {
       console.log(`Removed workspace: ${ws}`);
       console.log('Run `e3 gc` to reclaim disk space');
     } catch (err) {
+      if (err instanceof WorkspaceLockError) {
+        console.log('');
+        console.log(`Workspace is locked by another process with PID: ${err.holder?.pid ?? 'unknown'}`);
+        process.exit(1);
+      }
       exitError(formatError(err));
     }
   },
