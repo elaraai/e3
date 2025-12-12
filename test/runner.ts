@@ -210,13 +210,17 @@ export async function runFuzzTests(config: RunnerConfig): Promise<RunnerResults>
     }
 
     // Progress indicator for non-verbose mode
-    if (!config.verbose && (i + 1) % 10 === 0) {
-      process.stdout.write('.');
+    if (!config.verbose) {
+      const completed = (i + 1) * activeScenarios.length;
+      const total = config.iterations * activeScenarios.length;
+      const pct = Math.round((completed / total) * 100);
+      const elapsed = formatDuration(Date.now() - startTime);
+      process.stdout.write(`\r[${pct}%] ${i + 1}/${config.iterations} iterations, ${results.passed} passed, ${results.failed} failed (${elapsed})`);
     }
   }
 
   if (!config.verbose) {
-    console.log(); // Newline after progress dots
+    console.log(); // Newline after progress
   }
 
   results.duration = Date.now() - startTime;

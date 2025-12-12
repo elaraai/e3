@@ -129,10 +129,10 @@ export function randomPackage(config: PackageConfig = {}): GeneratedPackage {
     });
   }
 
-  // Build the package using the last task (which will pull in all dependencies)
-  const lastTask = tasks[tasks.length - 1]!;
+  // Build the package including all tasks (not just the last one)
+  // This ensures orphaned branches in the DAG are still included
   const pkgName = `fuzz_pkg_${random.string(6)}`;
-  const pkg = e3.package(pkgName, '1.0.0', lastTask.taskDef);
+  const pkg = e3.package(pkgName, '1.0.0', ...tasks.map(t => t.taskDef));
 
   return {
     package: pkg,
