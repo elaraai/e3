@@ -70,7 +70,7 @@ export async function testConcurrentWritesDuringExecution(): Promise<ScenarioRes
     const writePromises: Promise<any>[] = [];
     for (let i = 0; i < 10; i++) {
       const valuePath = join(testDir, `value_${i}.east`);
-      writeFileSync(valuePath, `${i * 10}n`);
+      writeFileSync(valuePath, `${i * 10}`);
 
       // Fire off set commands without waiting
       writePromises.push(
@@ -85,22 +85,39 @@ export async function testConcurrentWritesDuringExecution(): Promise<ScenarioRes
     const startSucceeded = startResult.exitCode === 0;
     const writeSuccesses = writeResults.filter(r => r.exitCode === 0).length;
     const writeFailures = writeResults.filter(r => r.exitCode !== 0).length;
+    const lockErrors = writeResults.filter(r => r.stderr.includes('locked')).length;
 
     // Get final output
     const getResult = await runE3Command(['get', repoDir, 'ws.tasks.compute.output'], testDir);
 
     removeTestDir(testDir);
 
+    // Verify expected behavior:
+    // - Start should succeed
+    // - Some writes should fail with lock errors (proves locking is working)
+    if (!startSucceeded) {
+      throw new Error(`Start command failed: ${startResult.stderr}`);
+    }
+
+    // Any failures must be lock errors
+    const nonLockErrors = writeResults.filter(r => r.exitCode !== 0 && !r.stderr.includes('locked'));
+    if (nonLockErrors.length > 0) {
+      throw new Error(`Writes failed with unexpected errors: ${nonLockErrors.map(r => r.stderr).join(', ')}`);
+    }
+
+    // We expect at least some lock errors to prove locking is working
+    if (lockErrors === 0) {
+      throw new Error(`Expected some writes to fail with lock errors, but all ${writeSuccesses} writes succeeded. Locking may not be working.`);
+    }
+
     return {
-      success: true,  // Test "passes" if we didn't crash
+      success: true,
       state: {
         startSucceeded,
         writeSuccesses,
         writeFailures,
+        lockErrors,
         finalOutput: getResult.stdout.trim(),
-        // Log any errors for analysis
-        startStderr: startResult.stderr,
-        writeErrors: writeResults.filter(r => r.exitCode !== 0).map(r => r.stderr),
       },
       duration: Date.now() - startTime,
     };
@@ -158,20 +175,41 @@ export async function testMultipleSimultaneousStarts(): Promise<ScenarioResult> 
 
     const successes = results.filter(r => r.exitCode === 0).length;
     const failures = results.filter(r => r.exitCode !== 0).length;
+    const lockErrors = results.filter(r => r.stderr.includes('locked')).length;
 
     // Verify final state is consistent
     const getResult = await runE3Command(['get', repoDir, 'ws.tasks.double.output'], testDir);
 
     removeTestDir(testDir);
 
+    // Verify expected locking behavior:
+    // - Exactly 1 start should succeed (got the lock)
+    // - All others should fail with lock errors
+    if (successes !== 1) {
+      throw new Error(`Expected exactly 1 successful start, got ${successes}`);
+    }
+
+    if (failures !== 4) {
+      throw new Error(`Expected 4 failed starts, got ${failures}`);
+    }
+
+    if (lockErrors !== 4) {
+      throw new Error(`Expected 4 lock errors, got ${lockErrors}. Errors: ${results.filter(r => r.exitCode !== 0).map(r => r.stderr).join(', ')}`);
+    }
+
+    // Verify output is correct
+    const finalOutput = getResult.stdout.trim();
+    if (finalOutput !== '84') {
+      throw new Error(`Expected output '84', got '${finalOutput}'`);
+    }
+
     return {
       success: true,
       state: {
         successes,
         failures,
-        finalOutput: getResult.stdout.trim(),
-        expectedOutput: '84n',  // 42 * 2
-        errors: results.filter(r => r.exitCode !== 0).map(r => r.stderr),
+        lockErrors,
+        finalOutput,
       },
       duration: Date.now() - startTime,
     };
@@ -224,7 +262,7 @@ export async function testRapidSetStartCycles(): Promise<ScenarioResult> {
     const allPromises: Promise<any>[] = [];
     for (let i = 1; i <= 10; i++) {
       const valuePath = join(testDir, `value_${i}.east`);
-      writeFileSync(valuePath, `${i}n`);
+      writeFileSync(valuePath, `${i}`);
 
       // Don't await - fire and forget
       allPromises.push(runE3Command(['set', repoDir, 'ws.inputs.x', valuePath], testDir));
@@ -239,19 +277,49 @@ export async function testRapidSetStartCycles(): Promise<ScenarioResult> {
 
     const setSuccesses = setResults.filter(r => r.exitCode === 0).length;
     const startSuccesses = startResults.filter(r => r.exitCode === 0).length;
+    const startLockErrors = startResults.filter(r => r.stderr.includes('locked')).length;
 
     // Final state check
     const getResult = await runE3Command(['get', repoDir, 'ws.tasks.double.output'], testDir);
 
     removeTestDir(testDir);
 
+    // Verify locking behavior:
+    // - At least 1 start should succeed
+    // - Some starts should fail with lock errors (proves locking is working)
+    // - All failures must be lock errors
+    if (startSuccesses < 1) {
+      throw new Error(`Expected at least 1 successful start, got ${startSuccesses}`);
+    }
+
+    const startFailures = startResults.filter(r => r.exitCode !== 0).length;
+
+    // All failures must be lock errors
+    if (startFailures > 0 && startLockErrors !== startFailures) {
+      const nonLockErrors = startResults.filter(r => r.exitCode !== 0 && !r.stderr.includes('locked'));
+      throw new Error(`Start failures should be lock errors. Got ${startLockErrors} lock errors out of ${startFailures} failures. Non-lock errors: ${nonLockErrors.map(r => r.stderr).join(', ')}`);
+    }
+
+    // We expect at least some lock errors to prove locking is working
+    if (startLockErrors === 0) {
+      throw new Error(`Expected some starts to fail with lock errors, but all ${startSuccesses} starts succeeded. Locking may not be working.`);
+    }
+
+    // Verify we got a valid output (should be even number since we double)
+    const finalOutput = getResult.stdout.trim();
+    const outputNum = parseInt(finalOutput, 10);
+    if (isNaN(outputNum) || outputNum % 2 !== 0) {
+      throw new Error(`Expected even number output, got '${finalOutput}'`);
+    }
+
     return {
       success: true,
       state: {
         setSuccesses,
         startSuccesses,
+        startLockErrors,
         totalOps: results.length,
-        finalOutput: getResult.stdout.trim(),
+        finalOutput,
       },
       duration: Date.now() - startTime,
     };
@@ -318,6 +386,7 @@ export async function testInterleavedMultiWorkspace(): Promise<ScenarioResult> {
 
     const results = await Promise.all(ops);
     const successes = results.filter(r => r.exitCode === 0).length;
+    const lockErrors = results.filter(r => r.stderr.includes('locked')).length;
 
     // Verify each workspace has valid output
     const get1 = await runE3Command(['get', repoDir, 'ws1.tasks.double.output'], testDir);
@@ -326,14 +395,40 @@ export async function testInterleavedMultiWorkspace(): Promise<ScenarioResult> {
 
     removeTestDir(testDir);
 
+    // Verify behavior:
+    // - Some starts should fail with lock errors (same workspace locked)
+    // - Different workspaces should not block each other
+    // - All failures must be lock errors
+    const failures = results.filter(r => r.exitCode !== 0).length;
+    if (failures > 0 && lockErrors !== failures) {
+      const nonLockErrors = results.filter(r => r.exitCode !== 0 && !r.stderr.includes('locked'));
+      throw new Error(`Failures should be lock errors. Got ${lockErrors} lock errors out of ${failures} failures. Non-lock errors: ${nonLockErrors.map(r => r.stderr).join(', ')}`);
+    }
+
+    // We expect at least some lock errors to prove locking is working
+    // (5 iterations * 3 workspaces = 15 starts, but each workspace can only run 1 at a time)
+    if (lockErrors === 0) {
+      throw new Error(`Expected some starts to fail with lock errors, but all ${successes} starts succeeded. Locking may not be working.`);
+    }
+
+    // Verify all workspaces produced correct output
+    const ws1Output = get1.stdout.trim();
+    const ws2Output = get2.stdout.trim();
+    const ws3Output = get3.stdout.trim();
+
+    if (ws1Output !== '2' || ws2Output !== '2' || ws3Output !== '2') {
+      throw new Error(`Expected all outputs to be '2', got ws1='${ws1Output}', ws2='${ws2Output}', ws3='${ws3Output}'`);
+    }
+
     return {
       success: true,
       state: {
         successes,
+        lockErrors,
         totalOps: results.length,
-        ws1Output: get1.stdout.trim(),
-        ws2Output: get2.stdout.trim(),
-        ws3Output: get3.stdout.trim(),
+        ws1Output,
+        ws2Output,
+        ws3Output,
       },
       duration: Date.now() - startTime,
     };
