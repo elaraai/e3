@@ -6,10 +6,11 @@ This is an npm workspace monorepo containing the e3 (East Execution Engine) pack
 The directory structure is:
 
  - packages/e3-types - Shared type definitions for e3
+ - packages/e3 - TypeScript SKD for user to create e3 packages
  - packages/e3-core - Core business logic library (like libgit2)
  - packages/e3-cli - CLI tool (like git)
  - integration-tests - End-to-end tests for e3
- - design - design documentation
+ - design - design documentation (see design/e3-mvp.md for overview)
 
 ## Purpose
 
@@ -26,9 +27,9 @@ An e3 repository holds and manages datasets and East programs, and automatically
  - **workspace** - a package is deployed to a workspace, where input datasets can be mutated and automated dataflow executed (with consistency guarantees)
  - **runner** - a program that e3 can spawn to execute a task
  - **IR** - East's intermediate representation, representing an East program that has passed through East's front-end compiler
- - **task** - a combination of a runner (an East interpretter or JIT compiler), fixed inputs (East IR defining the task) and inputs to be provided (the input data to the task)
  - **dataset** - like git, workspace data is stored in a "tree" with datasets as the leaves - each dataset has a "path" and a fixed East type
- - **dataflow** - a combination of a task with paths to input and output dataset locations
+ - **task** - a combination of a runner (an East interpretter or JIT compiler) and inputs datasets to be provided (both East IR and input data to the task)
+ - **dataflow** - the DAG of tasks and datasets to be executed in a workspace
 
 ## References
 

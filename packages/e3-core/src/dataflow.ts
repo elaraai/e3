@@ -14,8 +14,13 @@
  * 2. Compute reverse dependencies (which tasks depend on each output)
  * 3. Initialize ready queue with tasks whose inputs are all assigned
  * 4. Execute tasks from ready queue, respecting concurrency limit
- * 5. On task completion, update workspace and check dependents for readiness
+ * 5. On task completion, queue workspace update then check dependents for readiness
  * 6. On failure, stop launching new tasks but wait for running ones
+ *
+ * IMPORTANT: Workspace state updates are serialized through an async queue to
+ * prevent race conditions when multiple tasks complete concurrently. Each task's
+ * output is written to the workspace and dependents are notified only after the
+ * write completes, ensuring downstream tasks see consistent state.
  */
 
 import { decodeBeast2For } from '@elaraai/east';
@@ -48,6 +53,55 @@ import {
 } from './errors.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+
+// =============================================================================
+// Async Mutex for Workspace Updates
+// =============================================================================
+
+/**
+ * Simple async mutex to serialize workspace state updates.
+ *
+ * When multiple tasks complete concurrently, their workspace writes must be
+ * serialized to prevent race conditions (read-modify-write on the workspace
+ * root hash). This mutex ensures only one update runs at a time.
+ */
+class AsyncMutex {
+  private queue: Array<() => void> = [];
+  private locked = false;
+
+  /**
+   * Acquire the mutex, execute the callback, then release.
+   * If the mutex is already held, waits until it's available.
+   */
+  async runExclusive<T>(fn: () => T): Promise<Awaited<T>> {
+    await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+
+  private acquire(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.locked) {
+        this.locked = true;
+        resolve();
+      } else {
+        this.queue.push(resolve);
+      }
+    });
+  }
+
+  private release(): void {
+    const next = this.queue.shift();
+    if (next) {
+      next();
+    } else {
+      this.locked = false;
+    }
+  }
+}
 
 // =============================================================================
 // Types
@@ -301,6 +355,11 @@ export async function dataflowExecute(
   let skipped = 0;
   let hasFailure = false;
 
+  // Mutex to serialize workspace state updates.
+  // When multiple tasks complete concurrently, their writes to the workspace
+  // must be serialized to prevent lost updates (read-modify-write race).
+  const workspaceUpdateMutex = new AsyncMutex();
+
   // Ready queue: tasks with all dependencies resolved
   const readyQueue: string[] = [];
   const completed = new Set<string>();
@@ -353,8 +412,13 @@ export async function dataflowExecute(
     return cachedOutputHash;
   }
 
-  // Execute a single task
-  async function executeTask(taskName: string): Promise<TaskExecutionResult> {
+  // Internal result type that includes output hash for workspace update
+  interface InternalTaskResult extends TaskExecutionResult {
+    outputHash?: string;
+  }
+
+  // Execute a single task (does NOT write to workspace - caller must do that)
+  async function executeTask(taskName: string): Promise<InternalTaskResult> {
     const node = taskNodes.get(taskName)!;
     const taskStartTime = Date.now();
 
@@ -386,8 +450,8 @@ export async function dataflowExecute(
 
     const result = await taskExecute(repoPath, node.hash, inputHashes, execOptions);
 
-    // Build task result
-    const taskResult: TaskExecutionResult = {
+    // Build task result (NOTE: workspace update happens later, in mutex-protected section)
+    const taskResult: InternalTaskResult = {
       name: taskName,
       cached: result.cached,
       state: result.state,
@@ -401,9 +465,9 @@ export async function dataflowExecute(
       taskResult.error = result.error ?? undefined;
     }
 
-    // On success, update the workspace with the output
+    // Pass output hash to caller for workspace update (if successful)
     if (result.state === 'success' && result.outputHash) {
-      await workspaceSetDatasetByHash(repoPath, ws, node.outputPath, result.outputHash);
+      taskResult.outputHash = result.outputHash;
     }
 
     return taskResult;
@@ -475,18 +539,23 @@ export async function dataflowExecute(
         // Check if there's a valid cached execution for current inputs
         const cachedOutputHash = await getCachedOutput(taskName);
         if (cachedOutputHash !== null && !options.force) {
-          // Valid cached execution exists for current inputs
-          completed.add(taskName);
-          cached++;
-          const result: TaskExecutionResult = {
-            name: taskName,
-            cached: true,
-            state: 'success',
-            duration: 0,
-          };
-          results.push(result);
-          options.onTaskComplete?.(result);
-          notifyDependents(taskName);
+          // Valid cached execution exists for current inputs.
+          // No workspace write needed (output already matches), but we still
+          // need mutex protection for state updates to prevent races with
+          // concurrent task completions.
+          await workspaceUpdateMutex.runExclusive(() => {
+            completed.add(taskName);
+            cached++;
+            const result: TaskExecutionResult = {
+              name: taskName,
+              cached: true,
+              state: 'success',
+              duration: 0,
+            };
+            results.push(result);
+            options.onTaskComplete?.(result);
+            notifyDependents(taskName);
+          });
           continue;
         }
 
@@ -496,23 +565,35 @@ export async function dataflowExecute(
           try {
             const result = await executeTask(taskName);
 
-            inProgress.delete(taskName);
-            completed.add(taskName);
-            results.push(result);
-            options.onTaskComplete?.(result);
-
-            if (result.state === 'success') {
-              if (result.cached) {
-                cached++;
-              } else {
-                executed++;
+            // Use mutex to serialize workspace updates and dependent notifications.
+            // This prevents race conditions where two tasks complete simultaneously,
+            // both read the same workspace state, and one overwrites the other's changes.
+            await workspaceUpdateMutex.runExclusive(async () => {
+              // Write output to workspace BEFORE notifying dependents
+              if (result.state === 'success' && result.outputHash) {
+                const node = taskNodes.get(taskName)!;
+                await workspaceSetDatasetByHash(repoPath, ws, node.outputPath, result.outputHash);
               }
-              notifyDependents(taskName);
-            } else {
-              failed++;
-              hasFailure = true;
-              skipDependents(taskName);
-            }
+
+              // Now safe to update execution state and notify dependents
+              inProgress.delete(taskName);
+              completed.add(taskName);
+              results.push(result);
+              options.onTaskComplete?.(result);
+
+              if (result.state === 'success') {
+                if (result.cached) {
+                  cached++;
+                } else {
+                  executed++;
+                }
+                notifyDependents(taskName);
+              } else {
+                failed++;
+                hasFailure = true;
+                skipDependents(taskName);
+              }
+            });
           } finally {
             runningPromises.delete(taskName);
           }
