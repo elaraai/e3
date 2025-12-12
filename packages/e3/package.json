@@ -20,12 +20,12 @@
   "dependencies": {
     "@elaraai/e3-types": "*",
     "@elaraai/east": "0.0.1-beta.11",
-    "yazl": "^2.5.1"
+    "yazl": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
     "@types/yauzl": "^2.10.3",
-    "@types/yazl": "^2.4.5",
+    "@types/yazl": "^3.0.0",
     "typescript": "^5.7.2",
     "yauzl": "^3.2.0"
   },
