@@ -272,8 +272,9 @@ async function sweep(
           const fileStat = await fs.stat(filePath);
 
           // Check age - skip young files to avoid race with concurrent writes
+          // Note: age can be negative if file was written after 'now' was captured
           const age = now - fileStat.mtimeMs;
-          if (age < minAge) {
+          if (minAge > 0 && age < minAge) {
             result.skippedYoung++;
             continue;
           }
