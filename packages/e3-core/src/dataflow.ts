@@ -49,8 +49,13 @@ import {
   WorkspaceNotDeployedError,
   TaskNotFoundError,
   DataflowError,
+  DataflowAbortedError,
   isNotFoundError,
 } from './errors.js';
+import {
+  acquireWorkspaceLock,
+  type WorkspaceLockHandle,
+} from './workspaceLock.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -173,6 +178,22 @@ export interface DataflowOptions {
   force?: boolean;
   /** Filter to run only specific task(s) by exact name */
   filter?: string;
+  /**
+   * External workspace lock to use. If provided, the caller is responsible
+   * for releasing the lock after execution. If not provided, dataflowExecute
+   * will acquire and release a lock internally.
+   *
+   * Use an external lock when you need to hold the lock across multiple
+   * operations (e.g., API server that cancels and restarts dataflow on writes).
+   */
+  lock?: WorkspaceLockHandle;
+  /**
+   * AbortSignal for cancellation. When aborted:
+   * - No new tasks will be started
+   * - Running tasks will be killed (SIGTERM, then SIGKILL)
+   * - DataflowAbortedError will be thrown with partial results
+   */
+  signal?: AbortSignal;
   /** Callback when a task starts */
   onTaskStart?: (name: string) => void;
   /** Callback when a task completes */
@@ -305,10 +326,15 @@ async function buildDependencyGraph(
  * the concurrency limit. On failure, no new tasks are launched but
  * running tasks are allowed to complete.
  *
+ * Acquires an exclusive lock on the workspace for the duration of execution
+ * to prevent concurrent modifications. If options.lock is provided, uses that
+ * lock instead (caller is responsible for releasing it).
+ *
  * @param repoPath - Path to .e3 repository
  * @param ws - Workspace name
  * @param options - Execution options
  * @returns Result of the dataflow execution
+ * @throws {WorkspaceLockError} If workspace is locked by another process
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace has no package deployed
  * @throws {TaskNotFoundError} If filter specifies a task that doesn't exist
@@ -318,6 +344,28 @@ export async function dataflowExecute(
   repoPath: string,
   ws: string,
   options: DataflowOptions = {}
+): Promise<DataflowResult> {
+  // Acquire lock if not provided externally
+  const externalLock = options.lock;
+  const lock = externalLock ?? await acquireWorkspaceLock(repoPath, ws);
+
+  try {
+    return await dataflowExecuteWithLock(repoPath, ws, options);
+  } finally {
+    // Only release the lock if we acquired it internally
+    if (!externalLock) {
+      await lock.release();
+    }
+  }
+}
+
+/**
+ * Internal: Execute dataflow with lock already held.
+ */
+async function dataflowExecuteWithLock(
+  repoPath: string,
+  ws: string,
+  options: DataflowOptions
 ): Promise<DataflowResult> {
   const startTime = Date.now();
   const concurrency = options.concurrency ?? 4;
@@ -354,6 +402,15 @@ export async function dataflowExecute(
   let failed = 0;
   let skipped = 0;
   let hasFailure = false;
+  let aborted = false;
+
+  // Check for abort signal
+  const checkAborted = () => {
+    if (options.signal?.aborted && !aborted) {
+      aborted = true;
+    }
+    return aborted;
+  };
 
   // Mutex to serialize workspace state updates.
   // When multiple tasks complete concurrently, their writes to the workspace
@@ -444,6 +501,7 @@ export async function dataflowExecute(
     // Execute the task
     const execOptions: ExecuteOptions = {
       force: options.force,
+      signal: options.signal,
       onStdout: options.onStdout ? (data) => options.onStdout!(taskName, data) : undefined,
       onStderr: options.onStderr ? (data) => options.onStderr!(taskName, data) : undefined,
     };
@@ -530,8 +588,8 @@ export async function dataflowExecute(
         break;
       }
 
-      // Launch tasks up to concurrency limit if no failure
-      while (!hasFailure && readyQueue.length > 0 && runningPromises.size < concurrency) {
+      // Launch tasks up to concurrency limit if no failure and not aborted
+      while (!hasFailure && !checkAborted() && readyQueue.length > 0 && runningPromises.size < concurrency) {
         const taskName = readyQueue.shift()!;
 
         if (completed.has(taskName) || inProgress.has(taskName)) continue;
@@ -617,6 +675,14 @@ export async function dataflowExecute(
   // Wait for any remaining tasks
   if (runningPromises.size > 0) {
     await Promise.all(runningPromises.values());
+  }
+
+  // Check for abort one final time
+  checkAborted();
+
+  // If aborted, throw with partial results
+  if (aborted) {
+    throw new DataflowAbortedError(results);
   }
 
   return {

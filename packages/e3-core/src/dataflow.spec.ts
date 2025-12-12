@@ -27,6 +27,8 @@ import {
 import { objectWrite } from './objects.js';
 import { workspaceDeploy } from './workspaces.js';
 import { workspaceGetDataset, workspaceSetDataset } from './trees.js';
+import { acquireWorkspaceLock } from './workspaceLock.js';
+import { WorkspaceLockError, DataflowAbortedError } from './errors.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
 
 describe('dataflow', () => {
@@ -451,6 +453,266 @@ describe('dataflow', () => {
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.executed, 4);
       assert.ok(maxConcurrent <= 2, `Max concurrent was ${maxConcurrent}, expected <= 2`);
+    });
+
+    it('rejects concurrent dataflow execution on same workspace', async () => {
+      // Create a simple package with a slow task
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: StringType }],
+          ['output', { type: 'value', value: StringType }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const inputEncoder = encodeBeast2For(StringType);
+      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+
+      // Use sleep to make the task take some time
+      const slowCopyCmd = ['bash', '-c', 'sleep 0.3; cp "$1" "$2"', '--', '{input}', '{output}'];
+      await createPackageWithTasks(
+        testRepo,
+        [{ name: 'slow-task', command: slowCopyCmd, inputs: [inputPath], output: outputPath }],
+        structure,
+        {
+          input: {
+            value: 'test',
+            ref: { type: 'value', value: inputHash } as DataRef,
+          },
+        }
+      );
+      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      // Start first execution (don't await)
+      const firstExecution = dataflowExecute(testRepo, 'test-ws');
+
+      // Give it a moment to acquire the lock
+      await new Promise(resolve => setTimeout(resolve, 150));
+
+      // Try to start second execution - should fail with WorkspaceLockError
+      await assert.rejects(
+        dataflowExecute(testRepo, 'test-ws'),
+        (err: Error) => {
+          assert.ok(err instanceof WorkspaceLockError, `Expected WorkspaceLockError, got ${err.constructor.name}`);
+          assert.strictEqual((err as WorkspaceLockError).workspace, 'test-ws');
+          return true;
+        }
+      );
+
+      // Wait for first execution to complete
+      const result = await firstExecution;
+      assert.strictEqual(result.success, true);
+    });
+
+    it('allows sequential dataflow executions', async () => {
+      // Create a simple package
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: StringType }],
+          ['output', { type: 'value', value: StringType }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const inputEncoder = encodeBeast2For(StringType);
+      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+
+      await createPackageWithTasks(
+        testRepo,
+        [{ name: 'task', command: ['cp', '{input}', '{output}'], inputs: [inputPath], output: outputPath }],
+        structure,
+        {
+          input: {
+            value: 'test',
+            ref: { type: 'value', value: inputHash } as DataRef,
+          },
+        }
+      );
+      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      // First execution
+      const result1 = await dataflowExecute(testRepo, 'test-ws');
+      assert.strictEqual(result1.success, true);
+
+      // Second execution (should succeed because first released the lock)
+      const result2 = await dataflowExecute(testRepo, 'test-ws');
+      assert.strictEqual(result2.success, true);
+    });
+
+    it('allows external lock management', async () => {
+      // Create a simple package
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: StringType }],
+          ['output', { type: 'value', value: StringType }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const inputEncoder = encodeBeast2For(StringType);
+      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+
+      await createPackageWithTasks(
+        testRepo,
+        [{ name: 'task', command: ['cp', '{input}', '{output}'], inputs: [inputPath], output: outputPath }],
+        structure,
+        {
+          input: {
+            value: 'test',
+            ref: { type: 'value', value: inputHash } as DataRef,
+          },
+        }
+      );
+      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      // Acquire lock externally
+      const lock = await acquireWorkspaceLock(testRepo, 'test-ws');
+
+      try {
+        // Execute with external lock
+        const result = await dataflowExecute(testRepo, 'test-ws', { lock });
+        assert.strictEqual(result.success, true);
+
+        // Lock should still be held (we can't acquire another)
+        await assert.rejects(
+          acquireWorkspaceLock(testRepo, 'test-ws'),
+          (err: Error) => err instanceof WorkspaceLockError
+        );
+      } finally {
+        await lock.release();
+      }
+
+      // Now lock should be released - can acquire again
+      const lock2 = await acquireWorkspaceLock(testRepo, 'test-ws');
+      await lock2.release();
+    });
+
+    it('aborts execution when signal is triggered', async () => {
+      // Create a package with a slow task
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: StringType }],
+          ['output', { type: 'value', value: StringType }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const inputEncoder = encodeBeast2For(StringType);
+      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+
+      // Task that sleeps for 2 seconds
+      const slowCmd = ['bash', '-c', 'sleep 2; cp "$1" "$2"', '--', '{input}', '{output}'];
+      await createPackageWithTasks(
+        testRepo,
+        [{ name: 'slow-task', command: slowCmd, inputs: [inputPath], output: outputPath }],
+        structure,
+        {
+          input: {
+            value: 'test',
+            ref: { type: 'value', value: inputHash } as DataRef,
+          },
+        }
+      );
+      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      const controller = new AbortController();
+
+      // Start execution
+      const executionPromise = dataflowExecute(testRepo, 'test-ws', {
+        signal: controller.signal,
+      });
+
+      // Abort after a short delay
+      await new Promise(resolve => setTimeout(resolve, 200));
+      controller.abort();
+
+      // Should throw DataflowAbortedError
+      await assert.rejects(
+        executionPromise,
+        (err: Error) => {
+          assert.ok(err instanceof DataflowAbortedError, `Expected DataflowAbortedError, got ${err.constructor.name}`);
+          return true;
+        }
+      );
+    });
+
+    it('includes partial results in DataflowAbortedError', async () => {
+      // Create a package with two tasks: one fast, one slow
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: StringType }],
+          ['fast_output', { type: 'value', value: StringType }],
+          ['slow_output', { type: 'value', value: StringType }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const fastOutputPath: TreePath = [variant('field', 'fast_output')];
+      const slowOutputPath: TreePath = [variant('field', 'slow_output')];
+
+      const inputEncoder = encodeBeast2For(StringType);
+      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+
+      // Fast task completes quickly, slow task takes long
+      await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'fast-task', command: ['cp', '{input}', '{output}'], inputs: [inputPath], output: fastOutputPath },
+          { name: 'slow-task', command: ['bash', '-c', 'sleep 2; cp "$1" "$2"', '--', '{input}', '{output}'], inputs: [inputPath], output: slowOutputPath },
+        ],
+        structure,
+        {
+          input: {
+            value: 'test',
+            ref: { type: 'value', value: inputHash } as DataRef,
+          },
+        }
+      );
+      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      const controller = new AbortController();
+
+      // Start execution with concurrency 2 so both tasks start
+      const executionPromise = dataflowExecute(testRepo, 'test-ws', {
+        signal: controller.signal,
+        concurrency: 2,
+      });
+
+      // Wait for fast task to complete, then abort
+      await new Promise(resolve => setTimeout(resolve, 300));
+      controller.abort();
+
+      // Should throw with partial results
+      try {
+        await executionPromise;
+        assert.fail('Expected DataflowAbortedError');
+      } catch (err) {
+        assert.ok(err instanceof DataflowAbortedError);
+        const abortErr = err as DataflowAbortedError;
+        assert.ok(abortErr.partialResults);
+        // Fast task should have completed
+        const fastResult = abortErr.partialResults!.find(r => r.name === 'fast-task');
+        assert.ok(fastResult, 'Fast task should be in partial results');
+        assert.strictEqual(fastResult!.state, 'success');
+      }
     });
   });
 });

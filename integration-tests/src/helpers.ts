@@ -144,3 +144,70 @@ export async function waitFor(
 
   throw new Error(`Timeout waiting for condition after ${timeoutMs}ms`);
 }
+
+/**
+ * Handle to a running CLI process that can be signaled
+ */
+export interface RunningCliProcess {
+  /** Send a signal to the process */
+  kill: (signal: NodeJS.Signals) => void;
+  /** Promise that resolves when process exits */
+  result: Promise<CliResult>;
+  /** The child process PID */
+  pid: number;
+}
+
+/**
+ * Spawn an e3 CLI command that can be signaled
+ *
+ * Unlike runE3Command, this returns immediately with a handle to the running
+ * process, allowing tests to send signals (SIGINT, SIGTERM) to it.
+ *
+ * @param args - Command arguments (e.g., ['start', '.', 'ws'])
+ * @param cwd - Working directory for the command
+ * @returns Handle to the running process
+ */
+export function spawnE3Command(
+  args: string[],
+  cwd: string
+): RunningCliProcess {
+  const cliPath = getE3CliPath();
+
+  const child = spawn('node', [cliPath, ...args], {
+    cwd,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.on('data', (data) => {
+    stdout += data.toString();
+  });
+
+  child.stderr.on('data', (data) => {
+    stderr += data.toString();
+  });
+
+  const result = new Promise<CliResult>((resolve, reject) => {
+    child.on('error', (error) => {
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      resolve({
+        exitCode: code ?? 1,
+        stdout,
+        stderr,
+      });
+    });
+  });
+
+  child.stdin.end();
+
+  return {
+    kill: (signal: NodeJS.Signals) => child.kill(signal),
+    result,
+    pid: child.pid!,
+  };
+}

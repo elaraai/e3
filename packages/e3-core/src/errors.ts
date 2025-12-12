@@ -56,6 +56,41 @@ export class WorkspaceExistsError extends E3Error {
   }
 }
 
+/**
+ * Information about the process holding a workspace lock.
+ */
+export interface LockHolder {
+  /** Process ID of the lock holder */
+  pid: number;
+  /** When the lock was acquired (ISO 8601) */
+  acquiredAt: string;
+  /** System boot ID (to detect stale locks after reboot) */
+  bootId?: string;
+  /** Process start time in jiffies (to detect PID reuse) */
+  startTime?: number;
+  /** Command that acquired the lock (for debugging) */
+  command?: string;
+}
+
+/**
+ * Thrown when a workspace is locked by another process.
+ *
+ * This error is thrown when attempting to acquire an exclusive lock on a
+ * workspace that is already locked by another process (e.g., another
+ * `e3 start` command or API server).
+ */
+export class WorkspaceLockError extends E3Error {
+  constructor(
+    public readonly workspace: string,
+    public readonly holder?: LockHolder
+  ) {
+    const msg = holder
+      ? `Workspace '${workspace}' is locked by process ${holder.pid} (since ${holder.acquiredAt})`
+      : `Workspace '${workspace}' is locked by another process`;
+    super(msg);
+  }
+}
+
 // =============================================================================
 // Package Errors
 // =============================================================================
@@ -157,6 +192,19 @@ export class DataflowError extends E3Error {
     public readonly cause?: Error
   ) {
     super(cause ? `${message}: ${cause.message}` : message);
+  }
+}
+
+/**
+ * Thrown when a dataflow execution is aborted via AbortSignal.
+ *
+ * This is not an error condition - it indicates the execution was intentionally
+ * cancelled (e.g., by an API server before applying a write). The partial
+ * results contain the status of tasks that completed before the abort.
+ */
+export class DataflowAbortedError extends E3Error {
+  constructor(public readonly partialResults?: TaskExecutionResult[]) {
+    super('Dataflow execution was aborted');
   }
 }
 

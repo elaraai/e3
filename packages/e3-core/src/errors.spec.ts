@@ -15,6 +15,8 @@ import {
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
   WorkspaceExistsError,
+  WorkspaceLockError,
+  type LockHolder,
   PackageNotFoundError,
   PackageInvalidError,
   PackageExistsError,
@@ -24,6 +26,7 @@ import {
   ObjectCorruptError,
   ExecutionCorruptError,
   DataflowError,
+  DataflowAbortedError,
   PermissionDeniedError,
   isNotFoundError,
   isPermissionError,
@@ -93,6 +96,36 @@ describe('errors', () => {
       const err = new WorkspaceExistsError('myws');
       assert.ok(err.message.includes('myws'));
       assert.strictEqual(err.workspace, 'myws');
+    });
+  });
+
+  describe('WorkspaceLockError', () => {
+    it('includes workspace name in message without holder', () => {
+      const err = new WorkspaceLockError('myws');
+      assert.ok(err.message.includes('myws'));
+      assert.ok(err.message.includes('locked'));
+      assert.strictEqual(err.workspace, 'myws');
+      assert.strictEqual(err.holder, undefined);
+    });
+
+    it('includes holder info in message when provided', () => {
+      const holder: LockHolder = {
+        pid: 12345,
+        acquiredAt: '2025-01-15T10:30:00Z',
+        bootId: 'abc123',
+        command: 'e3 start',
+      };
+      const err = new WorkspaceLockError('myws', holder);
+      assert.ok(err.message.includes('myws'));
+      assert.ok(err.message.includes('12345'));
+      assert.ok(err.message.includes('2025-01-15T10:30:00Z'));
+      assert.strictEqual(err.workspace, 'myws');
+      assert.strictEqual(err.holder, holder);
+    });
+
+    it('is instanceof E3Error', () => {
+      const err = new WorkspaceLockError('ws');
+      assert.ok(err instanceof E3Error);
     });
   });
 
@@ -194,6 +227,32 @@ describe('errors', () => {
     it('works without cause', () => {
       const err = new DataflowError('simple message');
       assert.strictEqual(err.message, 'simple message');
+    });
+  });
+
+  describe('DataflowAbortedError', () => {
+    it('has descriptive message', () => {
+      const err = new DataflowAbortedError();
+      assert.ok(err.message.includes('aborted'));
+    });
+
+    it('preserves partial results', () => {
+      const results = [
+        { name: 'task1', cached: false, state: 'success' as const, duration: 100 },
+        { name: 'task2', cached: true, state: 'success' as const, duration: 0 },
+      ];
+      const err = new DataflowAbortedError(results);
+      assert.strictEqual(err.partialResults, results);
+    });
+
+    it('works without partial results', () => {
+      const err = new DataflowAbortedError();
+      assert.strictEqual(err.partialResults, undefined);
+    });
+
+    it('is instanceof E3Error', () => {
+      const err = new DataflowAbortedError();
+      assert.ok(err instanceof E3Error);
     });
   });
 

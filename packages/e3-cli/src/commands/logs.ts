@@ -177,7 +177,7 @@ async function showLogs(
     };
 
     // Keep polling until interrupted
-    const intervalId = setInterval(poll, pollInterval);
+    const intervalId = setInterval(() => void poll(), pollInterval);
     process.on('SIGINT', () => {
       clearInterval(intervalId);
       console.log('\n[Stopped]');

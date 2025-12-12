@@ -105,6 +105,8 @@ export {
   // Command IR evaluation
   evaluateCommandIr,
   // Process detection
+  getBootId,
+  getPidStartTime,
   isProcessAlive,
   // Execution
   taskExecute,
@@ -121,6 +123,15 @@ export {
   type TaskExecutionResult,
 } from './dataflow.js';
 
+// Workspace locking
+export {
+  acquireWorkspaceLock,
+  getWorkspaceLockHolder,
+  workspaceLockPath,
+  type WorkspaceLockHandle,
+  type AcquireLockOptions,
+} from './workspaceLock.js';
+
 // Errors
 export {
   // Base
@@ -131,6 +142,8 @@ export {
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
   WorkspaceExistsError,
+  WorkspaceLockError,
+  type LockHolder,
   // Package
   PackageNotFoundError,
   PackageInvalidError,
@@ -146,6 +159,7 @@ export {
   ExecutionCorruptError,
   // Dataflow
   DataflowError,
+  DataflowAbortedError,
   // Generic
   PermissionDeniedError,
   // Helpers

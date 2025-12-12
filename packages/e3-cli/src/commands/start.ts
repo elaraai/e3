@@ -12,7 +12,7 @@
  *   e3 start . my-workspace --force
  */
 
-import { dataflowExecute, type TaskExecutionResult } from '@elaraai/e3-core';
+import { dataflowExecute, DataflowAbortedError, type TaskExecutionResult } from '@elaraai/e3-core';
 import { resolveRepo, formatError, exitError } from '../utils.js';
 
 /**
@@ -23,6 +23,19 @@ export async function startCommand(
   ws: string,
   options: { filter?: string; concurrency?: string; force?: boolean }
 ): Promise<void> {
+  // Set up abort controller for signal handling
+  const controller = new AbortController();
+
+  // Handle SIGINT (Ctrl+C) and SIGTERM gracefully
+  const signalHandler = (signal: string) => {
+    console.log('');
+    console.log(`Received ${signal}, aborting...`);
+    controller.abort();
+  };
+
+  process.on('SIGINT', () => signalHandler('SIGINT'));
+  process.on('SIGTERM', () => signalHandler('SIGTERM'));
+
   try {
     const repoPath = resolveRepo(repoArg);
     const concurrency = options.concurrency ? parseInt(options.concurrency, 10) : 4;
@@ -41,6 +54,7 @@ export async function startCommand(
       concurrency,
       force: options.force,
       filter: options.filter,
+      signal: controller.signal,
       onTaskStart: (name) => {
         console.log(`  [START] ${name}`);
       },
@@ -75,6 +89,15 @@ export async function startCommand(
       process.exit(1);
     }
   } catch (err) {
+    if (err instanceof DataflowAbortedError) {
+      console.log('');
+      console.log('Aborted.');
+      if (err.partialResults && err.partialResults.length > 0) {
+        const completed = err.partialResults.filter(r => r.state === 'success').length;
+        console.log(`  Completed before abort: ${completed}`);
+      }
+      process.exit(130); // Standard exit code for SIGINT (128 + 2)
+    }
     exitError(formatError(err));
   }
 }

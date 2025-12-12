@@ -328,9 +328,10 @@ export async function evaluateCommandIr(
 // ============================================================================
 
 /**
- * Get the current system boot ID
+ * Get the current system boot ID.
+ * Used for detecting stale locks/processes after system reboot.
  */
-async function getBootId(): Promise<string> {
+export async function getBootId(): Promise<string> {
   try {
     const data = await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf-8');
     return data.trim();
@@ -341,10 +342,11 @@ async function getBootId(): Promise<string> {
 }
 
 /**
- * Get process start time from /proc/<pid>/stat
- * Returns the starttime field (field 22) which is jiffies since boot
+ * Get process start time from /proc/<pid>/stat.
+ * Returns the starttime field (field 22) which is jiffies since boot.
+ * Used together with boot ID to uniquely identify a process (handles PID reuse).
  */
-async function getPidStartTime(pid: number): Promise<number> {
+export async function getPidStartTime(pid: number): Promise<number> {
   try {
     const data = await fs.readFile(`/proc/${pid}/stat`, 'utf-8');
     // Fields are space-separated, but comm (field 2) can contain spaces and is in parens
@@ -391,6 +393,8 @@ export interface ExecuteOptions {
   force?: boolean;
   /** Timeout in milliseconds (default: none) */
   timeout?: number;
+  /** AbortSignal for cancellation */
+  signal?: AbortSignal;
   /** Stream stdout callback */
   onStdout?: (data: string) => void;
   /** Stream stderr callback */
@@ -635,8 +639,30 @@ async function runCommand(
 ): Promise<{ exitCode: number | null; error: string | null }> {
   const [cmd, ...cmdArgs] = args;
 
+  // Process Lifecycle Management
+  // ============================
+  // We use detached: true to create a new process group, allowing us to kill
+  // the entire process tree by signaling the negative PID (process group leader).
+  //
+  // LIMITATION: Process groups are flat, not hierarchical. If a task spawns a
+  // subprocess that creates its own process group (via setsid, daemonization,
+  // or another detached spawn), that subprocess will escape our kill signal.
+  // This is a fundamental Unix limitation - process groups were designed for
+  // terminal job control (Ctrl+C/Ctrl+Z), not process tree management.
+  //
+  // For most tasks (shell scripts, pipelines, normal child processes) this works
+  // fine. A task would have to intentionally call setsid() to escape.
+  //
+  // Potential improvements for hosted e3:
+  // - Linux cgroups: Hierarchical containment with no escape. Requires root or
+  //   systemd integration (systemd-run --scope). Used by Docker/Kubernetes.
+  // - PR_SET_CHILD_SUBREAPER: Makes e3 adopt orphaned processes instead of init,
+  //   allowing tracking and cleanup. Requires polling to detect orphans.
+  // - Firecracker/microVMs: Complete isolation with hardware virtualization.
+  //   The VM boundary provides bulletproof containment. Best for multi-tenant.
   const child = spawn(cmd, cmdArgs, {
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
   });
 
   // Set up event listeners IMMEDIATELY before any async work
@@ -671,12 +697,33 @@ async function runCommand(
     }
   });
 
+  // Helper to kill the entire process group (child and all its descendants).
+  // With detached: true, child.pid is the process group leader, so killing
+  // -child.pid sends the signal to all processes in that group.
+  const killProcessGroup = () => {
+    if (child.pid) {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // Process may have already exited
+      }
+    }
+  };
+
   // Handle timeout
   let timeoutId: NodeJS.Timeout | undefined;
   if (options.timeout) {
-    timeoutId = setTimeout(() => {
-      child.kill('SIGKILL');
-    }, options.timeout);
+    timeoutId = setTimeout(killProcessGroup, options.timeout);
+  }
+
+  // Handle abort signal
+  if (options.signal) {
+    if (options.signal.aborted) {
+      // Already aborted before we started
+      killProcessGroup();
+    } else {
+      options.signal.addEventListener('abort', killProcessGroup, { once: true });
+    }
   }
 
   // Write running status with actual child PID (can be async now)
@@ -696,6 +743,9 @@ async function runCommand(
 
   // Cleanup
   if (timeoutId) clearTimeout(timeoutId);
+  if (options.signal) {
+    options.signal.removeEventListener('abort', killProcessGroup);
+  }
   stdoutStream.end();
   stderrStream.end();
 

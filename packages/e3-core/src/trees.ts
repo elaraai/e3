@@ -31,9 +31,9 @@ import { packageRead } from './packages.js';
 import {
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
-  DatasetNotFoundError,
   isNotFoundError,
 } from './errors.js';
+import { acquireWorkspaceLock } from './workspaceLock.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -345,11 +345,15 @@ export async function packageGetDataset(
  * This creates new tree objects along the path with structural sharing,
  * then atomically updates the workspace root.
  *
+ * Acquires an exclusive lock on the workspace for the duration of the write
+ * to prevent concurrent modifications.
+ *
  * @param repoPath - Path to .e3 repository
  * @param ws - Workspace name
  * @param treePath - Path to the dataset
  * @param value - The new value to write
  * @param type - The East type for encoding the value (EastType or EastTypeValue)
+ * @throws {WorkspaceLockError} If workspace is locked by another process
  * @throws If workspace not deployed, path invalid, or path points to a tree
  */
 export async function workspaceSetDataset(
@@ -363,6 +367,26 @@ export async function workspaceSetDataset(
     throw new Error('Cannot set dataset at root path - root is always a tree');
   }
 
+  // Acquire exclusive lock for the duration of the write
+  const lock = await acquireWorkspaceLock(repoPath, ws);
+  try {
+    await workspaceSetDatasetUnlocked(repoPath, ws, treePath, value, type);
+  } finally {
+    await lock.release();
+  }
+}
+
+/**
+ * Internal: Update a dataset without acquiring a lock.
+ * Caller must hold the workspace lock.
+ */
+async function workspaceSetDatasetUnlocked(
+  repoPath: string,
+  ws: string,
+  treePath: TreePath,
+  value: unknown,
+  type: EastType | EastTypeValue
+): Promise<void> {
   const state = await readWorkspaceState(repoPath, ws);
 
   // Read the deployed package object to get the structure
@@ -689,6 +713,11 @@ export async function workspaceGetDatasetHash(
  *
  * Unlike workspaceSetDataset which encodes a value, this takes a hash
  * directly. Useful for dataflow execution which already has the output hash.
+ *
+ * IMPORTANT: This function does NOT acquire a workspace lock. The caller must
+ * hold an exclusive lock on the workspace (via acquireWorkspaceLock) before
+ * calling this function. This is typically used by dataflowExecute which
+ * holds the lock for the entire execution.
  *
  * @param repoPath - Path to .e3 repository
  * @param ws - Workspace name
