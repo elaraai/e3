@@ -1,6 +1,128 @@
 # e3-api: Remote API Server and Client
 
-e3-api-server exposes e3-core operations over HTTP, enabling remote CLI commands and programmatic access. e3-api-client provides a TypeScript client library that mirrors e3-core's API.
+e3-api-server exposes e3-core operations over HTTP. e3-api-client provides a TypeScript client library.
+
+## e3-core Functions Reference
+
+All functions exported from `@elaraai/e3-core`. Type column: **East** = East type from e3-types, **TS** = TypeScript interface.
+
+### Repository
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `repoInit(repoPath)` | Initialize a new e3 repository | `InitRepositoryResult` | TS | |
+| `repoFind(startPath?)` | Find e3 repository directory | `string \| null` | TS | |
+| `repoGet(repoPath?)` | Get repository, throw if not found | `string` | TS | |
+| `repoGc(repoPath, options?)` | Run garbage collection | `Promise<GcResult>` | TS | `POST /api/gc` |
+
+### Objects
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `computeHash(data)` | Calculate SHA256 hash | `string` | TS | |
+| `objectWrite(repoPath, data)` | Write data to object store | `Promise<string>` | TS | |
+| `objectWriteStream(repoPath, stream)` | Write stream to object store | `Promise<string>` | TS | |
+| `objectRead(repoPath, hash)` | Read raw bytes from object store | `Promise<Uint8Array>` | TS | |
+| `objectExists(repoPath, hash)` | Check if object exists | `Promise<boolean>` | TS | |
+| `objectPath(repoPath, hash)` | Get filesystem path for object | `string` | TS | |
+| `objectAbbrev(repoPath, hash, minLength?)` | Get minimum unique abbreviation length | `Promise<number>` | TS | |
+
+### Packages
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `packageList(repoPath)` | List all packages | `Promise<{ name, version }[]>` | TS | `GET /api/packages` |
+| `packageGetLatestVersion(repoPath, name)` | Get latest version of package | `Promise<string \| undefined>` | TS | |
+| `packageResolve(repoPath, name, version)` | Get package hash | `Promise<string>` | TS | |
+| `packageRead(repoPath, name, version)` | Read package object | `Promise<PackageObject>` | East | `GET /api/packages/:name/:version` |
+| `packageImport(repoPath, zipPath)` | Import package from zip | `Promise<PackageImportResult>` | TS | `POST /api/packages` |
+| `packageExport(repoPath, name, version, zipPath)` | Export package to zip | `Promise<PackageExportResult>` | TS | `GET /api/packages/:name/:version/export` |
+| `packageRemove(repoPath, name, version)` | Remove a package | `Promise<void>` | TS | `DELETE /api/packages/:name/:version` |
+
+### Workspaces
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `workspaceList(repoPath)` | List workspace names | `Promise<string[]>` | TS | `GET /api/workspaces` |
+| `workspaceCreate(repoPath, name)` | Create empty workspace | `Promise<void>` | TS | `POST /api/workspaces` |
+| `workspaceRemove(repoPath, name, options?)` | Remove workspace | `Promise<void>` | TS | `DELETE /api/workspaces/:ws` |
+| `workspaceGetState(repoPath, name)` | Get workspace state | `Promise<WorkspaceState \| null>` | East | `GET /api/workspaces/:ws` |
+| `workspaceGetPackage(repoPath, name)` | Get deployed package info | `Promise<{ name, version, hash }>` | TS | |
+| `workspaceGetRoot(repoPath, name)` | Get root tree hash | `Promise<string>` | TS | |
+| `workspaceSetRoot(repoPath, name, hash)` | Set root tree hash | `Promise<void>` | TS | |
+| `workspaceDeploy(repoPath, name, pkgName, pkgVersion, options?)` | Deploy package to workspace | `Promise<void>` | TS | `POST /api/workspaces/:ws/deploy` |
+| `workspaceExport(repoPath, name, zipPath, outputName?, version?)` | Export workspace as package | `Promise<WorkspaceExportResult>` | TS | `GET /api/workspaces/:ws/export` |
+| `workspaceStatus(repoPath, ws)` | Get comprehensive workspace status | `Promise<WorkspaceStatusResult>` | TS | `GET /api/workspaces/:ws/status` |
+
+### Trees & Datasets (Low-level)
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `treeRead(repoPath, hash, structure)` | Read tree object by hash | `Promise<TreeObject>` | TS | |
+| `treeWrite(repoPath, fields, structure)` | Write tree object | `Promise<string>` | TS | |
+| `datasetRead(repoPath, hash)` | Read dataset value by hash | `Promise<{ type, value }>` | TS | |
+| `datasetWrite(repoPath, value, type)` | Write dataset value | `Promise<string>` | TS | |
+
+### Trees & Datasets (High-level)
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `packageListTree(repoPath, name, version, path)` | List fields at path in package | `Promise<string[]>` | TS | |
+| `packageGetDataset(repoPath, name, version, path)` | Get dataset value from package | `Promise<unknown>` | TS | |
+| `workspaceListTree(repoPath, ws, treePath)` | List fields at path in workspace | `Promise<string[]>` | TS | `GET /api/workspaces/:ws/list/*` |
+| `workspaceGetDataset(repoPath, ws, treePath)` | Get dataset value from workspace | `Promise<unknown>` | TS | |
+| `workspaceGetDatasetHash(repoPath, ws, treePath)` | Get dataset hash without decoding | `Promise<{ refType, hash }>` | TS | `GET /api/workspaces/:ws/get/*` |
+| `workspaceSetDataset(repoPath, ws, treePath, value, type, options?)` | Set dataset value | `Promise<void>` | TS | `PUT /api/workspaces/:ws/set/*` |
+| `workspaceSetDatasetByHash(repoPath, ws, treePath, valueHash)` | Set dataset by hash | `Promise<void>` | TS | |
+
+### Tasks
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `packageListTasks(repoPath, name, version)` | List tasks in package | `Promise<string[]>` | TS | |
+| `packageGetTask(repoPath, name, version, taskName)` | Get task object from package | `Promise<TaskObject>` | East | |
+| `workspaceListTasks(repoPath, ws)` | List tasks in workspace | `Promise<string[]>` | TS | `GET /api/workspaces/:ws/tasks` |
+| `workspaceGetTaskHash(repoPath, ws, taskName)` | Get task object hash | `Promise<string>` | TS | |
+| `workspaceGetTask(repoPath, ws, taskName)` | Get task object | `Promise<TaskObject>` | East | `GET /api/workspaces/:ws/tasks/:name` |
+
+### Executions
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `inputsHash(inputHashes)` | Compute combined hash of inputs | `string` | TS | |
+| `executionPath(repoPath, taskHash, inHash)` | Get execution directory path | `string` | TS | |
+| `executionGet(repoPath, taskHash, inHash)` | Get execution status | `Promise<ExecutionStatus \| null>` | East | |
+| `executionGetOutput(repoPath, taskHash, inHash)` | Get execution output hash | `Promise<string \| null>` | TS | |
+| `executionListForTask(repoPath, taskHash)` | List executions for task | `Promise<string[]>` | TS | |
+| `executionList(repoPath)` | List all executions | `Promise<{ taskHash, inputsHash }[]>` | TS | |
+| `executionReadLog(repoPath, taskHash, inHash, stream, options?)` | Read execution logs | `Promise<LogChunk>` | TS | `GET /api/workspaces/:ws/logs/:task` |
+| `evaluateCommandIr(repoPath, commandIrHash, inputPaths, outputPath)` | Evaluate command IR | `Promise<string[]>` | TS | |
+| `taskExecute(repoPath, taskHash, inputHashes, options?)` | Execute single task | `Promise<ExecutionResult>` | TS | |
+
+### Dataflow
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `dataflowExecute(repoPath, ws, options?)` | Execute workspace dataflow | `Promise<DataflowResult>` | TS | `POST /api/workspaces/:ws/start` |
+| `dataflowGetGraph(repoPath, ws)` | Get dependency graph | `Promise<{ tasks, dependencies }>` | TS | `GET /api/workspaces/:ws/graph` |
+
+### Workspace Locking
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `workspaceLockPath(repoPath, workspace)` | Get lock file path | `string` | TS | |
+| `acquireWorkspaceLock(repoPath, workspace, options?)` | Acquire workspace lock | `Promise<WorkspaceLockHandle>` | TS | |
+| `getWorkspaceLockHolder(repoPath, workspace)` | Get current lock holder | `Promise<LockHolder \| null>` | TS | |
+
+### Process Detection
+
+| Function | Description | Return Type | Type | Proposed Endpoint |
+|----------|-------------|-------------|------|-------------------|
+| `getBootId()` | Get system boot ID | `Promise<string>` | TS | |
+| `getPidStartTime(pid)` | Get process start time | `Promise<number>` | TS | |
+| `isProcessAlive(pid, pidStartTime, bootId)` | Check if process is alive | `Promise<boolean>` | TS | |
+
+---
 
 ## Overview
 
@@ -8,1212 +130,359 @@ Two packages:
 - **`@elaraai/e3-api-server`** - HTTP server wrapping e3-core
 - **`@elaraai/e3-api-client`** - Client library for remote e3 operations
 
-### Architecture
-
-```
-┌─────────────────────┐         HTTP/SSE          ┌─────────────────────┐
-│   e3-api-client     │ ◄────────────────────────► │   e3-api-server     │
-│                     │                            │                     │
-│  - start()          │   POST /api/start          │  - HTTP server      │
-│  - status()         │   GET  /api/status         │  - SSE broadcaster  │
-│  - packages.*       │   GET  /api/executions/... │  - Execution mgr    │
-│  - workspaces.*     │                            │                     │
-│  - datasets.*       │                            │                     │
-└─────────────────────┘                            └─────────────────────┘
-                                                            │
-                                                            ▼
-                                                   ┌─────────────────────┐
-                                                   │      e3-core        │
-                                                   │   (filesystem ops)  │
-                                                   └─────────────────────┘
-```
-
 ### Design Goals
 
-1. **Mirror e3-core's API** - Client should feel identical to using e3-core directly
-2. **SSE for streaming** - Long-running operations push events to clients
-3. **Stateless server** - Server doesn't hold state beyond filesystem + active executions
-4. **Reconnection support** - Clients can reconnect and catch up on missed events
-5. **Future-proof for auth** - Design assumes authentication/authorization will be added
+1. **Mirror e3-core** - API endpoints map directly to e3-core functions
+2. **BEAST2 protocol** - Request/response bodies use BEAST2 serialization
+3. **Stateless server** - No state beyond filesystem
+4. **Type-safe** - East types for request/response schemas
+5. **Poll-based** - No SSE; clients poll for status
 
 ## Protocol
 
-### REST Endpoints
+### BEAST2 Serialization
 
-#### Repository
+All request and response bodies use BEAST2 binary format:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/status` | Repository status |
-| `POST` | `/api/gc` | Run garbage collection |
+```
+Content-Type: application/beast2
+```
 
-#### Packages
+Dataset values are stored as BEAST2 in the object store, so GET returns raw bytes directly (no decode/re-encode).
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/packages` | List packages |
-| `GET` | `/api/packages/:name` | Get package details |
-| `POST` | `/api/packages/import` | Import package from archive |
-| `GET` | `/api/packages/:name/export` | Export package as archive |
-| `DELETE` | `/api/packages/:name` | Remove package |
+### Response Schema
 
-#### Workspaces
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/workspaces` | List workspaces |
-| `POST` | `/api/workspaces` | Create workspace |
-| `GET` | `/api/workspaces/:name` | Get workspace state |
-| `DELETE` | `/api/workspaces/:name` | Remove workspace |
-| `POST` | `/api/workspaces/:name/deploy` | Deploy package to workspace |
-| `GET` | `/api/workspaces/:name/export` | Export workspace data |
-
-#### Datasets
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/workspaces/:ws/datasets` | List datasets (tree structure) |
-| `GET` | `/api/workspaces/:ws/datasets/*path` | Get dataset value |
-| `PUT` | `/api/workspaces/:ws/datasets/*path` | Set dataset value |
-
-#### Tasks
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/workspaces/:ws/tasks` | List tasks in workspace |
-| `GET` | `/api/workspaces/:ws/tasks/:name` | Get task details |
-
-#### Executions
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/workspaces/:ws/start` | Start dataflow execution |
-| `GET` | `/api/executions` | List active/recent executions |
-| `GET` | `/api/executions/:id` | Get execution state |
-| `GET` | `/api/executions/:id/events` | **SSE stream** - execution events |
-| `GET` | `/api/executions/:id/tasks/:task/logs` | Get task logs (paginated) |
-
-### Request/Response Format
-
-All requests and responses use JSON. Binary data (datasets) uses base64 encoding with a wrapper:
+All responses use a variant type for success/error:
 
 ```typescript
-// Dataset value wrapper
-interface DatasetValue {
-  type: "beast2";           // Encoding format
-  data: string;             // Base64-encoded BEAST2
-  schema?: string;          // Optional East type hash for validation
-}
+const ResponseType = <T extends EastType>(successType: T) => VariantType({
+  success: successType,
+  error: ErrorType,
+});
 ```
 
-### Error Response
+### HTTP Status Codes
+
+- `200` - Success (check response variant for actual result)
+- `400` - Malformed request
+- `415` - Unsupported media type
+- `500` - Server error
+
+Domain errors return `200` with `error` variant, not HTTP error codes.
+
+---
+
+## Error Types
 
 ```typescript
-interface ErrorResponse {
-  error: {
-    code: string;           // Machine-readable code, e.g., "WORKSPACE_NOT_FOUND"
-    message: string;        // Human-readable message
-    details?: unknown;      // Additional context
-  };
-}
+const WorkspaceNotFoundErrorType = StructType({ workspace: StringType });
+const WorkspaceNotDeployedErrorType = StructType({ workspace: StringType });
+const WorkspaceExistsErrorType = StructType({ workspace: StringType });
+const LockHolderType = StructType({
+  pid: IntegerType,
+  acquiredAt: StringType,
+  bootId: OptionType(StringType),
+  command: OptionType(StringType),
+});
+const WorkspaceLockedErrorType = StructType({
+  workspace: StringType,
+  holder: VariantType({ unknown: NullType, known: LockHolderType }),
+});
+const PackageNotFoundErrorType = StructType({
+  packageName: StringType,
+  version: OptionType(StringType),
+});
+const PackageExistsErrorType = StructType({ packageName: StringType, version: StringType });
+const PackageInvalidErrorType = StructType({ reason: StringType });
+const DatasetNotFoundErrorType = StructType({ workspace: StringType, path: StringType });
+const TaskNotFoundErrorType = StructType({ task: StringType });
+const ObjectNotFoundErrorType = StructType({ hash: StringType });
+const DataflowErrorType = StructType({ message: StringType });
+const PermissionDeniedErrorType = StructType({ path: StringType });
+const InternalErrorType = StructType({ message: StringType });
+
+const ErrorType = VariantType({
+  workspace_not_found: WorkspaceNotFoundErrorType,
+  workspace_not_deployed: WorkspaceNotDeployedErrorType,
+  workspace_exists: WorkspaceExistsErrorType,
+  workspace_locked: WorkspaceLockedErrorType,
+  package_not_found: PackageNotFoundErrorType,
+  package_exists: PackageExistsErrorType,
+  package_invalid: PackageInvalidErrorType,
+  dataset_not_found: DatasetNotFoundErrorType,
+  task_not_found: TaskNotFoundErrorType,
+  object_not_found: ObjectNotFoundErrorType,
+  dataflow_error: DataflowErrorType,
+  dataflow_aborted: NullType,
+  permission_denied: PermissionDeniedErrorType,
+  internal: InternalErrorType,
+});
 ```
 
-Standard HTTP status codes:
-- `400` - Bad request (validation error)
-- `404` - Resource not found
-- `409` - Conflict (e.g., workspace already exists)
-- `500` - Internal server error
+---
 
-## Execution Events
+## API Endpoints
 
-Long-running operations (dataflow execution) use Server-Sent Events for real-time updates.
+### Repository
 
-### Starting an Execution
-
-```
-POST /api/workspaces/production/start
-Content-Type: application/json
-
-{
-  "filter": "train-*",
-  "concurrency": 4,
-  "force": false
-}
-```
-
-Response:
-```json
-{
-  "executionId": "exec_a1b2c3d4",
-  "status": "running",
-  "eventsUrl": "/api/executions/exec_a1b2c3d4/events"
-}
-```
-
-### Event Stream
-
-```
-GET /api/executions/exec_a1b2c3d4/events
-Accept: text/event-stream
-```
-
-The server sends events as they occur:
-
-```
-event: execution_started
-data: {"executionId":"exec_a1b2c3d4","workspace":"production","startedAt":1702300000000}
-
-event: task_started
-data: {"task":"load-data","startedAt":1702300001000}
-
-event: task_stdout
-data: {"task":"load-data","data":"Loading 1000 records...\n","offset":0}
-
-event: task_completed
-data: {"task":"load-data","result":{"cached":false,"state":"success","duration":1523}}
-
-event: task_started
-data: {"task":"train-model","startedAt":1702300003000}
-
-event: task_stderr
-data: {"task":"train-model","data":"Warning: low memory\n","offset":0}
-
-event: task_completed
-data: {"task":"train-model","result":{"cached":false,"state":"success","duration":45230},"changedDatasets":["outputs/model"]}
-
-event: execution_completed
-data: {"result":{"success":true,"executed":2,"cached":0,"failed":0,"skipped":0,"duration":46753,"changedDatasets":["outputs/predictions","outputs/model"]}}
-```
-
-### Event Types
+| e3-core Function | Method | Path | Request | Response |
+|------------------|--------|------|---------|----------|
+| `repoGc()` | POST | `/api/gc` | `GcRequestType` | `GcResultType` |
 
 ```typescript
-type ExecutionEvent =
-  | {
-      type: "execution_started";
-      executionId: string;
-      workspace: string;
-      startedAt: number;
-      filter?: string;
-    }
-  | {
-      type: "task_started";
-      task: string;
-      startedAt: number;
-    }
-  | {
-      type: "task_stdout";
-      task: string;
-      data: string;
-      offset: number;        // Byte offset for log continuity
-    }
-  | {
-      type: "task_stderr";
-      task: string;
-      data: string;
-      offset: number;
-    }
-  | {
-      type: "task_completed";
-      task: string;
-      result: TaskExecutionResult;
-      changedDatasets: string[];   // Datasets written by this task
-    }
-  | {
-      type: "execution_completed";
-      result: DataflowResult;
-    }
-  | {
-      type: "execution_error";
-      message: string;
-    };
-
-interface TaskExecutionResult {
-  cached: boolean;
-  state: "success" | "failed" | "error" | "skipped";
-  error?: string;
-  exitCode?: number;
-  duration: number;
-}
-
-interface DataflowResult {
-  success: boolean;
-  executed: number;
-  cached: number;
-  failed: number;
-  skipped: number;
-  tasks: TaskExecutionResult[];
-  duration: number;
-  changedDatasets: string[];    // Paths that were written during execution
-}
-```
-
-### Reconnection and Catch-Up
-
-Clients may disconnect during long-running executions. The server supports reconnection with state recovery.
-
-#### Query Parameters
-
-```
-GET /api/executions/:id/events?since=<event_sequence>
-```
-
-- `since` - Resume from this event sequence number (0-indexed)
-
-#### Reconnection Flow
-
-1. Client connects to `/api/executions/:id/events`
-2. Server sends current state snapshot first:
-   ```
-   event: state_snapshot
-   data: {"status":"running","startedAt":1702300000000,"completedTasks":["load-data"],"activeTasks":["train-model"],"sequence":5}
-   ```
-3. Server replays any buffered events since `since` parameter (if provided)
-4. Server continues with live events
-
-#### Event Buffering
-
-The server buffers events for active executions. Buffer is cleared when:
-- Execution completes and all clients disconnect
-- Buffer exceeds size limit (oldest events dropped)
-- Configurable TTL expires after completion
-
-```typescript
-interface ExecutionBuffer {
-  events: Array<{ sequence: number; event: ExecutionEvent }>;
-  maxSize: number;          // Default: 1000 events
-  completedTTL: number;     // Default: 5 minutes after completion
-}
-```
-
-## e3-api-client
-
-### Installation
-
-```bash
-npm install @elaraai/e3-api-client
-```
-
-### Basic Usage
-
-```typescript
-import { createClient } from "@elaraai/e3-api-client";
-
-const client = createClient({ url: "http://localhost:3000" });
-
-// Simple operations
-const packages = await client.packages.list();
-const workspaces = await client.workspaces.list();
-
-// Get/set datasets
-const data = await client.datasets.get("production", ["inputs", "config"]);
-await client.datasets.set("production", ["inputs", "config"], newValue);
-```
-
-### Execution with Events
-
-```typescript
-// Start execution
-const execution = await client.start("production", {
-  filter: "train-*",
-  concurrency: 4,
+const GcRequestType = StructType({
+  dryRun: BooleanType,
+  minAge: OptionType(IntegerType),
 });
 
-// Option 1: Async iterator
-for await (const event of execution.events()) {
-  switch (event.type) {
-    case "task_started":
-      console.log(`Starting: ${event.task}`);
-      break;
-    case "task_stdout":
-      process.stdout.write(event.data);
-      break;
-    case "task_completed":
-      console.log(`Completed: ${event.task} (${event.result.duration}ms)`);
-      break;
-    case "execution_completed":
-      console.log(`Done: ${event.result.executed} executed, ${event.result.cached} cached`);
-      break;
-  }
-}
-
-// Option 2: Event emitter style
-execution.on("task_started", (e) => console.log(`Starting: ${e.task}`));
-execution.on("task_completed", (e) => console.log(`Done: ${e.task}`));
-execution.on("execution_completed", (result) => console.log("Finished", result));
-
-// Wait for completion
-const result = await execution.wait();
-
-// Option 3: Just wait, ignore events
-const result = await client.startAndWait("production", { filter: "train-*" });
+const GcResultType = StructType({
+  deletedObjects: IntegerType,
+  deletedPartials: IntegerType,
+  retainedObjects: IntegerType,
+  skippedYoung: IntegerType,
+  bytesFreed: IntegerType,
+});
 ```
 
-### Reconnection
+### Packages
+
+| e3-core Function | Method | Path | Request | Response |
+|------------------|--------|------|---------|----------|
+| `packageList()` | GET | `/api/packages` | - | `ArrayType(PackageListItemType)` |
+| `packageRead()` | GET | `/api/packages/:name/:version` | - | `PackageObjectType` |
+| `packageImport()` | POST | `/api/packages` | `BlobType` | `PackageImportResultType` |
+| `packageExport()` | GET | `/api/packages/:name/:version/export` | - | `BlobType` |
+| `packageRemove()` | DELETE | `/api/packages/:name/:version` | - | `NullType` |
 
 ```typescript
-// Execution handle persists execution ID
-const execution = await client.start("production");
-const executionId = execution.id;
-
-// ... client disconnects ...
-
-// Reconnect later
-const execution = client.attach(executionId);
-for await (const event of execution.events()) {
-  // Receives state snapshot + missed events + live events
-}
-```
-
-### Client API Reference
-
-```typescript
-interface E3Client {
-  // Repository
-  status(): Promise<RepositoryStatus>;
-  gc(): Promise<GCResult>;
-
-  // Packages
-  packages: {
-    list(): Promise<PackageInfo[]>;
-    get(name: string): Promise<PackageDetails>;
-    import(archive: Buffer | ReadableStream): Promise<PackageInfo>;
-    export(name: string): Promise<ReadableStream>;
-    remove(name: string): Promise<void>;
-  };
-
-  // Workspaces
-  workspaces: {
-    list(): Promise<WorkspaceInfo[]>;
-    create(name: string): Promise<WorkspaceInfo>;
-    get(name: string): Promise<WorkspaceState>;
-    remove(name: string): Promise<void>;
-    deploy(name: string, packageName: string): Promise<void>;
-    export(name: string): Promise<ReadableStream>;
-  };
-
-  // Datasets
-  datasets: {
-    list(workspace: string): Promise<DatasetTree>;
-    get(workspace: string, path: string[]): Promise<DatasetValue>;
-    set(workspace: string, path: string[], value: DatasetValue): Promise<void>;
-  };
-
-  // Tasks
-  tasks: {
-    list(workspace: string): Promise<TaskInfo[]>;
-    get(workspace: string, name: string): Promise<TaskDetails>;
-  };
-
-  // Executions
-  start(workspace: string, options?: StartOptions): Promise<Execution>;
-  startAndWait(workspace: string, options?: StartOptions): Promise<DataflowResult>;
-  attach(executionId: string): Execution;
-  executions: {
-    list(): Promise<ExecutionInfo[]>;
-    get(id: string): Promise<ExecutionState>;
-    logs(id: string, task: string, options?: LogOptions): Promise<LogChunk>;
-  };
-}
-
-interface Execution {
-  id: string;
-  events(): AsyncIterable<ExecutionEvent>;
-  on<T extends ExecutionEvent["type"]>(
-    type: T,
-    handler: (event: Extract<ExecutionEvent, { type: T }>) => void
-  ): void;
-  off(type: string, handler: Function): void;
-  wait(): Promise<DataflowResult>;
-  abort(): Promise<void>;
-}
-
-interface StartOptions {
-  filter?: string;
-  concurrency?: number;
-  force?: boolean;
-}
-
-interface LogOptions {
-  stream: "stdout" | "stderr";
-  offset?: number;
-  limit?: number;
-}
-```
-
-## e3-api-server
-
-### Installation
-
-```bash
-npm install @elaraai/e3-api-server
-```
-
-### CLI Usage
-
-```bash
-# Start server for a repository
-e3-api-server --repo ./my-repo --port 3000
-
-# With custom host binding
-e3-api-server --repo ./my-repo --host 0.0.0.0 --port 8080
-```
-
-### Programmatic Usage
-
-```typescript
-import { createServer } from "@elaraai/e3-api-server";
-
-const server = await createServer({
-  repo: "./my-repo",
-  port: 3000,
-  host: "localhost",
+const PackageListItemType = StructType({
+  name: StringType,
+  version: StringType,
 });
 
-await server.start();
+// PackageObjectType from e3-types
 
-// Graceful shutdown
-process.on("SIGTERM", () => server.stop());
+const PackageImportResultType = StructType({
+  name: StringType,
+  version: StringType,
+  packageHash: StringType,
+  objectCount: IntegerType,
+});
 ```
 
-### Configuration
+### Workspaces
+
+| e3-core Function | Method | Path | Request | Response |
+|------------------|--------|------|---------|----------|
+| `workspaceList()` | GET | `/api/workspaces` | - | `ArrayType(StringType)` |
+| `workspaceCreate()` | POST | `/api/workspaces` | `WorkspaceCreateRequestType` | `NullType` |
+| `workspaceGetState()` | GET | `/api/workspaces/:ws` | - | `WorkspaceStateType` |
+| `workspaceRemove()` | DELETE | `/api/workspaces/:ws` | - | `NullType` |
+| `workspaceDeploy()` | POST | `/api/workspaces/:ws/deploy` | `WorkspaceDeployRequestType` | `NullType` |
+| `workspaceExport()` | GET | `/api/workspaces/:ws/export` | - | `BlobType` |
+| `workspaceStatus()` | GET | `/api/workspaces/:ws/status` | - | `WorkspaceStatusResultType` |
 
 ```typescript
-interface ServerConfig {
-  repo: string;              // Path to e3 repository (required)
-  port?: number;             // HTTP port (default: 3000)
-  host?: string;             // Bind address (default: "localhost")
+const WorkspaceCreateRequestType = StructType({
+  name: StringType,
+});
 
-  // Execution settings
-  execution?: {
-    bufferSize?: number;     // Max events to buffer per execution (default: 1000)
-    completedTTL?: number;   // Ms to keep completed execution buffers (default: 300000)
-    maxConcurrent?: number;  // Max concurrent executions (default: 10)
-  };
+const WorkspaceDeployRequestType = StructType({
+  packageName: StringType,
+  packageVersion: StringType,
+});
 
-  // Future: Authentication
-  // auth?: {
-  //   type: "bearer" | "basic" | "custom";
-  //   validate: (credentials: unknown) => Promise<AuthContext>;
-  // };
-}
+// WorkspaceStateType from e3-types
+
+const DatasetStatusType = VariantType({
+  unset: NullType,
+  stale: NullType,
+  'up-to-date': NullType,
+});
+
+const TaskStatusUpToDateType = StructType({ cached: BooleanType });
+const TaskStatusWaitingType = StructType({ reason: StringType });
+const TaskStatusInProgressType = StructType({
+  pid: OptionType(IntegerType),
+  startedAt: OptionType(StringType),
+});
+const TaskStatusFailedType = StructType({
+  exitCode: IntegerType,
+  completedAt: OptionType(StringType),
+});
+const TaskStatusErrorType = StructType({
+  message: StringType,
+  completedAt: OptionType(StringType),
+});
+const TaskStatusStaleRunningType = StructType({
+  pid: OptionType(IntegerType),
+  startedAt: OptionType(StringType),
+});
+
+const TaskStatusType = VariantType({
+  'up-to-date': TaskStatusUpToDateType,
+  ready: NullType,
+  waiting: TaskStatusWaitingType,
+  'in-progress': TaskStatusInProgressType,
+  failed: TaskStatusFailedType,
+  error: TaskStatusErrorType,
+  'stale-running': TaskStatusStaleRunningType,
+});
+
+const DatasetStatusInfoType = StructType({
+  path: StringType,
+  status: DatasetStatusType,
+  hash: OptionType(StringType),
+  isTaskOutput: BooleanType,
+  producedBy: OptionType(StringType),
+});
+
+const TaskStatusInfoType = StructType({
+  name: StringType,
+  hash: StringType,
+  status: TaskStatusType,
+  inputs: ArrayType(StringType),
+  output: StringType,
+  dependsOn: ArrayType(StringType),
+});
+
+const WorkspaceStatusSummaryType = StructType({
+  datasets: StructType({
+    total: IntegerType,
+    unset: IntegerType,
+    stale: IntegerType,
+    upToDate: IntegerType,
+  }),
+  tasks: StructType({
+    total: IntegerType,
+    upToDate: IntegerType,
+    ready: IntegerType,
+    waiting: IntegerType,
+    inProgress: IntegerType,
+    failed: IntegerType,
+    error: IntegerType,
+    staleRunning: IntegerType,
+  }),
+});
+
+const WorkspaceStatusResultType = StructType({
+  workspace: StringType,
+  lock: OptionType(LockHolderType),
+  datasets: ArrayType(DatasetStatusInfoType),
+  tasks: ArrayType(TaskStatusInfoType),
+  summary: WorkspaceStatusSummaryType,
+});
 ```
 
-## Package Structure
+### Datasets
+
+| e3-core Function | Method | Path | Request | Response |
+|------------------|--------|------|---------|----------|
+| `workspaceListTree()` | GET | `/api/workspaces/:ws/list` | - | `ArrayType(StringType)` |
+| `workspaceListTree()` | GET | `/api/workspaces/:ws/list/*` | - | `ArrayType(StringType)` |
+| `workspaceGetDatasetHash()` | GET | `/api/workspaces/:ws/get/*` | - | Raw BEAST2 |
+| `workspaceSetDataset()` | PUT | `/api/workspaces/:ws/set/*` | Raw BEAST2 | `NullType` |
+
+Note: `get/*` returns raw BEAST2 bytes from the object store (the dataset value). `set/*` accepts raw BEAST2 bytes with the type embedded.
+
+### Tasks
+
+| e3-core Function | Method | Path | Request | Response |
+|------------------|--------|------|---------|----------|
+| `workspaceListTasks()` | GET | `/api/workspaces/:ws/tasks` | - | `ArrayType(TaskListItemType)` |
+| `workspaceGetTask()` | GET | `/api/workspaces/:ws/tasks/:name` | - | `TaskObjectType` |
+
+```typescript
+const TaskListItemType = StructType({
+  name: StringType,
+  hash: StringType,
+});
+
+// TaskObjectType from e3-types
+```
+
+### Execution
+
+| e3-core Function | Method | Path | Request | Response |
+|------------------|--------|------|---------|----------|
+| `dataflowExecute()` | POST | `/api/workspaces/:ws/start` | `DataflowRequestType` | `NullType` (202 Accepted) |
+| `dataflowGetGraph()` | GET | `/api/workspaces/:ws/graph` | - | `DataflowGraphType` |
+| `executionReadLog()` | GET | `/api/workspaces/:ws/logs/:task` | Query: stream, offset, limit | `LogChunkType` |
+
+**Execution Model (Non-blocking):**
+
+`POST /start` is non-blocking:
+1. Acquires workspace lock
+2. Spawns `dataflowExecute()` in background
+3. Returns immediately with 202 Accepted
+
+Client polls `GET /status` to track progress:
+- `lock` field shows who holds the lock (PID, start time)
+- `tasks[].status` shows each task's state (`in-progress`, `up-to-date`, `failed`, etc.)
+- `datasets[].status` shows which outputs are complete
+
+When execution finishes:
+- Lock is released (`lock` becomes null)
+- All task statuses reflect final state
+- Dataset statuses are `up-to-date` or `stale` (if failed)
+
+This is stateless - all execution state is persisted to filesystem by `dataflowExecute()`:
+- Lock file: `workspaces/<ws>.lock`
+- Task status: `executions/<taskHash>/<inputsHash>/status.beast2`
+- Logs: `executions/<taskHash>/<inputsHash>/stdout.txt`, `stderr.txt`
+
+```typescript
+const DataflowRequestType = StructType({
+  concurrency: OptionType(IntegerType),
+  force: BooleanType,
+  filter: OptionType(StringType),
+});
+
+const GraphTaskType = StructType({
+  name: StringType,
+  hash: StringType,
+  inputs: ArrayType(StringType),
+  output: StringType,
+  dependsOn: ArrayType(StringType),
+});
+
+const DataflowGraphType = StructType({
+  tasks: ArrayType(GraphTaskType),
+});
+
+const LogChunkType = StructType({
+  data: StringType,
+  offset: IntegerType,
+  size: IntegerType,
+  totalSize: IntegerType,
+  complete: BooleanType,
+});
+```
+
+---
+
+## Implementation Status
 
 ### e3-api-server
 
-```
-packages/e3-api-server/
-├── src/
-│   ├── index.ts              # createServer() export
-│   ├── server.ts             # HTTP server setup (Express/Fastify)
-│   ├── routes/
-│   │   ├── status.ts         # GET /api/status, POST /api/gc
-│   │   ├── packages.ts       # /api/packages/*
-│   │   ├── workspaces.ts     # /api/workspaces/*
-│   │   ├── datasets.ts       # /api/workspaces/:ws/datasets/*
-│   │   ├── tasks.ts          # /api/workspaces/:ws/tasks/*
-│   │   └── executions.ts     # /api/executions/*, POST /api/workspaces/:ws/start
-│   ├── execution-manager.ts  # Tracks active executions, event buffering
-│   ├── sse.ts                # SSE response helpers
-│   ├── errors.ts             # Error types and formatting
-│   └── cli.ts                # CLI entry point
-├── package.json
-└── tsconfig.json
-```
+**Complete:**
+- [x] BEAST2 request/response helpers (`beast2.ts`)
+- [x] Error handling with domain error types (`errors.ts`)
+- [x] Repository: `GET /api/status`, `POST /api/gc`
+- [x] Packages: `GET /api/packages`, `GET /api/packages/:name/:version`, `POST /api/packages`, `GET /api/packages/:name/:version/export`, `DELETE /api/packages/:name/:version`
+- [x] Workspaces: `GET /api/workspaces`, `POST /api/workspaces`, `GET /api/workspaces/:ws`, `DELETE /api/workspaces/:ws`, `POST /api/workspaces/:ws/deploy`, `GET /api/workspaces/:ws/export`, `GET /api/workspaces/:ws/status`
+- [x] Datasets: `GET /list`, `GET /list/*`, `GET /get/*`, `PUT /set/*`
+- [x] Tasks: `GET /tasks`, `GET /tasks/:name`
+- [x] Execution: `POST /api/workspaces/:ws/start` (non-blocking), `GET /api/workspaces/:ws/graph`, `GET /api/workspaces/:ws/logs/:task`
+- [x] Server CLI (`cli.ts`)
 
 ### e3-api-client
 
-```
-packages/e3-api-client/
-├── src/
-│   ├── index.ts              # createClient() export
-│   ├── client.ts             # E3Client implementation
-│   ├── execution.ts          # Execution handle with SSE subscription
-│   ├── sse.ts                # SSE parsing, reconnection logic
-│   ├── errors.ts             # Error types
-│   └── types.ts              # Shared types (re-exported)
-├── package.json
-└── tsconfig.json
-```
-
-## Implementation Notes
-
-### Server: Execution Manager
-
-The execution manager tracks active executions and handles event broadcasting:
-
-```typescript
-class ExecutionManager {
-  private executions = new Map<string, ExecutionState>();
-
-  async start(workspace: string, options: StartOptions): Promise<string> {
-    const id = `exec_${crypto.randomUUID().slice(0, 8)}`;
-
-    const state: ExecutionState = {
-      id,
-      workspace,
-      status: "running",
-      startedAt: Date.now(),
-      events: [],
-      clients: new Set(),
-    };
-    this.executions.set(id, state);
-
-    // Run dataflow with callbacks
-    dataflowExecute(this.repo, workspace, {
-      ...options,
-      onTaskStart: (task) => this.emit(id, {
-        type: "task_started",
-        task,
-        startedAt: Date.now(),
-      }),
-      onTaskComplete: (task, result) => this.emit(id, {
-        type: "task_completed",
-        task,
-        result,
-      }),
-      onStdout: (task, data, offset) => this.emit(id, {
-        type: "task_stdout",
-        task,
-        data,
-        offset,
-      }),
-      onStderr: (task, data, offset) => this.emit(id, {
-        type: "task_stderr",
-        task,
-        data,
-        offset,
-      }),
-    }).then((result) => {
-      state.status = "completed";
-      state.result = result;
-      this.emit(id, { type: "execution_completed", result });
-      this.scheduleCleanup(id);
-    }).catch((error) => {
-      state.status = "error";
-      state.error = error.message;
-      this.emit(id, { type: "execution_error", message: error.message });
-      this.scheduleCleanup(id);
-    });
-
-    return id;
-  }
-
-  subscribe(id: string, res: Response, since?: number): void {
-    const state = this.executions.get(id);
-    if (!state) throw new NotFoundError("Execution not found");
-
-    // Send state snapshot
-    this.sendSSE(res, "state_snapshot", {
-      status: state.status,
-      startedAt: state.startedAt,
-      completedTasks: state.completedTasks,
-      activeTasks: state.activeTasks,
-      sequence: state.events.length,
-    });
-
-    // Replay buffered events if requested
-    if (since !== undefined) {
-      for (const { sequence, event } of state.events) {
-        if (sequence >= since) {
-          this.sendSSE(res, event.type, event);
-        }
-      }
-    }
-
-    // Subscribe to live events
-    state.clients.add(res);
-    res.on("close", () => state.clients.delete(res));
-  }
-
-  private emit(id: string, event: ExecutionEvent): void {
-    const state = this.executions.get(id);
-    if (!state) return;
-
-    const sequence = state.events.length;
-    state.events.push({ sequence, event });
-
-    // Trim buffer if needed
-    if (state.events.length > this.config.bufferSize) {
-      state.events.shift();
-    }
-
-    // Broadcast to connected clients
-    for (const client of state.clients) {
-      this.sendSSE(client, event.type, { ...event, sequence });
-    }
-  }
-
-  private sendSSE(res: Response, event: string, data: unknown): void {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  }
-}
-```
-
-### Client: SSE with Reconnection
-
-```typescript
-class Execution {
-  constructor(
-    private client: E3Client,
-    public readonly id: string,
-  ) {}
-
-  async *events(): AsyncIterable<ExecutionEvent> {
-    let lastSequence = 0;
-    let retries = 0;
-
-    while (true) {
-      try {
-        const url = `${this.client.baseUrl}/api/executions/${this.id}/events?since=${lastSequence}`;
-        const response = await fetch(url, {
-          headers: { Accept: "text/event-stream" },
-        });
-
-        retries = 0; // Reset on successful connection
-
-        for await (const event of parseSSE(response.body)) {
-          if (event.sequence !== undefined) {
-            lastSequence = event.sequence + 1;
-          }
-
-          yield event;
-
-          if (event.type === "execution_completed" || event.type === "execution_error") {
-            return;
-          }
-        }
-      } catch (error) {
-        if (retries >= this.client.maxRetries) throw error;
-        retries++;
-        await sleep(Math.min(1000 * Math.pow(2, retries), 30000));
-      }
-    }
-  }
-
-  async wait(): Promise<DataflowResult> {
-    for await (const event of this.events()) {
-      if (event.type === "execution_completed") {
-        return event.result;
-      }
-      if (event.type === "execution_error") {
-        throw new Error(event.message);
-      }
-    }
-    throw new Error("Execution stream ended unexpectedly");
-  }
-}
-```
-
-## React Integration
-
-The client package includes React hooks for building reactive UIs that automatically update when dataflow completes.
-
-### Installation
-
-```bash
-npm install @elaraai/e3-api-client
-```
-
-### Provider Setup
-
-```tsx
-import { E3Provider } from "@elaraai/e3-api-client/react";
-
-function App() {
-  return (
-    <E3Provider url="http://localhost:3000" workspace="production">
-      <Dashboard />
-    </E3Provider>
-  );
-}
-```
-
-### Core Hooks
-
-#### useDataset
-
-Fetches a dataset and automatically refetches when dataflow completes.
-
-```tsx
-import { useDataset } from "@elaraai/e3-api-client/react";
-
-function SalesChart() {
-  const { data, isLoading, error } = useDataset<SalesData[]>(["outputs", "predictions"]);
-
-  if (isLoading) return <Spinner />;
-  if (error) return <Error message={error.message} />;
-
-  return <LineChart data={data} />;
-}
-```
-
-#### useDatasetMutation
-
-Returns a mutation function to update a dataset.
-
-```tsx
-import { useDatasetMutation } from "@elaraai/e3-api-client/react";
-
-function ConfigEditor() {
-  const [config, setConfig] = useState({ threshold: 0.5 });
-  const { mutate, isPending } = useDatasetMutation(["inputs", "config"]);
-
-  const handleSave = () => {
-    mutate(config);  // Updates dataset on server
-  };
-
-  return (
-    <div>
-      <Slider
-        value={config.threshold}
-        onChange={(v) => setConfig({ ...config, threshold: v })}
-      />
-      <Button onClick={handleSave} disabled={isPending}>
-        Save
-      </Button>
-    </div>
-  );
-}
-```
-
-#### useExecution
-
-Starts a dataflow execution and provides reactive status.
-
-```tsx
-import { useExecution } from "@elaraai/e3-api-client/react";
-
-function RunButton() {
-  const { start, status, progress, error } = useExecution();
-
-  return (
-    <div>
-      <Button
-        onClick={() => start()}
-        disabled={status === "running"}
-      >
-        {status === "running" ? "Running..." : "Run Dataflow"}
-      </Button>
-
-      {status === "running" && (
-        <Progress
-          value={progress.completed}
-          max={progress.total}
-          label={`${progress.currentTask}...`}
-        />
-      )}
-
-      {status === "completed" && (
-        <Success>Completed in {progress.duration}ms</Success>
-      )}
-
-      {error && <Error>{error.message}</Error>}
-    </div>
-  );
-}
-```
-
-#### useExecutionEvents
-
-Subscribe to execution events for custom handling.
-
-```tsx
-import { useExecutionEvents } from "@elaraai/e3-api-client/react";
-
-function ExecutionLog() {
-  const [logs, setLogs] = useState<string[]>([]);
-
-  useExecutionEvents({
-    onTaskStarted: (e) => setLogs((l) => [...l, `Starting ${e.task}`]),
-    onTaskCompleted: (e) => setLogs((l) => [...l, `Done: ${e.task} (${e.result.duration}ms)`]),
-    onStdout: (e) => setLogs((l) => [...l, e.data]),
-  });
-
-  return (
-    <pre>
-      {logs.join("\n")}
-    </pre>
-  );
-}
-```
-
-### Complete Example: Edit → Run → View
-
-```tsx
-import {
-  E3Provider,
-  useDataset,
-  useDatasetMutation,
-  useExecution,
-} from "@elaraai/e3-api-client/react";
-
-function App() {
-  return (
-    <E3Provider url="http://localhost:3000" workspace="production">
-      <Dashboard />
-    </E3Provider>
-  );
-}
-
-function Dashboard() {
-  return (
-    <div className="dashboard">
-      <ConfigPanel />
-      <ResultsPanel />
-    </div>
-  );
-}
-
-function ConfigPanel() {
-  // Load current config
-  const { data: config, isLoading } = useDataset<Config>(["inputs", "config"]);
-
-  // Mutation to save config
-  const { mutate: saveConfig, isPending: isSaving } = useDatasetMutation(["inputs", "config"]);
-
-  // Execution control
-  const { start, status, progress } = useExecution();
-
-  // Local form state
-  const [form, setForm] = useState<Config | null>(null);
-
-  // Initialize form when data loads
-  useEffect(() => {
-    if (config && !form) setForm(config);
-  }, [config]);
-
-  if (isLoading || !form) return <Spinner />;
-
-  const handleRun = async () => {
-    // 1. Save the config
-    await saveConfig(form);
-    // 2. Start the dataflow
-    start();
-  };
-
-  const isRunning = status === "running";
-
-  return (
-    <Card>
-      <h2>Configuration</h2>
-
-      <FormField label="Threshold">
-        <Slider
-          value={form.threshold}
-          onChange={(v) => setForm({ ...form, threshold: v })}
-          disabled={isRunning}
-        />
-      </FormField>
-
-      <FormField label="Model Type">
-        <Select
-          value={form.modelType}
-          onChange={(v) => setForm({ ...form, modelType: v })}
-          options={["linear", "neural", "ensemble"]}
-          disabled={isRunning}
-        />
-      </FormField>
-
-      <Button onClick={handleRun} disabled={isRunning || isSaving}>
-        {isRunning ? `Running: ${progress.currentTask}...` : "Save & Run"}
-      </Button>
-
-      {isRunning && (
-        <Progress value={progress.completed} max={progress.total} />
-      )}
-    </Card>
-  );
-}
-
-function ResultsPanel() {
-  // This automatically refetches when dataflow completes
-  const { data: predictions, isLoading, updatedAt } = useDataset<Prediction[]>(
-    ["outputs", "predictions"]
-  );
-
-  if (isLoading) return <Spinner />;
-
-  return (
-    <Card>
-      <h2>Predictions</h2>
-      <small>Last updated: {updatedAt.toLocaleTimeString()}</small>
-
-      <LineChart
-        data={predictions}
-        xKey="date"
-        yKey="value"
-      />
-
-      <Table
-        columns={[
-          { key: "date", header: "Date" },
-          { key: "value", header: "Predicted Value" },
-          { key: "confidence", header: "Confidence" },
-        ]}
-        rows={predictions}
-      />
-    </Card>
-  );
-}
-```
-
-### How Auto-Refresh Works
-
-The server tracks which datasets are written during execution and includes them in the `execution_completed` event. Only those datasets are invalidated.
-
-1. **useExecution** subscribes to execution events via SSE
-2. When `execution_completed` fires, it includes `changedDatasets: ["outputs/predictions", "outputs/model"]`
-3. Context calls `invalidateDatasets(changedDatasets)`
-4. Only **useDataset** hooks watching those paths refetch
-5. React re-renders with new data
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ React App                                                           │
-│                                                                     │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────┐ │
-│  │ ConfigPanel │    │ RunButton   │    │ ResultsPanel            │ │
-│  │             │    │             │    │                         │ │
-│  │ useDataset  │    │ useExecution│    │ useDataset(outputs/pred)│ │
-│  │ (inputs/*)  │    │             │    │                         │ │
-│  │ NOT refetch │    │             │    │ ✓ REFETCHES             │ │
-│  └─────────────┘    └──────┬──────┘    └───────────┬─────────────┘ │
-│                            │                       │               │
-│                            │  onCompleted(result)  │               │
-│                            │  changedDatasets:     │               │
-│                            │  ["outputs/pred"]     │               │
-│                            │ ──────────────────────┼───────────┐   │
-│                            │                       │           │   │
-│                            ▼                       ▼           │   │
-│  ┌──────────────────────────────────────────────────────────┐ │   │
-│  │                    E3Provider Context                    │◄┘   │
-│  │  - client: E3Client                                      │     │
-│  │  - workspace: "production"                               │     │
-│  │  - invalidateDatasets(paths): selective refetch          │     │
-│  │  - subscriptions: Map<path, Set<callback>>               │     │
-│  └──────────────────────────────────────────────────────────┘     │
-│                              │                                     │
-└──────────────────────────────┼─────────────────────────────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │   e3-api-server     │
-                    └─────────────────────┘
-```
-
-The context maintains a subscription map. Each `useDataset` hook registers its path on mount. When `invalidateDatasets(paths)` is called, only hooks whose paths match (or are prefixes of) the changed paths are notified to refetch.
-
-### Hook API Reference
-
-```typescript
-// Provider
-interface E3ProviderProps {
-  url: string;                    // Server URL
-  workspace: string;              // Default workspace
-  children: React.ReactNode;
-}
-
-// useDataset
-interface UseDatasetOptions {
-  workspace?: string;             // Override default workspace
-  enabled?: boolean;              // Conditionally fetch
-  refetchOn?: "task_completed" | "execution_completed" | "none";  // Default: "execution_completed"
-}
-
-interface UseDatasetResult<T> {
-  data: T | undefined;
-  isLoading: boolean;
-  isFetching: boolean;            // True during refetch
-  error: Error | null;
-  updatedAt: Date | null;
-  refetch: () => Promise<void>;
-}
-
-function useDataset<T>(
-  path: string[],
-  options?: UseDatasetOptions
-): UseDatasetResult<T>;
-
-// useDatasetMutation
-interface UseDatasetMutationOptions {
-  workspace?: string;
-  onSuccess?: () => void;
-  onError?: (error: Error) => void;
-}
-
-interface UseDatasetMutationResult<T> {
-  mutate: (value: T) => Promise<void>;
-  mutateAsync: (value: T) => Promise<void>;
-  isPending: boolean;
-  error: Error | null;
-  reset: () => void;
-}
-
-function useDatasetMutation<T>(
-  path: string[],
-  options?: UseDatasetMutationOptions
-): UseDatasetMutationResult<T>;
-
-// useExecution
-interface UseExecutionOptions {
-  workspace?: string;
-  filter?: string;
-  concurrency?: number;
-  force?: boolean;
-  onTaskStarted?: (event: TaskStartedEvent) => void;
-  onTaskCompleted?: (event: TaskCompletedEvent) => void;
-  onCompleted?: (result: DataflowResult) => void;
-  onError?: (error: Error) => void;
-}
-
-interface ExecutionProgress {
-  total: number;
-  completed: number;
-  cached: number;
-  failed: number;
-  currentTask: string | null;
-  duration: number;
-}
-
-interface UseExecutionResult {
-  start: (options?: Partial<UseExecutionOptions>) => void;
-  status: "idle" | "running" | "completed" | "error";
-  progress: ExecutionProgress;
-  result: DataflowResult | null;
-  error: Error | null;
-  reset: () => void;
-}
-
-function useExecution(options?: UseExecutionOptions): UseExecutionResult;
-
-// useExecutionEvents - for custom event handling
-interface UseExecutionEventsOptions {
-  executionId?: string;           // Attach to specific execution
-  onTaskStarted?: (event: TaskStartedEvent) => void;
-  onTaskCompleted?: (event: TaskCompletedEvent) => void;
-  onStdout?: (event: StdoutEvent) => void;
-  onStderr?: (event: StderrEvent) => void;
-  onCompleted?: (result: DataflowResult) => void;
-  onError?: (error: Error) => void;
-}
-
-function useExecutionEvents(options: UseExecutionEventsOptions): void;
-
-// useClient - escape hatch for direct client access
-function useClient(): E3Client;
-
-// useWorkspace - get/set current workspace
-function useWorkspace(): {
-  workspace: string;
-  setWorkspace: (ws: string) => void;
-};
-```
-
-### Integration with React Query / SWR
-
-The hooks are designed to work standalone, but can also integrate with existing data fetching libraries:
-
-```tsx
-// With React Query
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useClient } from "@elaraai/e3-api-client/react";
-
-function useDatasetWithQuery<T>(path: string[]) {
-  const client = useClient();
-  const workspace = "production";
-
-  return useQuery({
-    queryKey: ["dataset", workspace, ...path],
-    queryFn: () => client.datasets.get(workspace, path),
-  });
-}
-
-// Invalidate on execution complete
-function useExecutionWithQuery() {
-  const client = useClient();
-  const queryClient = useQueryClient();
-
-  const startExecution = async () => {
-    const execution = await client.start("production");
-
-    for await (const event of execution.events()) {
-      if (event.type === "execution_completed") {
-        // Invalidate all dataset queries
-        queryClient.invalidateQueries({ queryKey: ["dataset"] });
-      }
-    }
-  };
-
-  return { startExecution };
-}
-```
-
-### Package Structure Update
-
-```
-packages/e3-api-client/
-├── src/
-│   ├── index.ts              # createClient() export
-│   ├── client.ts             # E3Client implementation
-│   ├── execution.ts          # Execution handle
-│   ├── sse.ts                # SSE parsing
-│   ├── errors.ts             # Error types
-│   └── types.ts              # Shared types
-├── react/
-│   ├── index.ts              # React exports
-│   ├── provider.tsx          # E3Provider
-│   ├── context.ts            # Internal context
-│   ├── useDataset.ts         # useDataset hook
-│   ├── useDatasetMutation.ts # useDatasetMutation hook
-│   ├── useExecution.ts       # useExecution hook
-│   └── useExecutionEvents.ts # useExecutionEvents hook
-├── package.json
-└── tsconfig.json
-```
-
-## Future Considerations
-
-### Multiple Repositories
-
-Current design binds server to one repository. Future options:
-
-1. **Path-based routing**: `/api/repos/:repo/workspaces/...`
-2. **Subdomain routing**: `repo1.api.example.com/api/workspaces/...`
-3. **Header-based**: `X-E3-Repository: repo1`
-
-### Authentication & Authorization
-
-Hooks for future auth:
-
-```typescript
-interface AuthContext {
-  userId: string;
-  permissions: string[];
-}
-
-interface ServerConfig {
-  auth?: {
-    validate(request: Request): Promise<AuthContext>;
-    authorize(context: AuthContext, action: string, resource: string): boolean;
-  };
-}
-```
-
-### WebSocket Alternative
-
-SSE is simpler and sufficient for server→client streaming. If bidirectional streaming is needed (e.g., stdin to running tasks), WebSocket could be added:
-
-```
-GET /api/executions/:id/ws → WebSocket upgrade
-```
-
-### Abort/Cancel Execution
-
-```
-POST /api/executions/:id/abort
-```
-
-Would require e3-core support for graceful task cancellation.
+**Complete:**
+- [x] BEAST2 HTTP helpers (`http.ts`)
+- [x] Repository: `repoStatus`, `repoGc`
+- [x] Packages: `packageList`, `packageGet`, `packageImport`, `packageExport`, `packageRemove`
+- [x] Workspaces: `workspaceList`, `workspaceCreate`, `workspaceGet`, `workspaceRemove`, `workspaceDeploy`, `workspaceExport`, `workspaceStatus`
+- [x] Datasets: `datasetList`, `datasetListAt`, `datasetGet`, `datasetSet`
+- [x] Tasks: `taskList`, `taskGet`
+- [x] Execution: `dataflowStart`, `dataflowGraph`, `taskLogs`

@@ -1,6 +1,6 @@
 /**
  * Copyright (c) 2025 Elara AI Pty Ltd
- * Dual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.
+ * Licensed under BSL 1.1. See LICENSE for details.
  */
 
 /**
@@ -357,6 +357,30 @@ export async function dataflowExecute(
       await lock.release();
     }
   }
+}
+
+/**
+ * Start dataflow execution in the background (non-blocking).
+ *
+ * Returns a promise immediately without awaiting execution. The lock is
+ * released automatically when execution completes.
+ *
+ * @param repoPath - Path to .e3 repository
+ * @param ws - Workspace name
+ * @param options - Execution options (lock must be provided)
+ * @returns Promise that resolves when execution completes
+ * @throws {WorkspaceNotFoundError} If workspace doesn't exist
+ * @throws {WorkspaceNotDeployedError} If workspace has no package deployed
+ * @throws {TaskNotFoundError} If filter specifies a task that doesn't exist
+ * @throws {DataflowError} If execution fails for other reasons
+ */
+export function dataflowStart(
+  repoPath: string,
+  ws: string,
+  options: DataflowOptions & { lock: WorkspaceLockHandle }
+): Promise<DataflowResult> {
+  return dataflowExecuteWithLock(repoPath, ws, options)
+    .finally(() => options.lock.release());
 }
 
 /**

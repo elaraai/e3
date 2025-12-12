@@ -1,6 +1,6 @@
 /**
  * Copyright (c) 2025 Elara AI Pty Ltd
- * Dual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.
+ * Licensed under BSL 1.1. See LICENSE for details.
  */
 
 /**
@@ -178,6 +178,25 @@ export async function packageList(
   }
 
   return packages;
+}
+
+/**
+ * Get the latest version of a package.
+ *
+ * @param repoPath - Path to .e3 repository
+ * @param name - Package name
+ * @returns Latest version string, or undefined if package not found
+ */
+export async function packageGetLatestVersion(
+  repoPath: string,
+  name: string
+): Promise<string | undefined> {
+  const packages = await packageList(repoPath);
+  const versions = packages
+    .filter(p => p.name === name)
+    .map(p => p.version)
+    .sort();
+  return versions[versions.length - 1];
 }
 
 /**
