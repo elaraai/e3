@@ -25,3 +25,11 @@ export {
   testRapidSetStartCycles,
   testInterleavedMultiWorkspace,
 } from './concurrent-ops.js';
+export {
+  testLargeArrays,
+  testLargeStrings,
+  testNestedStructures,
+  testDeepDAG,
+  testWideDAG,
+  testDiamondChain,
+} from './stress.js';

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --stack-size=8192
 
 /**
  * Copyright (c) 2025 Elara AI Pty Ltd

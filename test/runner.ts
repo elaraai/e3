@@ -27,6 +27,14 @@ import {
   testRapidSetStartCycles,
   testInterleavedMultiWorkspace,
 } from './scenarios/concurrent-ops.js';
+import {
+  testLargeArrays,
+  testLargeStrings,
+  testNestedStructures,
+  testDeepDAG,
+  testWideDAG,
+  testDiamondChain,
+} from './scenarios/stress.js';
 
 export interface RunnerConfig {
   /** Number of iterations to run */
@@ -88,6 +96,14 @@ const scenarios: Scenario[] = [
   { name: 'concurrent-multiple-starts', fn: testMultipleSimultaneousStarts },
   { name: 'concurrent-rapid-set-start', fn: testRapidSetStartCycles },
   { name: 'concurrent-multi-workspace', fn: testInterleavedMultiWorkspace },
+
+  // Stress tests - large data and complex DAGs
+  { name: 'stress-large-arrays', fn: testLargeArrays },
+  { name: 'stress-large-strings', fn: testLargeStrings },
+  { name: 'stress-nested-structures', fn: testNestedStructures },
+  { name: 'stress-deep-dag', fn: testDeepDAG },
+  { name: 'stress-wide-dag', fn: testWideDAG },
+  { name: 'stress-diamond-chain', fn: testDiamondChain },
 ];
 
 /**
