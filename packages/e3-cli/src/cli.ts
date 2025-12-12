@@ -39,8 +39,8 @@ program
   .action(initCommand);
 
 program
-  .command('status <repo>')
-  .description('Show repository status (packages, workspaces)')
+  .command('status <repo> [workspace]')
+  .description('Show repository status, or detailed workspace status if workspace provided')
   .action(statusCommand);
 
 program

@@ -33,7 +33,7 @@ import {
   WorkspaceNotDeployedError,
   isNotFoundError,
 } from './errors.js';
-import { acquireWorkspaceLock } from './workspaceLock.js';
+import { acquireWorkspaceLock, type WorkspaceLockHandle } from './workspaceLock.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -340,6 +340,18 @@ export async function packageGetDataset(
 }
 
 /**
+ * Options for setting a workspace dataset.
+ */
+export interface WorkspaceSetDatasetOptions {
+  /**
+   * External workspace lock to use. If provided, the caller is responsible
+   * for releasing the lock after the operation. If not provided, workspaceSetDataset
+   * will acquire and release a lock internally.
+   */
+  lock?: WorkspaceLockHandle;
+}
+
+/**
  * Update a dataset at a path within a workspace.
  *
  * This creates new tree objects along the path with structural sharing,
@@ -353,6 +365,7 @@ export async function packageGetDataset(
  * @param treePath - Path to the dataset
  * @param value - The new value to write
  * @param type - The East type for encoding the value (EastType or EastTypeValue)
+ * @param options - Optional settings including external lock
  * @throws {WorkspaceLockError} If workspace is locked by another process
  * @throws If workspace not deployed, path invalid, or path points to a tree
  */
@@ -361,18 +374,23 @@ export async function workspaceSetDataset(
   ws: string,
   treePath: TreePath,
   value: unknown,
-  type: EastType | EastTypeValue
+  type: EastType | EastTypeValue,
+  options: WorkspaceSetDatasetOptions = {}
 ): Promise<void> {
   if (treePath.length === 0) {
     throw new Error('Cannot set dataset at root path - root is always a tree');
   }
 
-  // Acquire exclusive lock for the duration of the write
-  const lock = await acquireWorkspaceLock(repoPath, ws);
+  // Acquire lock if not provided externally
+  const externalLock = options.lock;
+  const lock = externalLock ?? await acquireWorkspaceLock(repoPath, ws);
   try {
     await workspaceSetDatasetUnlocked(repoPath, ws, treePath, value, type);
   } finally {
-    await lock.release();
+    // Only release the lock if we acquired it internally
+    if (!externalLock) {
+      await lock.release();
+    }
   }
 }
 

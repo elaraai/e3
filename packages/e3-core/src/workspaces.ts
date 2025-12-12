@@ -30,7 +30,7 @@ import {
   WorkspaceExistsError,
   isNotFoundError,
 } from './errors.js';
-import { acquireWorkspaceLock } from './workspaceLock.js';
+import { acquireWorkspaceLock, type WorkspaceLockHandle } from './workspaceLock.js';
 
 /**
  * Get the path to a workspace's state file.
@@ -144,6 +144,18 @@ export async function workspaceCreate(
 }
 
 /**
+ * Options for workspace removal.
+ */
+export interface WorkspaceRemoveOptions {
+  /**
+   * External workspace lock to use. If provided, the caller is responsible
+   * for releasing the lock after the operation. If not provided, workspaceRemove
+   * will acquire and release a lock internally.
+   */
+  lock?: WorkspaceLockHandle;
+}
+
+/**
  * Remove a workspace.
  *
  * Objects remain until repoGc is run.
@@ -153,15 +165,18 @@ export async function workspaceCreate(
  *
  * @param repoPath - Path to .e3 repository
  * @param name - Workspace name
+ * @param options - Optional settings including external lock
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceLockError} If workspace is locked by another process
  */
 export async function workspaceRemove(
   repoPath: string,
-  name: string
+  name: string,
+  options: WorkspaceRemoveOptions = {}
 ): Promise<void> {
-  // Acquire lock to prevent removing while dataflow is running
-  const lock = await acquireWorkspaceLock(repoPath, name);
+  // Acquire lock if not provided externally
+  const externalLock = options.lock;
+  const lock = externalLock ?? await acquireWorkspaceLock(repoPath, name);
   try {
     const stateFile = statePath(repoPath, name);
     try {
@@ -173,7 +188,10 @@ export async function workspaceRemove(
       throw err;
     }
   } finally {
-    lock.release();
+    // Only release the lock if we acquired it internally
+    if (!externalLock) {
+      await lock.release();
+    }
   }
 }
 
@@ -285,6 +303,18 @@ export async function workspaceSetRoot(
 }
 
 /**
+ * Options for workspace deployment.
+ */
+export interface WorkspaceDeployOptions {
+  /**
+   * External workspace lock to use. If provided, the caller is responsible
+   * for releasing the lock after the operation. If not provided, workspaceDeploy
+   * will acquire and release a lock internally.
+   */
+  lock?: WorkspaceLockHandle;
+}
+
+/**
  * Deploy a package to a workspace.
  *
  * Creates the workspace if it doesn't exist. Writes state file atomically
@@ -298,17 +328,19 @@ export async function workspaceSetRoot(
  * @param name - Workspace name
  * @param pkgName - Package name
  * @param pkgVersion - Package version
+ * @param options - Optional settings including external lock
  * @throws {WorkspaceLockError} If workspace is locked by another process
  */
 export async function workspaceDeploy(
   repoPath: string,
   name: string,
   pkgName: string,
-  pkgVersion: string
+  pkgVersion: string,
+  options: WorkspaceDeployOptions = {}
 ): Promise<void> {
-  // Acquire workspace lock to prevent conflicts with running dataflows
-  // or concurrent deploys
-  const lock = await acquireWorkspaceLock(repoPath, name);
+  // Acquire lock if not provided externally
+  const externalLock = options.lock;
+  const lock = externalLock ?? await acquireWorkspaceLock(repoPath, name);
   try {
     // Resolve package hash and read package object
     const packageHash = await packageResolve(repoPath, pkgName, pkgVersion);
@@ -326,7 +358,10 @@ export async function workspaceDeploy(
 
     await writeState(repoPath, name, state);
   } finally {
-    lock.release();
+    // Only release the lock if we acquired it internally
+    if (!externalLock) {
+      await lock.release();
+    }
   }
 }
 

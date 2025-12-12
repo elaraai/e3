@@ -57,6 +57,8 @@ export {
   workspaceDeploy,
   workspaceExport,
   type WorkspaceExportResult,
+  type WorkspaceRemoveOptions,
+  type WorkspaceDeployOptions,
 } from './workspaces.js';
 
 // Tree and dataset operations (low-level, by hash)
@@ -77,6 +79,7 @@ export {
   workspaceGetDatasetHash,
   workspaceSetDataset,
   workspaceSetDatasetByHash,
+  type WorkspaceSetDatasetOptions,
 } from './trees.js';
 
 // Task operations
@@ -131,6 +134,16 @@ export {
   type WorkspaceLockHandle,
   type AcquireLockOptions,
 } from './workspaceLock.js';
+
+// Workspace status
+export {
+  workspaceStatus,
+  type DatasetStatus,
+  type TaskStatus,
+  type DatasetStatusInfo,
+  type TaskStatusInfo,
+  type WorkspaceStatusResult,
+} from './workspaceStatus.js';
 
 // Errors
 export {
