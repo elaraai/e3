@@ -11,7 +11,7 @@
  * - `.tasks.${name}.output` - The output dataset (public)
  */
 
-import type { BlockBuilder, EastType, ExprType, FunctionExpr, FunctionIR } from '@elaraai/east';
+import type { BlockBuilder, CallableFunctionExpr, EastType, ExprType, FunctionExpr, FunctionIR } from '@elaraai/east';
 import { Expr, variant, ArrayType, StringType, East, IRType } from '@elaraai/east';
 import type { DatasetDef, DataTreeDef, TaskDef } from './types.js';
 
@@ -158,7 +158,7 @@ function collectDeps(
 export function task<Name extends string, Inputs extends Array<DatasetDef>, Output extends EastType>(
   name: Name,
   inputs: Inputs,
-  fn: FunctionExpr<{ [K in keyof Inputs]: NoInfer<Inputs>[K] extends DatasetDef<infer T> ? T : never }, Output>,
+  fn: FunctionExpr<{ [K in keyof Inputs]: NoInfer<Inputs>[K] extends DatasetDef<infer T> ? T : never }, Output> | CallableFunctionExpr<{ [K in keyof Inputs]: NoInfer<Inputs>[K] extends DatasetDef<infer T> ? T : never }, Output>,
   config?: {
     runner?: string[],
   }
