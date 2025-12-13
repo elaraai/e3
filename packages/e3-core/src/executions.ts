@@ -486,9 +486,11 @@ export async function taskExecute(
   }
 
   // Step 3: Create scratch directory
+  // Include PID to prevent collisions when multiple e3 processes run the same
+  // task concurrently (e.g., same task in different workspaces at same millisecond)
   const scratchDir = path.join(
     tmpdir(),
-    `e3-exec-${taskHash.slice(0, 8)}-${inHash.slice(0, 8)}-${Date.now()}`
+    `e3-exec-${taskHash.slice(0, 8)}-${inHash.slice(0, 8)}-${process.pid}-${Date.now()}`
   );
   await fs.mkdir(scratchDir, { recursive: true });
 
