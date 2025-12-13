@@ -105,11 +105,11 @@ jobs:
         working-directory: packages/e3-types
         run: |
           if [[ "${{ inputs.release_type }}" == pre* ]]; then
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version
           else
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --no-git-tag-version
           fi
-          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Bump e3-core version
         if: ${{ inputs.publish_e3_core }}
@@ -117,11 +117,11 @@ jobs:
         working-directory: packages/e3-core
         run: |
           if [[ "${{ inputs.release_type }}" == pre* ]]; then
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version
           else
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --no-git-tag-version
           fi
-          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Bump e3 version
         if: ${{ inputs.publish_e3 }}
@@ -129,11 +129,11 @@ jobs:
         working-directory: packages/e3
         run: |
           if [[ "${{ inputs.release_type }}" == pre* ]]; then
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version
           else
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --no-git-tag-version
           fi
-          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Bump e3-cli version
         if: ${{ inputs.publish_e3_cli }}
@@ -141,11 +141,11 @@ jobs:
         working-directory: packages/e3-cli
         run: |
           if [[ "${{ inputs.release_type }}" == pre* ]]; then
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version
           else
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --no-git-tag-version
           fi
-          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Bump e3-api-client version
         if: ${{ inputs.publish_e3_api_client }}
@@ -153,11 +153,11 @@ jobs:
         working-directory: packages/e3-api-client
         run: |
           if [[ "${{ inputs.release_type }}" == pre* ]]; then
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version
           else
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --no-git-tag-version
           fi
-          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Bump e3-api-server version
         if: ${{ inputs.publish_e3_api_server }}
@@ -165,11 +165,11 @@ jobs:
         working-directory: packages/e3-api-server
         run: |
           if [[ "${{ inputs.release_type }}" == pre* ]]; then
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --preid=alpha --no-git-tag-version
           else
-            NEW_VERSION=$(npm version ${{ inputs.release_type }} --no-git-tag-version | sed 's/^v//')
+            npm version ${{ inputs.release_type }} --no-git-tag-version
           fi
-          echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       # Commit all version bumps
       - name: Commit version bumps

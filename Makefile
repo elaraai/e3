@@ -69,6 +69,7 @@ dev: install build
 # Link CLI to PATH
 link: build
 	@echo "Linking e3 CLI to PATH..."
+	chmod +x packages/e3-cli/dist/src/cli.js
 	cd packages/e3-cli && npm link --force
 	@echo ""
 	@echo "✓ e3 CLI is now available globally"
