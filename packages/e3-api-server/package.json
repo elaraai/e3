@@ -34,6 +34,11 @@
     "server"
   ],
   "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elaraai/e3",
+    "directory": "packages/e3-api-server"
+  },
   "dependencies": {
     "@elaraai/e3-core": "*",
     "@elaraai/e3-types": "*",

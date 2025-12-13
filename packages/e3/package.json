@@ -32,5 +32,10 @@
   "files": [
     "dist"
   ],
-  "license": "SEE LICENSE IN LICENSE"
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elaraai/e3",
+    "directory": "packages/e3"
+  }
 }
