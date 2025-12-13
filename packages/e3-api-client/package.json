@@ -1,6 +1,6 @@
 {
   "name": "@elaraai/e3-api-client",
-  "version": "0.0.1-alpha.2",
+  "version": "0.0.1-alpha.3",
   "type": "module",
   "description": "East Execution Engine API Client - TypeScript client library for e3 API server",
   "main": "dist/src/index.js",
