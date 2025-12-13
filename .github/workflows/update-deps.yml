@@ -32,8 +32,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22.x
-          cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
+          # Note: npm caching disabled - we need fresh install after version updates
 
       - name: Check for @elaraai/east updates
         id: check_updates
