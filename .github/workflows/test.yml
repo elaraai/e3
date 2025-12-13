@@ -66,7 +66,7 @@ jobs:
         run: |
           npm install -g @elaraai/east-node-cli
           curl -LsSf https://astral.sh/uv/install.sh | sh
-          source $HOME/.local/bin/env
+          export PATH="$HOME/.local/bin:$PATH"
           cd east-py && make install-cli
 
       - name: Run linters
