@@ -15,7 +15,7 @@
     "@elaraai/e3-core": "*",
     "@elaraai/e3-api-server": "*",
     "@elaraai/e3-api-client": "*",
-    "@elaraai/east": "0.0.1-beta.11"
+    "@elaraai/east": "^0.0.1-beta.14"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
