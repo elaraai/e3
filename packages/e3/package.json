@@ -1,6 +1,6 @@
 {
   "name": "@elaraai/e3",
-  "version": "0.0.2-beta.0",
+  "version": "0.0.2-beta.1",
   "description": "TypeScript SDK for authoring e3 packages",
   "type": "module",
   "main": "dist/src/index.js",
@@ -18,7 +18,7 @@
     "test": "node --enable-source-maps --test 'dist/src/**/*.spec.js'"
   },
   "dependencies": {
-    "@elaraai/e3-types": "*",
+    "@elaraai/e3-types": "^0.0.2-beta.1",
     "@elaraai/east": "^0.0.1-beta.14",
     "yazl": "^2.5.1"
   },

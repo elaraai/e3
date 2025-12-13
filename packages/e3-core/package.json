@@ -1,6 +1,6 @@
 {
   "name": "@elaraai/e3-core",
-  "version": "0.0.2-beta.0",
+  "version": "0.0.2-beta.1",
   "type": "module",
   "description": "East Execution Engine Core - Programmatic API for e3 repository operations",
   "main": "dist/src/index.js",
@@ -40,8 +40,8 @@
     "directory": "packages/e3-core"
   },
   "dependencies": {
-    "@elaraai/e3": "*",
-    "@elaraai/e3-types": "*",
+    "@elaraai/e3": "^0.0.2-beta.1",
+    "@elaraai/e3-types": "^0.0.2-beta.1",
     "@elaraai/east": "^0.0.1-beta.14",
     "yauzl": "^3.2.0",
     "yazl": "^2.5.1"
