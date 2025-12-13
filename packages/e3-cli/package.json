@@ -31,7 +31,7 @@
   "dependencies": {
     "@elaraai/e3-core": "*",
     "@elaraai/e3-types": "*",
-    "@elaraai/east": "0.0.1-beta.11",
+    "@elaraai/east": "^0.0.1-beta.14",
     "commander": "^12.0.0"
   },
   "devDependencies": {
