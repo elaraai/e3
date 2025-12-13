@@ -34,7 +34,10 @@ build:
 	npm run build --workspace=packages/e3
 	npm run build --workspace=packages/e3-core
 	npm run build --workspace=packages/e3-cli
-	npm run build --workspace=integration-tests
+	npm run build --workspace=packages/e3-api-client
+	npm run build --workspace=packages/e3-api-server
+	npm run build --workspace=test/integration
+	npm run build --workspace=test/fuzz
 
 # Run all tests
 test:
@@ -66,6 +69,7 @@ dev: install build
 # Link CLI to PATH
 link: build
 	@echo "Linking e3 CLI to PATH..."
+	chmod +x packages/e3-cli/dist/src/cli.js
 	cd packages/e3-cli && npm link --force
 	@echo ""
 	@echo "✓ e3 CLI is now available globally"

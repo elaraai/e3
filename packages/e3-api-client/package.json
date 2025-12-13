@@ -1,0 +1,45 @@
+{
+  "name": "@elaraai/e3-api-client",
+  "version": "0.0.1-beta.0",
+  "type": "module",
+  "description": "East Execution Engine API Client - TypeScript client library for e3 API server",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "!dist/src/**/*.spec.*",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "test": "npm run build && node --enable-source-maps --test 'dist/src/**/*.spec.js'",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "keywords": [
+    "east",
+    "e3",
+    "api",
+    "client"
+  ],
+  "license": "SEE LICENSE IN LICENSE",
+  "dependencies": {
+    "@elaraai/e3-types": "*",
+    "@elaraai/east": "0.0.1-beta.11"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.47.0",
+    "@typescript-eslint/parser": "^8.47.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-headers": "^1.3.3",
+    "typescript": "^5.6.0"
+  }
+}

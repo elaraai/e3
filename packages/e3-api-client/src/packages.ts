@@ -1,0 +1,98 @@
+/**
+ * Copyright (c) 2025 Elara AI Pty Ltd
+ * Licensed under BSL 1.1. See LICENSE for details.
+ */
+
+import { ArrayType, BlobType, NullType } from '@elaraai/east';
+import { PackageObjectType, type PackageObject } from '@elaraai/e3-types';
+import type { PackageListItem, PackageImportResult } from './types.js';
+import { PackageListItemType, PackageImportResultType } from './types.js';
+import { get, post, del, unwrap } from './http.js';
+
+/**
+ * List all packages in the repository.
+ *
+ * @param url - Base URL of the e3 API server
+ * @returns Array of package info (name, version)
+ */
+export async function packageList(url: string): Promise<PackageListItem[]> {
+  const response = await get(url, '/api/packages', ArrayType(PackageListItemType));
+  return unwrap(response);
+}
+
+/**
+ * Get package object.
+ *
+ * @param url - Base URL of the e3 API server
+ * @param name - Package name
+ * @param version - Package version
+ * @returns Package object
+ */
+export async function packageGet(
+  url: string,
+  name: string,
+  version: string
+): Promise<PackageObject> {
+  const response = await get(
+    url,
+    `/api/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+    PackageObjectType
+  );
+  return unwrap(response);
+}
+
+/**
+ * Import a package from a zip archive.
+ *
+ * @param url - Base URL of the e3 API server
+ * @param archive - Zip archive as bytes
+ * @returns Imported package info
+ */
+export async function packageImport(
+  url: string,
+  archive: Uint8Array
+): Promise<PackageImportResult> {
+  const response = await post(url, '/api/packages', archive, BlobType, PackageImportResultType);
+  return unwrap(response);
+}
+
+/**
+ * Export a package as a zip archive.
+ *
+ * @param url - Base URL of the e3 API server
+ * @param name - Package name
+ * @param version - Package version
+ * @returns Zip archive as bytes
+ */
+export async function packageExport(
+  url: string,
+  name: string,
+  version: string
+): Promise<Uint8Array> {
+  const response = await get(
+    url,
+    `/api/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}/export`,
+    BlobType
+  );
+  return unwrap(response);
+}
+
+/**
+ * Remove a package from the repository.
+ *
+ * @param url - Base URL of the e3 API server
+ * @param name - Package name
+ * @param version - Package version
+ */
+export async function packageRemove(
+  url: string,
+  name: string,
+  version: string
+): Promise<void> {
+  const response = await del(
+    url,
+    `/api/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+    NullType
+  );
+  unwrap(response);
+}

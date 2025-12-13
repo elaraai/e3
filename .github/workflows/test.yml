@@ -30,6 +30,13 @@ jobs:
           path: East
           token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
+      - name: Checkout east-py repository
+        uses: actions/checkout@v4
+        with:
+          repository: elaraai/east-py
+          path: east-py
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
       - name: Set up Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
@@ -50,6 +57,17 @@ jobs:
       - name: Build packages
         working-directory: e3
         run: make build
+
+      - name: Link e3 CLI
+        working-directory: e3
+        run: make link
+
+      - name: Install East runners
+        run: |
+          npm install -g @elaraai/east-node-cli
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          cd east-py && make install-cli
 
       - name: Run linters
         working-directory: e3

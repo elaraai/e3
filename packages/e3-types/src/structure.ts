@@ -268,3 +268,152 @@ export function parsePath(pathStr: string, structure: Structure): ParsePathResul
 export function treePath(structure: Structure, ...fields: string[]): ParsePathResult {
   return parsePath('.' + fields.map(printIdentifier).join('.'), structure);
 }
+
+/**
+ * Result of parsing a dataset path specification.
+ */
+export interface ParseDatasetPathResult {
+  /** Workspace name */
+  ws: string;
+  /** Path within the workspace */
+  path: TreePath;
+}
+
+/**
+ * Parse workspace.path.to.dataset syntax into workspace name and TreePath.
+ *
+ * This is a lenient parser that does not validate against a structure.
+ * Use this for parsing user input where the structure is not yet known.
+ *
+ * @param pathSpec - Path specification in dot notation (e.g., "production.inputs.sales")
+ * @returns Workspace name and path segments
+ *
+ * @throws {Error} If path is empty or has unclosed backticks
+ *
+ * @example
+ * ```ts
+ * parseDatasetPath("production")
+ * // { ws: "production", path: [] }
+ *
+ * parseDatasetPath("production.inputs.sales")
+ * // { ws: "production", path: [field("inputs"), field("sales")] }
+ *
+ * // For field names with special characters, use backticks:
+ * parseDatasetPath("production.`my field`")
+ * // { ws: "production", path: [field("my field")] }
+ * ```
+ */
+export function parseDatasetPath(pathSpec: string): ParseDatasetPathResult {
+  const segments = parsePathSegments(pathSpec);
+
+  if (segments.length === 0) {
+    throw new Error('Path cannot be empty');
+  }
+
+  const ws = segments[0]!;
+  const path: TreePath = segments.slice(1).map((s) => variant('field', s));
+
+  return { ws, path };
+}
+
+/**
+ * Parse dot-separated path into segments, handling backtick-quoted identifiers.
+ * @internal
+ */
+function parsePathSegments(pathSpec: string): string[] {
+  const segments: string[] = [];
+  let current = '';
+  let inBackticks = false;
+
+  for (let i = 0; i < pathSpec.length; i++) {
+    const char = pathSpec[i];
+
+    if (char === '`') {
+      inBackticks = !inBackticks;
+    } else if (char === '.' && !inBackticks) {
+      if (current.length > 0) {
+        segments.push(current);
+        current = '';
+      }
+    } else {
+      current += char;
+    }
+  }
+
+  if (current.length > 0) {
+    segments.push(current);
+  }
+
+  if (inBackticks) {
+    throw new Error('Unclosed backtick in path');
+  }
+
+  return segments;
+}
+
+/**
+ * Result of parsing a package reference.
+ */
+export interface ParsePackageRefResult {
+  /** Package name */
+  name: string;
+  /** Version string, or undefined if not specified */
+  version?: string;
+}
+
+/**
+ * Parse a package reference like "name" or "name@version".
+ *
+ * @param ref - Package reference string
+ * @returns Package name and optional version
+ *
+ * @example
+ * ```ts
+ * parsePackageRef("my-package")
+ * // { name: "my-package", version: undefined }
+ *
+ * parsePackageRef("my-package@1.0.0")
+ * // { name: "my-package", version: "1.0.0" }
+ *
+ * // Scoped packages work too:
+ * parsePackageRef("@scope/package@2.0.0")
+ * // { name: "@scope/package", version: "2.0.0" }
+ * ```
+ */
+export function parsePackageRef(ref: string): ParsePackageRefResult {
+  const atIdx = ref.lastIndexOf('@');
+  // Handle scoped packages like @scope/name - only split on @ after position 0
+  if (atIdx > 0) {
+    return {
+      name: ref.slice(0, atIdx),
+      version: ref.slice(atIdx + 1),
+    };
+  }
+  return { name: ref };
+}
+
+/**
+ * Convert URL path segments to a TreePath.
+ *
+ * Takes slash-separated, URL-encoded path segments and converts them to
+ * a TreePath of field variants.
+ *
+ * @param urlPath - URL path string (e.g., "inputs/sales/data" or "/inputs/sales/data")
+ * @returns TreePath of field segments
+ *
+ * @example
+ * ```ts
+ * urlPathToTreePath("inputs/sales/data")
+ * // [field("inputs"), field("sales"), field("data")]
+ *
+ * urlPathToTreePath("inputs/my%20field")
+ * // [field("inputs"), field("my field")]
+ *
+ * urlPathToTreePath("")
+ * // []
+ * ```
+ */
+export function urlPathToTreePath(urlPath: string): TreePath {
+  const segments = urlPath.split('/').filter(p => p);
+  return segments.map(segment => variant('field', decodeURIComponent(segment)));
+}

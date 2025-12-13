@@ -1,6 +1,6 @@
 /**
  * Copyright (c) 2025 Elara AI Pty Ltd
- * Dual-licensed under AGPL-3.0 and commercial license. See LICENSE for details.
+ * Licensed under BSL 1.1. See LICENSE for details.
  */
 
 /**
@@ -39,6 +39,7 @@ export {
   packageExport,
   packageRemove,
   packageList,
+  packageGetLatestVersion,
   packageResolve,
   packageRead,
   type PackageImportResult,
@@ -120,6 +121,7 @@ export {
 // Dataflow execution
 export {
   dataflowExecute,
+  dataflowStart,
   dataflowGetGraph,
   type DataflowOptions,
   type DataflowResult,
