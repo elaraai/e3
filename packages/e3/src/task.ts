@@ -16,6 +16,14 @@ import { Expr, variant, ArrayType, StringType, East, IRType } from '@elaraai/eas
 import type { DatasetDef, DataTreeDef, TaskDef } from './types.js';
 
 /**
+ * Helper type to extract East types from DatasetDef array.
+ * Preserves tuple structure when T is a tuple.
+ */
+type ExtractDatasetTypes<T extends readonly DatasetDef[]> = {
+  [K in keyof T]: T[K] extends DatasetDef<infer U> ? U : never;
+} & EastType[];
+
+/**
  * Singleton tree definition for `.tasks`.
  *
  * All task subtrees are children of this tree.
@@ -155,10 +163,10 @@ function collectDeps(
  * );
  * ```
  */
-export function task<Name extends string, Inputs extends Array<DatasetDef>, Output extends EastType>(
+export function task<Name extends string, Inputs extends readonly DatasetDef[], Output extends EastType>(
   name: Name,
-  inputs: Inputs,
-  fn: FunctionExpr<{ [K in keyof Inputs]: NoInfer<Inputs>[K] extends DatasetDef<infer T> ? T : never }, Output> | CallableFunctionExpr<{ [K in keyof Inputs]: NoInfer<Inputs>[K] extends DatasetDef<infer T> ? T : never }, Output>,
+  inputs: [...Inputs],
+  fn: FunctionExpr<ExtractDatasetTypes<Inputs>, Output> | CallableFunctionExpr<ExtractDatasetTypes<Inputs>, Output>,
   config?: {
     runner?: string[],
   }
