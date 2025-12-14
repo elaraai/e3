@@ -20,7 +20,7 @@
     "@elaraai/e3": "*",
     "@elaraai/e3-cli": "*",
     "@elaraai/e3-core": "*",
-    "@elaraai/east": "^0.0.1-beta.14"
+    "@elaraai/east": "^0.0.1-beta.16"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
