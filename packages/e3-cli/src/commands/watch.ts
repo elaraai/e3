@@ -15,9 +15,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import * as vm from 'vm';
-import Module from 'node:module';
-import ts from 'typescript';
+import * as esbuild from 'esbuild';
 import e3 from '@elaraai/e3';
 import type { PackageDef } from '@elaraai/e3';
 import {
@@ -38,80 +36,71 @@ interface WatchOptions {
 }
 
 /**
- * Load compiler options from user's tsconfig.json
+ * Result of loading a package file, includes watched dependencies
  */
-function loadCompilerOptions(filePath: string): ts.CompilerOptions {
-  const searchPath = path.dirname(filePath);
-
-  // Find tsconfig.json starting from the source file's directory
-  const configPath = ts.findConfigFile(searchPath, ts.sys.fileExists, 'tsconfig.json');
-
-  if (configPath) {
-    // Read and parse tsconfig.json (handles "extends" automatically)
-    const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
-    if (configFile.error) {
-      console.log(`Warning: Error reading ${configPath}: ${configFile.error.messageText}`);
-    } else {
-      const parsed = ts.parseJsonConfigFileContent(
-        configFile.config,
-        ts.sys,
-        path.dirname(configPath)
-      );
-      return {
-        ...parsed.options,
-        // Override module to CommonJS for vm execution
-        module: ts.ModuleKind.CommonJS,
-      };
-    }
-  }
-
-  // Fallback defaults if no tsconfig found
-  return {
-    module: ts.ModuleKind.CommonJS,
-    target: ts.ScriptTarget.ES2022,
-    esModuleInterop: true,
-    strict: true,
-  };
+interface LoadResult {
+  pkg: PackageDef<Record<string, unknown>>;
+  watchedFiles: string[];
 }
 
 /**
- * Load and execute a TypeScript file, returning its default export
+ * Load and execute a TypeScript file using esbuild for bundling.
+ * esbuild automatically finds and uses the nearest tsconfig.json.
+ * Returns both the package and list of files to watch.
  */
-function loadPackageFile(filePath: string): PackageDef<Record<string, unknown>> {
+async function loadPackageFile(filePath: string): Promise<LoadResult> {
   const absolutePath = path.resolve(filePath);
-  const tsCode = fs.readFileSync(absolutePath, 'utf-8');
-  const compilerOptions = loadCompilerOptions(absolutePath);
 
-  // Transpile TypeScript to JavaScript
-  const result = ts.transpileModule(tsCode, {
-    compilerOptions,
-    fileName: absolutePath,
+  // Bundle with esbuild - handles multi-file TS, ESM packages, and tsconfig automatically
+  const result = esbuild.buildSync({
+    entryPoints: [absolutePath],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',  // ESM output for ESM-only packages like @elaraai/e3
+    write: false,
+    metafile: true,
+    external: ['@elaraai/*'],
+    logLevel: 'silent',
   });
 
-  // Create require that resolves from user's project directory
-  const userRequire = Module.createRequire(absolutePath);
-
-  // Execute in VM context
-  const moduleObj = { exports: {} as Record<string, unknown> };
-  const context = vm.createContext({
-    module: moduleObj,
-    exports: moduleObj.exports,
-    require: userRequire,
-    console,
-    Buffer,
-    process,
-    __dirname: path.dirname(absolutePath),
-    __filename: absolutePath,
-  });
-
-  try {
-    vm.runInContext(result.outputText, context, { filename: absolutePath });
-  } catch (err) {
-    throw new Error(`Failed to execute ${path.basename(filePath)}: ${err instanceof Error ? err.message : String(err)}`);
+  const jsCode = result.outputFiles?.[0]?.text;
+  if (!jsCode) {
+    throw new Error(`esbuild produced no output for ${filePath}`);
   }
 
-  // Get default export
-  const defaultExport = moduleObj.exports.default ?? moduleObj.exports;
+  // Extract list of bundled source files for watching
+  // esbuild metafile paths are relative to cwd
+  const watchedFiles = result.metafile
+    ? Object.keys(result.metafile.inputs)
+        .map(f => path.resolve(f))  // Resolve relative to cwd
+        .filter(f => !f.includes('node_modules'))
+    : [absolutePath];
+
+  // Write bundle to temp file in project directory and import it dynamically
+  // Must be in project dir so node_modules resolution works for external packages
+  // This avoids cross-realm instanceof issues that occur with vm.createContext
+  const tempDir = path.join(path.dirname(absolutePath), 'node_modules', '.cache', 'e3');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const tempFile = path.join(tempDir, `bundle-${Date.now()}.mjs`);
+  let defaultExport: unknown;
+  try {
+    fs.writeFileSync(tempFile, jsCode);
+    // Use dynamic import for ESM
+    // Add cache-busting query param to avoid Node's ESM cache
+    const moduleExports = await import(`${tempFile}?t=${Date.now()}`) as Record<string, unknown>;
+    defaultExport = moduleExports.default ?? moduleExports;
+  } catch (err) {
+    if (err instanceof Error && err.stack) {
+      console.error('Stack trace:', err.stack);
+    }
+    throw new Error(`Failed to execute ${path.basename(filePath)}: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    try {
+      fs.unlinkSync(tempFile);
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 
   // Validate it's a PackageDef
   if (!defaultExport || (defaultExport as { kind?: string }).kind !== 'package') {
@@ -124,7 +113,10 @@ function loadPackageFile(filePath: string): PackageDef<Record<string, unknown>> 
     );
   }
 
-  return defaultExport as PackageDef<Record<string, unknown>>;
+  return {
+    pkg: defaultExport as PackageDef<Record<string, unknown>>,
+    watchedFiles,
+  };
 }
 
 /**
@@ -172,12 +164,15 @@ export async function watchCommand(
   /**
    * Load, export, import, and deploy the package
    */
-  async function deployPackage(): Promise<{ name: string; version: string } | null> {
+  async function deployPackage(): Promise<{ name: string; version: string; watchedFiles: string[] } | null> {
     // Load package from TypeScript file
     let pkg: PackageDef<Record<string, unknown>>;
+    let watchedFiles: string[];
     try {
-      pkg = loadPackageFile(absoluteSourcePath);
-      console.log(`[${timestamp()}] Loaded: ${pkg.name}@${pkg.version}`);
+      const result = await loadPackageFile(absoluteSourcePath);
+      pkg = result.pkg;
+      watchedFiles = result.watchedFiles;
+      console.log(`[${timestamp()}] Loaded: ${pkg.name}@${pkg.version} (${watchedFiles.length} files)`);
     } catch (err) {
       console.log(`[${timestamp()}] Error loading package:`);
       console.log(`  ${err instanceof Error ? err.message : String(err)}`);
@@ -235,7 +230,7 @@ export async function watchCommand(
       return null;
     }
 
-    return { name: pkg.name, version: pkg.version };
+    return { name: pkg.name, version: pkg.version, watchedFiles };
   }
 
   /**
@@ -298,10 +293,13 @@ export async function watchCommand(
 
     const deployed = await deployPackage();
 
-    if (deployed && options.start) {
-      currentAbortController = new AbortController();
-      await runDataflow(currentAbortController.signal);
-      currentAbortController = null;
+    if (deployed) {
+      setupWatchers(deployed.watchedFiles);
+      if (options.start) {
+        currentAbortController = new AbortController();
+        await runDataflow(currentAbortController.signal);
+        currentAbortController = null;
+      }
     }
 
     isExecuting = false;
@@ -315,41 +313,64 @@ export async function watchCommand(
     }
   }
 
+  // Track file watchers for all source files
+  const watchers = new Map<string, fs.FSWatcher>();
+  let debounceTimer: NodeJS.Timeout | null = null;
+
+  function setupWatchers(files: string[]) {
+    // Close watchers for files no longer in the list
+    for (const [filePath, watcher] of watchers) {
+      if (!files.includes(filePath)) {
+        watcher.close();
+        watchers.delete(filePath);
+      }
+    }
+
+    // Add watchers for new files
+    for (const filePath of files) {
+      if (!watchers.has(filePath) && fs.existsSync(filePath)) {
+        const watcher = fs.watch(filePath, () => {
+          if (debounceTimer) {
+            clearTimeout(debounceTimer);
+          }
+          debounceTimer = setTimeout(() => {
+            handleChange().catch(err => {
+              console.log(`[${timestamp()}] Unexpected error:`);
+              console.log(`  ${formatError(err)}`);
+            });
+          }, 100);
+        });
+        watchers.set(filePath, watcher);
+      }
+    }
+  }
+
   // Initial load
   console.log(`[${timestamp()}] Initial load...`);
   isExecuting = true;
 
   const deployed = await deployPackage();
 
-  if (deployed && options.start) {
-    currentAbortController = new AbortController();
-    await runDataflow(currentAbortController.signal);
-    currentAbortController = null;
+  if (deployed) {
+    setupWatchers(deployed.watchedFiles);
+    if (options.start) {
+      currentAbortController = new AbortController();
+      await runDataflow(currentAbortController.signal);
+      currentAbortController = null;
+    }
   }
 
   isExecuting = false;
   console.log(`[${timestamp()}] Ready. Waiting for changes...`);
   console.log('');
 
-  // Set up file watcher with debounce
-  let debounceTimer: NodeJS.Timeout | null = null;
-  const watcher = fs.watch(absoluteSourcePath, () => {
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-    }
-    debounceTimer = setTimeout(() => {
-      handleChange().catch(err => {
-        console.log(`[${timestamp()}] Unexpected error:`);
-        console.log(`  ${formatError(err)}`);
-      });
-    }, 100);
-  });
-
   // Handle signals for graceful shutdown
   const cleanup = () => {
     console.log('');
     console.log('Stopping watch...');
-    watcher.close();
+    for (const watcher of watchers.values()) {
+      watcher.close();
+    }
     if (currentAbortController) {
       currentAbortController.abort();
     }
@@ -358,4 +379,14 @@ export async function watchCommand(
 
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
+
+  // Debug: show what files are being watched
+  console.log(`Watching ${watchers.size} files:`);
+  for (const file of watchers.keys()) {
+    console.log(`  - ${file}`);
+  }
+
+  // Keep process alive - the fs.watch handlers should do this,
+  // but use setInterval as backup
+  setInterval(() => {}, 1000 * 60 * 60);  // 1 hour intervals
 }
