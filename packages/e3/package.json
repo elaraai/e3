@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@elaraai/e3-types": "^0.0.2-beta.1",
-    "@elaraai/east": "^0.0.1-beta.14",
+    "@elaraai/east": "^0.0.1-beta.16",
     "yazl": "^2.5.1"
   },
   "devDependencies": {

@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@elaraai/e3-types": "^0.0.2-beta.1",
-    "@elaraai/east": "^0.0.1-beta.14"
+    "@elaraai/east": "^0.0.1-beta.16"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
