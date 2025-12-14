@@ -4,6 +4,7 @@
  */
 
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { serve, type ServerType } from '@hono/node-server';
 import { createRepositoryRoutes } from './routes/repository.js';
 import { createPackageRoutes } from './routes/packages.js';
@@ -22,6 +23,8 @@ export interface ServerConfig {
   port?: number;
   /** Bind address (default: "localhost") */
   host?: string;
+  /** Enable CORS for cross-origin requests (default: false) */
+  cors?: boolean;
 }
 
 /**
@@ -45,9 +48,14 @@ export interface Server {
  * @returns Server instance
  */
 export function createServer(config: ServerConfig): Server {
-  const { repo: repoPath, port = 3000, host = 'localhost' } = config;
+  const { repo: repoPath, port = 3000, host = 'localhost', cors: enableCors = false } = config;
 
   const app = new Hono();
+
+  // Enable CORS if configured
+  if (enableCors) {
+    app.use('*', cors({ origin: '*' }));
+  }
 
   // Repository routes: /api/status, /api/gc
   app.route('/api', createRepositoryRoutes(repoPath));

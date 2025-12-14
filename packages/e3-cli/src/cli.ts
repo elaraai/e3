@@ -24,6 +24,7 @@ import { logsCommand } from './commands/logs.js';
 import { statusCommand } from './commands/status.js';
 import { gcCommand } from './commands/gc.js';
 import { convertCommand } from './commands/convert.js';
+import { watchCommand } from './commands/watch.js';
 
 const program = new Command();
 
@@ -159,6 +160,14 @@ program
   .option('--concurrency <n>', 'Max concurrent tasks', '4')
   .option('--force', 'Force re-execution even if cached')
   .action(startCommand);
+
+program
+  .command('watch <repo> <workspace> <source>')
+  .description('Watch a TypeScript file and auto-deploy on changes')
+  .option('--start', 'Execute dataflow after each deploy')
+  .option('--concurrency <n>', 'Max concurrent tasks when using --start', '4')
+  .option('--abort-on-change', 'Abort running execution when file changes')
+  .action(watchCommand);
 
 program
   .command('logs <repo> <path>')
