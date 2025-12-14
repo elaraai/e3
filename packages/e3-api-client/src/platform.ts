@@ -7,7 +7,6 @@ import {
   East,
   StringType,
   IntegerType,
-  BooleanType,
   BlobType,
   NullType,
   ArrayType,
