@@ -46,7 +46,7 @@ jobs:
         id: check_updates
         run: |
           # Get current version from e3 package (canonical source)
-          CURRENT_VERSION=$(node -p "require('./packages/e3/package.json').dependencies['@elaraai/east']" | sed 's/\^//')
+          CURRENT_VERSION=$(node -p "require('./packages/e3/package.json').peerDependencies['@elaraai/east']" | sed 's/\^//')
           echo "current_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
 
           # Get latest version from npm (check both latest and beta tags)

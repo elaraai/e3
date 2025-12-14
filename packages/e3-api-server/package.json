@@ -1,6 +1,6 @@
 {
   "name": "@elaraai/e3-api-server",
-  "version": "0.0.2-beta.1",
+  "version": "0.0.2-beta.0",
   "type": "module",
   "description": "East Execution Engine API Server - HTTP server exposing e3-core operations",
   "main": "dist/src/index.js",
@@ -40,12 +40,14 @@
     "directory": "packages/e3-api-server"
   },
   "dependencies": {
-    "@elaraai/e3-core": "^0.0.2-beta.1",
-    "@elaraai/e3-types": "^0.0.2-beta.1",
-    "@elaraai/east": "^0.0.1-beta.14",
+    "@elaraai/e3-core": "*",
+    "@elaraai/e3-types": "*",
     "@hono/node-server": "^1.13.0",
     "commander": "^12.0.0",
     "hono": "^4.6.0"
+  },
+  "peerDependencies": {
+    "@elaraai/east": "^0.0.1-beta.14"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

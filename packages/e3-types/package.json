@@ -23,7 +23,7 @@
     "url": "https://github.com/elaraai/e3",
     "directory": "packages/e3-types"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@elaraai/east": "^0.0.1-beta.14"
   },
   "devDependencies": {
