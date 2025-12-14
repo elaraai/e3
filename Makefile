@@ -52,7 +52,11 @@ lint:
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
-	npm run clean
+	rm -rf node_modules/ package-lock.json
+	rm -rf packages/*/dist/
+	rm -rf packages/*/node_modules/
+	rm -rf test/*/dist/
+	rm -rf test/*/node_modules/
 	@echo "Clean complete"
 
 # Development setup

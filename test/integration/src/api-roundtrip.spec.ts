@@ -25,7 +25,7 @@ import {
 
 // SDK for creating test packages
 import e3 from '@elaraai/e3';
-import { IntegerType, StringType, East, encodeBeast2For, decodeBeast2For, variant } from '@elaraai/east';
+import { IntegerType, StringType, NullType, ArrayType, East, encodeBeast2For, decodeBeast2For, variant } from '@elaraai/east';
 
 // Server
 import { createServer, type Server } from '@elaraai/e3-api-server';
@@ -54,6 +54,8 @@ import {
   dataflowStart,
   dataflowExecute,
   dataflowGraph,
+  Platform,
+  PlatformImpl,
 } from '@elaraai/e3-api-client';
 
 describe('API round-trip', () => {
@@ -405,6 +407,109 @@ describe('API round-trip', () => {
 
       // Verify execution completed
       assert.strictEqual(status.tasks[0].status.type, 'up-to-date');
+    });
+  });
+
+  describe('platform function integration', () => {
+    it('repoStatus platform function compiles and runs', async () => {
+      // Define an East function that uses the platform function
+      const getStatus = East.asyncFunction([StringType], Platform.Types.RepositoryStatus, ($, url) => {
+        return Platform.repoStatus(url);
+      });
+
+      // Compile with platform implementation
+      const compiled = East.compileAsync(getStatus, PlatformImpl);
+
+      // Run the compiled function
+      const status = await compiled(baseUrl);
+
+      // Verify results
+      assert.ok(status.path.includes('.e3'), 'path should contain .e3');
+      assert.strictEqual(status.objectCount, 0n);
+      assert.strictEqual(status.packageCount, 0n);
+      assert.strictEqual(status.workspaceCount, 0n);
+    });
+
+    it('workspaceList platform function compiles and runs', async () => {
+      // Create a workspace first
+      await workspaceCreate(baseUrl, 'platform-test-ws');
+
+      // Define an East function that lists workspaces
+      const listWorkspaces = East.asyncFunction(
+        [StringType],
+        ArrayType(Platform.Types.WorkspaceInfo),
+        ($, url) => {
+          return Platform.workspaceList(url);
+        }
+      );
+
+      // Compile with platform implementation
+      const compiled = East.compileAsync(listWorkspaces, PlatformImpl);
+
+      // Run the compiled function
+      const workspaces = await compiled(baseUrl);
+
+      // Verify results
+      assert.strictEqual(workspaces.length, 1);
+      assert.strictEqual(workspaces[0].name, 'platform-test-ws');
+
+      // Clean up
+      await workspaceRemove(baseUrl, 'platform-test-ws');
+    });
+
+    it('workspace create/remove flow via platform functions', async () => {
+      // Define East function that creates and lists workspaces
+      const createAndList = East.asyncFunction(
+        [StringType, StringType],
+        ArrayType(Platform.Types.WorkspaceInfo),
+        ($, url, name) => {
+          // Create workspace
+          $.let(Platform.workspaceCreate(url, name));
+          // Return list
+          return Platform.workspaceList(url);
+        }
+      );
+
+      // Compile with platform implementation
+      const compiled = East.compileAsync(createAndList, PlatformImpl);
+
+      // Run the compiled function
+      const workspaces = await compiled(baseUrl, 'east-created-ws');
+
+      // Verify workspace was created
+      assert.strictEqual(workspaces.length, 1);
+      assert.strictEqual(workspaces[0].name, 'east-created-ws');
+      assert.strictEqual(workspaces[0].deployed, false);
+
+      // Clean up using platform function
+      const removeWs = East.asyncFunction([StringType, StringType], NullType, ($, url, name) => {
+        return Platform.workspaceRemove(url, name);
+      });
+      const compiledRemove = East.compileAsync(removeWs, PlatformImpl);
+      await compiledRemove(baseUrl, 'east-created-ws');
+
+      // Verify removed
+      const finalList = await workspaceList(baseUrl);
+      assert.strictEqual(finalList.length, 0);
+    });
+
+    it('$.let correctly infers array type from platform function', async () => {
+      // This test verifies the type inference fix - $.let should produce ArrayExpr not StructExpr
+      const listAndCount = East.asyncFunction([StringType], IntegerType, ($, url) => {
+        // $.let should correctly infer this as ArrayExpr
+        const packages = $.let(Platform.packageList(url));
+        // .size() should work since it's an array
+        return packages.size();
+      });
+
+      // Compile with platform implementation
+      const compiled = East.compileAsync(listAndCount, PlatformImpl);
+
+      // Run the compiled function
+      const count = await compiled(baseUrl);
+
+      // Empty repo should have 0 packages
+      assert.strictEqual(count, 0n);
     });
   });
 });

@@ -1437,6 +1437,19 @@ export const Platform = {
    * Type definitions for platform operations.
    */
   Types: {
+    RepositoryStatus: RepositoryStatusType,
+    GcRequest: GcRequestType,
+    GcResult: GcResultType,
+    PackageListItem: PackageListItemType,
+    PackageImportResult: PackageImportResultType,
+    WorkspaceInfo: WorkspaceInfoType,
+    WorkspaceStatusResult: WorkspaceStatusResultType,
+    TaskListItem: TaskListItemType,
+    TaskDetails: TaskDetailsType,
+    DataflowRequest: DataflowRequestType,
+    DataflowGraph: DataflowGraphType,
+    DataflowResult: DataflowResultType,
+    LogChunk: LogChunkType,
     LogOptions: LogOptionsType,
   },
 } as const;

@@ -13,7 +13,6 @@
   },
   "scripts": {
     "build": "tsc --build",
-    "clean": "rm -rf dist",
     "lint": "eslint .",
     "test": "node --enable-source-maps --test 'dist/src/**/*.spec.js'"
   },
