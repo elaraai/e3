@@ -111,3 +111,13 @@ endif
 	@echo "Updating @elaraai/east to version $(VERSION)..."
 	@find . -name "package.json" -exec sed -i 's/"@elaraai\/east": "[^"]*"/"@elaraai\/east": "^$(VERSION)"/g' {} \;
 	@echo "Done. Run 'npm install' to update dependencies."
+
+# Update @elaraai/east-node-std version across all packages
+# Usage: make set-east-node-std-version VERSION=0.0.1-beta.1
+set-east-node-std-version:
+ifndef VERSION
+	$(error VERSION is required. Usage: make set-east-node-std-version VERSION=0.0.1-beta.1)
+endif
+	@echo "Updating @elaraai/east-node-std to version $(VERSION)..."
+	@find . -name "package.json" -exec sed -i 's/"@elaraai\/east-node-std": "[^"]*"/"@elaraai\/east-node-std": "^$(VERSION)"/g' {} \;
+	@echo "Done. Run 'npm install' to update dependencies."
