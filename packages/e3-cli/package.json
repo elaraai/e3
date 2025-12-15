@@ -41,7 +41,7 @@
     "esbuild": "^0.24.0"
   },
   "peerDependencies": {
-    "@elaraai/east": "^0.0.1-beta.16"
+    "@elaraai/east": "^0.0.1-beta.17"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
