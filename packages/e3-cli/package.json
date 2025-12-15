@@ -1,6 +1,6 @@
 {
   "name": "@elaraai/e3-cli",
-  "version": "0.0.2-beta.4",
+  "version": "0.0.2-beta.5",
   "type": "module",
   "description": "East Execution Engine CLI - Command-line tool for managing e3 repositories and tasks",
   "main": "dist/src/index.js",
@@ -35,8 +35,8 @@
   },
   "dependencies": {
     "@elaraai/e3": "*",
-    "@elaraai/e3-core": "^0.0.2-beta.4",
-    "@elaraai/e3-types": "^0.0.2-beta.4",
+    "@elaraai/e3-core": "^0.0.2-beta.5",
+    "@elaraai/e3-types": "^0.0.2-beta.5",
     "commander": "^12.0.0",
     "esbuild": "^0.24.0"
   },
