@@ -28,6 +28,7 @@ import { objectRead } from './objects.js';
 import {
   executionGet,
   inputsHash,
+  isProcessAlive,
 } from './executions.js';
 import { workspaceGetDatasetHash } from './trees.js';
 import {
@@ -507,6 +508,7 @@ async function computeTaskStatus(
  * Check if an execution is currently in progress for a task.
  *
  * Looks for a 'running' execution status that is still alive.
+ * Only returns in-progress if the process is actually running.
  */
 async function checkInProgress(
   repoPath: string,
@@ -522,13 +524,21 @@ async function checkInProgress(
 
       const status = await executionGet(repoPath, taskHash, inHash);
       if (status?.type === 'running') {
-        // Found a running execution
-        // We could also verify the process is still alive here
-        return {
-          type: 'in-progress',
-          pid: Number(status.value.pid),
-          startedAt: status.value.startedAt.toISOString(),
-        };
+        // Found a running execution - verify process is actually alive
+        const pid = Number(status.value.pid);
+        const pidStartTime = Number(status.value.pidStartTime);
+        const bootId = status.value.bootId;
+
+        const alive = await isProcessAlive(pid, pidStartTime, bootId);
+        if (alive) {
+          return {
+            type: 'in-progress',
+            pid,
+            startedAt: status.value.startedAt.toISOString(),
+          };
+        }
+        // Process is dead - this is a stale running status, skip it
+        // (it will be reported as stale-running if it's the current inputs)
       }
     }
   } catch {

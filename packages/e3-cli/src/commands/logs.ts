@@ -21,6 +21,7 @@ import {
   inputsHash,
   workspaceGetDatasetHash,
   workspaceGetTask,
+  isProcessAlive,
 } from '@elaraai/e3-core';
 import { resolveRepo, formatError, exitError } from '../utils.js';
 
@@ -69,7 +70,19 @@ async function listWorkspaceTasks(repoPath: string, ws: string): Promise<void> {
       // Get status of the most recent execution
       const latestInHash = executions[0];
       const status = await executionGet(repoPath, taskHash, latestInHash);
-      const state = status?.type ?? 'unknown';
+      let state = status?.type ?? 'unknown';
+
+      // Check if running process is actually alive
+      if (status?.type === 'running') {
+        const pid = Number(status.value.pid);
+        const pidStartTime = Number(status.value.pidStartTime);
+        const bootId = status.value.bootId;
+        const alive = await isProcessAlive(pid, pidStartTime, bootId);
+        if (!alive) {
+          state = 'stale-running';
+        }
+      }
+
       console.log(`  ${taskName}  [${state}] (${executions.length} execution(s))`);
     }
   }
