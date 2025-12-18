@@ -301,6 +301,8 @@ export async function watchCommand(
         currentAbortController = null;
       }
     }
+    // Note: Don't reset watchers on failure - keep watching existing files
+    // so we can recover when the error is fixed
 
     isExecuting = false;
 
@@ -358,6 +360,9 @@ export async function watchCommand(
       await runDataflow(currentAbortController.signal);
       currentAbortController = null;
     }
+  } else {
+    // Even if deploy failed, watch the source file so we can recover
+    setupWatchers([absoluteSourcePath]);
   }
 
   isExecuting = false;
