@@ -80,7 +80,12 @@ export {
   workspaceGetDatasetHash,
   workspaceSetDataset,
   workspaceSetDatasetByHash,
+  workspaceGetTree,
   type WorkspaceSetDatasetOptions,
+  type WorkspaceGetTreeOptions,
+  type TreeNode,
+  type TreeBranchNode,
+  type TreeLeafNode,
 } from './trees.js';
 
 // Task operations

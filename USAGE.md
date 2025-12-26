@@ -1,714 +1,479 @@
 # e3 User Guide
 
-Usage guide for the e3 (East Execution Engine) - a durable, content-addressable execution engine for East IR.
+Usage guide for e3 (East Execution Engine) - a durable, content-addressable execution engine for East programs.
 
-e3 provides git-like task management with cryptographic content addressing, allowing you to submit East functions for execution, track their progress, and retrieve results by hash.
+e3 provides git-like task management with cryptographic content addressing, allowing you to define dataflow pipelines that execute across multiple runtimes (Node.js, Python, Julia).
 
 ---
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
-- [Installation](#installation)
 - [Core Concepts](#core-concepts)
+- [SDK Reference](#sdk-reference)
 - [CLI Reference](#cli-reference)
-- [Working with Tasks](#working-with-tasks)
-- [Creating IR](#creating-ir)
+- [Project Setup](#project-setup)
+- [Development Workflow](#development-workflow)
 - [File Formats](#file-formats)
-- [Git-like Features](#git-like-features)
 
 ---
 
 ## Quick Start
 
-**Workflow:**
-1. **Initialize a repository** using `e3 init`
-2. **Submit tasks** with IR and arguments using `e3 run`
-3. **Check status** and get results using `e3 status` and `e3 get`
-
-### Basic Example
+### 1. Create a package
 
 ```typescript
-// create-ir.mjs
-import { East, IntegerType, printFor, IRType } from '@elaraai/east';
-import fs from 'fs';
+// src/index.ts
+import { East, IntegerType, StringType } from '@elaraai/east';
+import e3 from '@elaraai/e3';
 
-// Create a function that returns 42
-const return42_expr = East.function([], IntegerType, () => 42n);
+// Define an input
+const name = e3.input('name', StringType, 'World');
 
-// Convert to IR and save
-const return42_ir = return42_expr.toIR().ir;
-const printer = printFor(IRType);
-fs.writeFileSync('return42.east', printer(return42_ir));
+// Define a task that uses the input
+const greet = e3.task(
+  'greet',
+  [name],
+  East.function([StringType], StringType, ($, n) =>
+    East.str`Hello, ${n}!`
+  )
+);
+
+// Bundle into a package
+const pkg = e3.package('hello', '1.0.0', greet);
+
+// Export for CLI import
+await e3.export(pkg, '/tmp/hello.zip');
+export default pkg;
 ```
+
+### 2. Deploy and run
 
 ```bash
-# Generate the IR file
-node create-ir.mjs
+# Initialize a repository
+e3 init .
 
-# Initialize an e3 repository
-e3 init
+# Import the package
+e3 package import . /tmp/hello.zip
 
-# Submit the task
-e3 run my-task return42.east
+# Create a workspace and deploy
+e3 workspace create . dev
+e3 workspace deploy . dev hello@1.0.0
 
-# Check the result
-e3 get my-task
-# Output: 42
+# Execute the dataflow
+e3 start . dev
+
+# Check the output
+e3 get . dev.tasks.greet.output
+# Output: "Hello, World!"
+
+# Change the input and re-run
+e3 set . dev.inputs.name name.east  # file containing: "Alice"
+e3 start . dev
+e3 get . dev.tasks.greet.output
+# Output: "Hello, Alice!"
 ```
 
-### Example with Arguments
-
-```typescript
-// create-ir.mjs
-import { East, IntegerType, printFor, IRType } from '@elaraai/east';
-import fs from 'fs';
-
-// Create add1 function using expression builder
-const add1_expr = East.function([IntegerType], IntegerType, ($, i) => i.add(1n));
-
-// Convert to IR
-const add1_eastir = add1_expr.toIR();
-const add1_ir = add1_eastir.ir;
-
-// Save as .east format
-const printer = printFor(IRType);
-const eastText = printer(add1_ir);
-fs.writeFileSync('add1.east', eastText);
-
-console.log('Created add1.east');
-```
-
-Then use it:
+### 3. Watch mode (development)
 
 ```bash
-# Generate the IR file
-node create-ir.mjs
-
-# Create an argument file
-echo "41" > arg.east
-
-# Submit task with argument
-e3 run add-task add1.east arg.east
-
-# Get result
-e3 get add-task
-# Output: 42
-```
-
----
-
-## Installation
-
-### CLI Tool (e3cli)
-
-```bash
-cd javascript/e3cli
-npm install
-npm run build
-npm link  # Makes 'e3' command available globally
+# Auto-deploy and run on file changes
+e3 watch . dev ./src/index.ts --start
 ```
 
 ---
 
 ## Core Concepts
 
-### Content-Addressable Storage
+### Package
 
-e3 uses SHA256 hashing for all objects (IR, arguments, results, commits). Every object is stored once and referenced by its hash, ensuring:
-- **Deduplication**: Identical content is stored only once
-- **Integrity**: Content cannot be modified without changing its hash
-- **Verifiability**: You can verify any object matches its hash
+An immutable collection of inputs, tasks, and their compiled East IR. Created with `e3.package()` and exported to a `.zip` file.
 
-### Task Identity
+### Workspace
 
-A task is uniquely identified by:
+A mutable environment where a package is deployed. Workspaces hold:
+- Input dataset values (can be modified)
+- Task outputs (computed by running tasks)
+- Execution state and cache
+
+### Task
+
+A computation that reads input datasets and produces an output dataset. Tasks are defined with `e3.task()` using an East function, or `e3.customTask()` for shell commands.
+
+### Dataflow
+
+The DAG of tasks and their dependencies. When you run `e3 start`, tasks execute in dependency order. Cached results are reused when inputs haven't changed.
+
+### Content Addressing
+
+All objects (IR, data, results) are stored by SHA256 hash. This enables:
+- Automatic deduplication
+- Cache invalidation when content changes
+- Integrity verification
+
+---
+
+## SDK Reference
+
+### `e3.input(name, type, defaultValue?)`
+
+Defines an input dataset at `.inputs.${name}`.
+
+```typescript
+import { StringType, IntegerType, ArrayType } from '@elaraai/east';
+
+// With default value
+const name = e3.input('name', StringType, 'World');
+
+// Without default (must be set before running)
+const count = e3.input('count', IntegerType);
+
+// Complex types
+const items = e3.input('items', ArrayType(StringType), ['a', 'b', 'c']);
 ```
-task_id = SHA256(ir_hash + args_hashes + runtime)
+
+### `e3.task(name, inputs, fn, config?)`
+
+Defines a task that runs an East function.
+
+```typescript
+import { East, IntegerType, StringType } from '@elaraai/east';
+
+// Task with no inputs
+const constant = e3.task(
+  'constant',
+  [],
+  East.function([], IntegerType, ($) => {
+    $.return(42n);
+  })
+);
+
+// Task that depends on an input
+const greet = e3.task(
+  'greet',
+  [name],  // input defined above
+  East.function([StringType], StringType, ($, n) =>
+    East.str`Hello, ${n}!`
+  )
+);
+
+// Task that depends on another task's output
+const shout = e3.task(
+  'shout',
+  [greet.output],
+  East.function([StringType], StringType, ($, greeting) =>
+    East.str`${greeting.toUpperCase()}!!!`
+  )
+);
+
+// Task with custom runner
+const pyTask = e3.task(
+  'py_task',
+  [someInput],
+  East.function([IntegerType], IntegerType, ($, x) => x.multiply(2n)),
+  { runner: ['uv', 'run', 'east-py', 'run', '-p', 'east-py-std'] }
+);
 ```
 
-This means:
-- Same function + same arguments + same runtime = same task_id
-- Tasks are naturally deduplicated
-- You can reference tasks by their content, not arbitrary IDs
+### `e3.customTask(name, inputs, outputType, command)`
 
-### Task Lifecycle
+Defines a task that runs a shell command instead of an East function.
 
+```typescript
+import { East, StringType, ArrayType } from '@elaraai/east';
+
+const processData = e3.customTask(
+  'process',
+  [rawData],
+  StringType,
+  ($, input_paths, output_path) =>
+    East.str`python process.py -i ${input_paths.get(0n)} -o ${output_path}`
+);
 ```
-1. Submit    → .new_task commit created
-2. Queue     → Task placed in queue/<runtime>/<task_id>
-3. Claim     → Worker moves to claims/<runtime>/<task_id>.<worker_id>
-4. Execute   → Worker compiles and runs the IR
-5. Complete  → .task_done commit created with result hash
+
+### `e3.package(name, version, ...items)`
+
+Bundles inputs and tasks into a package. Dependencies are collected automatically.
+
+```typescript
+// Only need to pass leaf tasks - dependencies are collected automatically
+const pkg = e3.package('myapp', '1.0.0', finalTask);
+
+// Or pass multiple items explicitly
+const pkg = e3.package('myapp', '1.0.0',
+  input1,
+  input2,
+  task1,
+  task2
+);
 ```
 
-### Repository Structure
+### `e3.export(pkg, zipPath)`
 
-```
-.e3/
-├── objects/           # Content-addressable storage
-│   ├── ab/
-│   │   ├── cdef123....beast2   # Binary objects
-│   │   └── 9876543....east     # Text objects
-├── queue/             # Pending tasks
-│   └── node/
-├── claims/            # In-progress tasks (claimed by workers)
-│   └── node/
-├── refs/
-│   └── tasks/         # Named task references
-│       ├── my-task    # Points to task_id
-│       └── another    # Points to task_id
-├── tasks/             # Task state (task_id → latest commit)
-│   └── bb11842c...    # Each file contains current commit hash
-└── tmp/               # Temporary files for atomic operations
+Exports a package to a `.zip` file for import into a repository.
+
+```typescript
+await e3.export(pkg, '/tmp/myapp.zip');
 ```
 
 ---
 
 ## CLI Reference
 
-### `e3 init [path]`
-
-Initialize a new e3 repository.
+### Repository Commands
 
 ```bash
-e3 init              # Initialize in current directory
-e3 init /path/to/dir # Initialize in specific directory
+e3 init <repo>                    # Initialize a new repository
+e3 status <repo> [workspace]      # Show status (repo or workspace details)
+e3 gc <repo> [--dry-run]          # Remove unreferenced objects
 ```
 
-Creates `.e3/` directory with the standard structure.
-
-### `e3 run <name> <ir> [args...]`
-
-Submit a task for execution.
+### Package Commands
 
 ```bash
-e3 run task-name function.east              # No arguments
-e3 run task-name function.east arg1.east    # One argument
-e3 run add3 add.east 1.east 2.east 3.east  # Multiple arguments
+e3 package import <repo> <zipPath>       # Import package from .zip
+e3 package export <repo> <pkg> <zipPath> # Export package to .zip
+e3 package list <repo>                   # List installed packages
+e3 package remove <repo> <pkg>           # Remove a package
 ```
 
-**Arguments:**
-- `<name>`: Friendly name for the task (creates a ref)
-- `<ir>`: Path to IR file (.east, .json, or .beast2)
-- `[args...]`: Paths to argument files (optional)
-
-**Output:**
-- Task ID (content hash)
-- Commit hash
-- IR hash
-- Argument hashes (if any)
-
-### `e3 status <name>`
-
-Check the status of a task.
+### Workspace Commands
 
 ```bash
-e3 status my-task
+e3 workspace create <repo> <name>              # Create empty workspace
+e3 workspace deploy <repo> <ws> <pkg[@ver]>    # Deploy package to workspace
+e3 workspace export <repo> <ws> <zipPath>      # Export workspace as package
+e3 workspace list <repo>                       # List workspaces
+e3 workspace remove <repo> <ws>                # Remove workspace
 ```
 
-Shows:
-- Task ID
-- Current status (Pending, Completed, Failed)
-- Execution time (if completed)
-- Latest commit hash
-
-### `e3 get <refOrHash>`
-
-Retrieve task output or any object by hash.
+### Data Commands
 
 ```bash
-# Get task output by name
-e3 get my-task
-
-# Get task output by task_id (full or partial hash)
-e3 get bb11842c
-
-# Get any object by hash
-e3 get d689550b        # Might be IR
-e3 get 8beea769        # Might be a result
-
-# Specify output format
-e3 get my-task --format east    # Human-readable (default)
-e3 get my-task --format json    # JSON
-e3 get my-task --format beast2  # Binary (for piping to file)
-
-# Save binary output
-e3 get my-task --format beast2 > result.beast2
+e3 list <repo> [path]                          # List tree contents
+e3 get <repo> <path> [-f east|json|beast2]     # Get dataset value
+e3 set <repo> <path> <file> [--type <spec>]    # Set dataset from file
 ```
 
-### `e3 list`
-
-List all task references.
+Path format: `workspace.path.to.dataset`
 
 ```bash
-e3 list
+e3 get . dev.inputs.name           # Get input value
+e3 get . dev.tasks.greet.output    # Get task output
+e3 set . dev.inputs.name data.east # Set input from file
 ```
 
-Shows all named tasks with their task_id prefixes (like `git branch`).
-
-### `e3 log <refOrHash>`
-
-Show commit history for a task.
+### Execution Commands
 
 ```bash
-e3 log my-task        # By name
-e3 log bb11842c       # By task_id hash
+# Execute dataflow in workspace
+e3 start <repo> <ws> [--filter <pattern>] [--concurrency <n>] [--force]
+
+# Run a single task ad-hoc (outside workspace)
+e3 run <repo> <pkg/task> [inputs...] -o <output>
+
+# Watch and auto-deploy on changes
+e3 watch <repo> <ws> <source.ts> [--start] [--abort-on-change]
+
+# View task logs
+e3 logs <repo> <path> [--follow]
 ```
 
-Displays the commit chain from newest to oldest (like `git log`):
-- Commit hashes
-- Commit types (.new_task, .task_done, etc.)
-- Timestamps
-- Execution times
-- IR and argument hashes
-
-### `e3 convert [input]`
-
-Convert between .east, .json, and .beast2 formats, or inspect type information.
+### Utility Commands
 
 ```bash
-# View .beast2 files in readable format
-e3 convert result.beast2                    # → .east format (default)
-e3 convert result.beast2 --to json          # → JSON format
-
-# Inspect type information
-e3 convert data.beast2 --to type            # Show type, not value
-echo '[1, 2, 3]' | e3 convert --to type     # → .Array .Integer
-
 # Convert between formats
-e3 convert input.east --to beast2 -o output.beast2
-cat data.east | e3 convert --to json
-
-# Override format detection
-e3 convert data.txt --from east             # Ignore extension
-echo '42' | e3 convert --from json --type '.Integer'
-```
-
-**Options:**
-- `--from <format>`: Input format (east, json, beast2) - default: auto-detect
-- `--to <format>`: Output format (east, json, beast2, type) - default: east
-- `-o, --output <path>`: Write to file instead of stdout
-- `--type <typespec>`: Type specification in .east format (required for .json input)
-
-**Format Detection:**
-- Files: Detected from extension (.east, .json, .beast2)
-- stdin: Auto-detected (beast2 by magic byte, json by structure, otherwise east)
-- Override with `--from` when needed
-
-### Interactive Data Viewer
-
-View and explore East data structures with an interactive terminal UI:
-
-```bash
-e3 view [input] [--from <format>] [-f]
-```
-
-**Options:**
-- `[input]`: File path to view (reads from stdin if omitted or `-`)
-- `--from <format>`: Input format (east, json, beast2) - auto-detected if not specified
-- `-f, --fullscreen`: Use full terminal height
-
-**Navigation:**
-- `↑/↓` or `j/k`: Move cursor up/down
-- `→/Enter/Space`: Expand node
-- `←/Delete`: Collapse node
-- `d`: Toggle detail pane visibility
-- `q/Esc`: Quit
-
-**Features:**
-- Two-pane layout: tree navigator (left) + detail view (right)
-- Type-aware navigation for Structs and Arrays
-- Full East type and value formatting
-- Displays file path or `<stdin>` in title bar
-
-**Examples:**
-```bash
-# View a .beast2 file
-e3 view data.beast2
-
-# View from stdin with fullscreen mode
-cat data.east | e3 view -f
-
-# View a .json file with explicit format
-e3 view data.json --from json
+e3 convert [input] [--from <fmt>] [--to <fmt>] [-o <output>] [--type <spec>]
 ```
 
 ---
 
-## Working with Tasks
+## Project Setup
 
-### Task Names vs Task IDs
+### TypeScript Project
 
-**Task Names** (refs):
-- Human-readable aliases (e.g., "my-task")
-- Stored in `.e3/refs/tasks/`
-- Multiple names can point to the same task_id
-
-**Task IDs**:
-- Content-based hash: `SHA256(ir_hash + args_hashes + runtime)`
-- 64 hex characters (e.g., `bb11842c543e876fccad...`)
-- Unique identifier for the exact computation
-
-### Partial Hashes
-
-Like git, you can use partial hashes anywhere a hash is expected:
-
-```bash
-e3 get bb11842c              # Partial task_id
-e3 get d689550b              # Partial object hash
-e3 log bb11                  # Even shorter (if unambiguous)
+```
+my-e3-project/
+├── package.json
+├── tsconfig.json
+├── pyproject.toml      # For Python runner (east-py)
+├── src/
+│   └── index.ts        # Package definition
+└── .e3/                # Repository (created by e3 init)
 ```
 
-e3 will resolve to the full hash if unambiguous, or error if multiple matches exist.
-
-### Viewing Task History
-
-```bash
-# See the full execution history
-e3 log my-task
-
-# Example output:
-# commit 68d080a23a4f
-#   Type: Task completed
-#   Result: 8beea7695fbb
-#   Runtime: node
-#   Execution time: 9.00ms
-#   Timestamp: 2025-11-18T04:30:12.049Z
-#
-# commit 167b0f2c0473
-#   Type: Task submission
-#   Task ID: bb11842c543e
-#   IR: d689550b203b
-#   Args: [0 arguments]
-#   Runtime: node
-#   Timestamp: 2025-11-18T04:20:46.087Z
+**package.json:**
+```json
+{
+  "name": "my-e3-project",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "main": "node dist/index.js"
+  },
+  "dependencies": {
+    "@elaraai/east": "^0.0.1-beta.11",
+    "@elaraai/e3": "^0.0.2-beta.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
 ```
 
-### Accessing Intermediate Objects
+**tsconfig.json:**
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true
+  },
+  "include": ["src"]
+}
+```
 
-You can retrieve any object by its hash:
+**pyproject.toml** (for Python runner):
+```toml
+[project]
+name = "my-e3-project"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "east-py>=0.0.1b11",
+    "east-py-std>=0.0.1b11",
+]
 
-```bash
-# Get the IR that was submitted
-e3 get d689550b --format east
+[tool.uv]
+dev-dependencies = []
+```
 
-# Get an argument value
-e3 get d5513cda
+### Makefile (recommended)
 
-# Get a result
-e3 get 8beea769
+```makefile
+WORKSPACE ?= dev
+PACKAGE_NAME ?= myapp
+PACKAGE_VERSION ?= 1.0.0
+
+build:
+	npm run build
+
+package: build
+	npm run main
+
+import: package
+	e3 package import . /tmp/pkg.zip
+
+deploy: import
+	e3 workspace create . $(WORKSPACE) || true
+	e3 workspace deploy . $(WORKSPACE) $(PACKAGE_NAME)@$(PACKAGE_VERSION)
+
+start: deploy
+	e3 start . $(WORKSPACE)
+
+all: start
+
+clean:
+	rm -rf dist /tmp/pkg.zip
 ```
 
 ---
 
-## Creating IR
+## Development Workflow
 
-### Using East Expression Builders (Recommended)
+### Watch Mode
 
-The best way to create IR is using East's TypeScript expression builders. This gives you:
-- Type safety
-- IDE autocomplete
-- Compile-time error checking
-- Clean, readable code
+The fastest development workflow uses `e3 watch`:
 
-```typescript
-import { East, IntegerType, ArrayType, printFor, IRType, encodeBeast2For } from '@elaraai/east';
-import fs from 'fs';
-
-// Simple function
-const add1 = East.function([IntegerType], IntegerType, ($, x) =>
-  x.add(1n)
-);
-
-// Function with multiple arguments
-const add = East.function([IntegerType, IntegerType], IntegerType, ($, a, b) =>
-  a.add(b)
-);
-
-// Working with arrays
-const sumArray = East.function([ArrayType(IntegerType)], IntegerType, ($, arr) =>
-  arr.reduce(0n, (sum, x) => sum.add(x))
-);
-
-// More complex logic
-const factorial = East.function([IntegerType], IntegerType, ($, n) =>
-  $.if(n.lte(1n))
-    .then(() => 1n)
-    .else(() => n.mul(factorial.call(n.sub(1n))))
-);
-
-// Convert to IR
-const add1_ir = add1.toIR().ir;
-
-// Save as .east (human-readable)
-const printer = printFor(IRType);
-fs.writeFileSync('add1.east', printer(add1_ir));
-
-// Or save as .beast2 (binary)
-const encoder = encodeBeast2For(IRType);
-fs.writeFileSync('add1.beast2', encoder(add1_ir));
-
-// Or save as .json
-import { toJSONFor } from '@elaraai/east';
-const toJSON = toJSONFor(IRType);
-fs.writeFileSync('add1.json', JSON.stringify(toJSON(add1_ir), null, 2));
+```bash
+e3 watch . dev ./src/index.ts --start
 ```
 
-For more details on East expression builders, see the [East Developer Guide](../East/USAGE.md).
+This:
+1. Compiles your TypeScript on save
+2. Exports and imports the package
+3. Deploys to the workspace
+4. Executes the dataflow
+5. Repeats when files change
 
-### Manual IR Creation
+Use `--abort-on-change` to cancel running executions when you save:
 
-You can also write IR directly in .east format, though this is more error-prone:
+```bash
+e3 watch . dev ./src/index.ts --start --abort-on-change
+```
 
-```east
-.Function (
-    type=.Function (inputs=[.Integer], output=.Integer, platforms=[]),
-    location=(filename="",line=0,column=0),
-    captures=[],
-    parameters=[.Variable(
-        type=.Integer,
-        location=(filename="",line=0,column=0),
-        name="_1",
-        mutable=false,
-        captured=false,
-    )],
-    body=.Builtin(
-        type=.Integer,
-        location=(filename="",line=0,column=0),
-        builtin="IntegerAdd",
-        type_parameters=[],
-        arguments=[
-            .Variable(
-                type=.Integer,
-                location=(filename="",line=0,column=0),
-                name="_1",
-                mutable=false,
-                captured=false,
-            ),
-            .Value(
-                type=.Integer,
-                location=(filename="",line=0,column=0),
-                value=.Integer 1
-            )
-        ]
-    )
-)
+### Manual Workflow
+
+```bash
+# Build and export
+npm run build && npm run main
+
+# Import and deploy
+e3 package import . /tmp/pkg.zip
+e3 workspace deploy . dev myapp@1.0.0
+
+# Run
+e3 start . dev
+
+# Check results
+e3 status . dev
+e3 get . dev.tasks.mytask.output
+```
+
+### Caching
+
+Tasks are cached by content hash. A task only re-runs when:
+- Its East function IR changes
+- Any of its input values change
+
+Changing one task doesn't invalidate unrelated tasks. Use `--force` to bypass cache:
+
+```bash
+e3 start . dev --force
 ```
 
 ---
 
 ## File Formats
 
-e3 supports three file formats for IR, arguments, and results:
+e3 supports three formats for data:
 
-### .east Format (Human-Readable)
+### .east (Human-Readable)
 
-Text-based format for easy editing and reading.
-
-**IR Example:**
 ```east
-.Function (
-    type=.Function (inputs=[.Integer], output=.Integer, platforms=[]),
-    location=(filename="",line=0,column=0),
-    captures=[],
-    parameters=[.Variable(...)],
-    body=.Builtin(...)
-)
+42                      # Integer
+"hello"                 # String
+[1, 2, 3]              # Array
+(name="Alice", age=30) # Struct
 ```
 
-**Value Example:**
-```east
-42                    # Integer
-"hello"              # String
-[1, 2, 3]           # Array
-```
+### .json
 
-### .json Format
-
-Standard JSON with East type wrappers.
-
-**Value Example:**
 ```json
-{
-  "type": "Integer",
-  "value": "42"
-}
+{"type": "Integer", "value": "42"}
 ```
 
-### .beast2 Format (Binary)
+### .beast2 (Binary)
 
-Compact binary format with self-describing types.
+Compact binary format with self-describing types. Use for efficiency.
 
-```bash
-# Create binary from text
-cat value.east | e3-encode > value.beast2
-
-# Extract binary to text
-e3 get <hash> --format beast2 > value.beast2
-e3 get <hash> --format east    # Human-readable
-```
-
-**When to use each:**
-- `.east`: Human editing, debugging, version control
-- `.json`: Integration with JSON APIs
-- `.beast2`: Efficient storage and transmission
-
----
-
-## Git-like Features
-
-e3 borrows many concepts from git for familiar workflows:
-
-### Content Addressing
-
-Like git's object database, e3 stores everything by content hash:
+### Converting
 
 ```bash
-# Objects are stored in .e3/objects/ab/cdef123...
-# Just like git's .git/objects/
-```
-
-### References
-
-Named pointers to task IDs:
-
-```bash
-e3 list                    # Like 'git branch'
-# my-task → bb11842c543e
-# another → abc123def456
-```
-
-### Commit History
-
-Tasks have a commit chain:
-
-```bash
-e3 log my-task            # Like 'git log'
-```
-
-### Hash Prefixes
-
-Abbreviated hashes work everywhere:
-
-```bash
-e3 get bb11842c           # Like 'git show bb11842c'
-e3 log d689550            # Like 'git log d689550'
+e3 convert data.beast2                    # → .east (default)
+e3 convert data.east --to beast2 -o out.beast2
+e3 convert data.json --to east
 ```
 
 ---
 
-## Environment Variables
+## Tips
 
-- `E3_REPO`: Default repository path (if not using `--repo` flag)
-
-```bash
-export E3_REPO=/path/to/my/repo/.e3
-e3 run my-task function.east
-```
-
----
-
-## Advanced Usage
-
-### Inspecting the Repository
-
-```bash
-# List all objects
-ls .e3/objects/
-
-# View a commit directly
-cat .e3/objects/ab/cdef123....east
-
-# Check task state
-cat .e3/tasks/bb11842c543e876fccad...
-
-# See queued tasks
-ls .e3/queue/node/
-
-# See claimed tasks
-ls .e3/claims/node/
-```
-
-### Manual Task Debugging
-
-```bash
-# Get full task information
-e3 log my-task
-
-# Extract IR for inspection
-e3 get <ir-hash> --format east > ir.east
-
-# Extract arguments
-e3 get <arg-hash> --format east > arg.east
-
-# Re-submit with modifications
-e3 run my-task-v2 ir.east arg.east
-```
-
-### Deduplication Example
-
-```bash
-# Submit the same task twice
-e3 run task1 function.east arg.east
-e3 run task2 function.east arg.east
-
-# They have the same task_id!
-e3 list
-# task1 → bb11842c543e
-# task2 → bb11842c543e
-
-# Only executed once
-# Both refs point to same result
-```
-
----
-
-## Tips & Best Practices
-
-1. **Use meaningful task names**: They're just pointers, so use descriptive names
-2. **Check status before waiting**: `e3 status` tells you if a task is complete
-3. **Use partial hashes**: Shorter is fine if unambiguous (like git)
-4. **Inspect IR before submitting**: `cat function.east` to verify
-5. **Keep workers running**: Use systemd or similar for production
-6. **Back up .e3/objects/**: That's your content database
-7. **Version control IR files**: Keep .east files in git for history
-
----
-
-## Troubleshooting
-
-### Task failed
-
-```bash
-# Check the log
-e3 log my-task
-
-# Look for task_error or task_fail commits
-# (Future: more detailed error reporting)
-```
-
-### Object not found
-
-```bash
-# Verify hash is correct
-e3 list  # Check task IDs
-
-# Try full hash instead of partial
-e3 get <full-64-char-hash>
-```
-
----
-
-## Future Features
-
-- Platform function support
-- Task cancellation
-- Stale claim recovery
-- Progress reporting for long tasks
-- Task dependencies and workflows
-- Web dashboard for monitoring
-
----
-
-For more information about East IR and the language itself, see the [East repository](../East).
+1. **Use watch mode** for fast iteration during development
+2. **Let dependencies flow** - only pass leaf tasks to `e3.package()`, dependencies are collected automatically
+3. **Check status** with `e3 status . workspace` to see task states
+4. **View logs** with `e3 logs . workspace.taskname` for debugging
+5. **Use inputs** for values that change between runs, tasks for computations

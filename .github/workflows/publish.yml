@@ -60,6 +60,7 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: e3,east-py,east-ui
 
       - uses: actions/checkout@v4
         with:
@@ -365,3 +366,26 @@ jobs:
           name: "@elaraai/e3-api-server ${{ steps.version_api_server.outputs.new_version }}"
           generate_release_notes: true
           prerelease: ${{ steps.npm_tag.outputs.prerelease == 'true' }}
+
+      - name: Wait for npm propagation
+        if: ${{ inputs.publish_e3_api_server }}
+        uses: nick-invision/retry@v3
+        with:
+          timeout_minutes: 5
+          max_attempts: 20
+          retry_wait_seconds: 15
+          command: npm view "@elaraai/e3-api-server@${{ steps.version_api_server.outputs.new_version }}" version
+
+      - name: Trigger update-deps in dependent repos
+        if: ${{ inputs.publish_e3_api_server }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          # east-ui depends on e3-api-server and e3-api-client
+          echo "Triggering update-deps in elaraai/east-ui..."
+          if gh workflow run update-deps.yml --repo "elaraai/east-ui"; then
+            echo "Successfully triggered east-ui (end of cascade)"
+          else
+            echo "Failed to trigger east-ui"
+            exit 1
+          fi

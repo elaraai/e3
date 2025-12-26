@@ -856,3 +856,195 @@ export async function workspaceSetDatasetByHash(
     rootUpdatedAt: new Date(),
   });
 }
+
+// =============================================================================
+// Tree Traversal
+// =============================================================================
+
+/**
+ * A tree branch node (contains children).
+ */
+export interface TreeBranchNode {
+  /** Field name */
+  name: string;
+  /** Discriminator */
+  kind: 'tree';
+  /** Child nodes */
+  children: TreeNode[];
+}
+
+/**
+ * A dataset leaf node (contains a value).
+ */
+export interface TreeLeafNode {
+  /** Field name */
+  name: string;
+  /** Discriminator */
+  kind: 'dataset';
+  /** East type value (only present if includeTypes option was true) */
+  datasetType?: EastTypeValue;
+}
+
+/**
+ * A node in the tree structure for display purposes.
+ */
+export type TreeNode = TreeBranchNode | TreeLeafNode;
+
+/**
+ * Options for workspaceGetTree.
+ */
+export interface WorkspaceGetTreeOptions {
+  /** Maximum depth to recurse (undefined = unlimited) */
+  maxDepth?: number;
+  /** Include East types for dataset nodes */
+  includeTypes?: boolean;
+}
+
+/**
+ * Check if a structure represents a task (has function_ir and output).
+ */
+function isTaskStructure(structure: Structure): boolean {
+  if (structure.type !== 'struct') return false;
+  const fields = structure.value;
+  return fields.has('function_ir') && fields.has('output');
+}
+
+/**
+ * Get the output type from a task structure (from structure, not value).
+ */
+function getTaskOutputTypeFromStructure(structure: Structure): EastTypeValue | undefined {
+  if (structure.type !== 'struct') return undefined;
+  const outputStructure = structure.value.get('output');
+  if (outputStructure?.type === 'value') {
+    return outputStructure.value as EastTypeValue;
+  }
+  return undefined;
+}
+
+/**
+ * Get the full tree structure at a path within a workspace.
+ *
+ * Recursively walks the tree and returns a hierarchical structure
+ * suitable for display. Tasks are shown as leaves with their output type.
+ *
+ * @param repoPath - Path to .e3 repository
+ * @param ws - Workspace name
+ * @param treePath - Path to start from (empty for root)
+ * @param options - Optional settings for depth limit and type inclusion
+ * @returns Array of tree nodes at the path
+ * @throws If workspace not deployed or path invalid
+ */
+export async function workspaceGetTree(
+  repoPath: string,
+  ws: string,
+  treePath: TreePath,
+  options: WorkspaceGetTreeOptions = {}
+): Promise<TreeNode[]> {
+  const { rootHash, rootStructure } = await getWorkspaceRootInfo(repoPath, ws);
+  const { maxDepth, includeTypes } = options;
+
+  // If path is empty, start from root
+  if (treePath.length === 0) {
+    if (rootStructure.type !== 'struct') {
+      throw new Error('Root is not a tree');
+    }
+    return walkTree(repoPath, rootHash, rootStructure, 0, maxDepth, includeTypes);
+  }
+
+  // Traverse to the path first
+  const { structure, ref } = await traverse(repoPath, rootHash, rootStructure, treePath);
+
+  // Must be a tree structure
+  if (structure.type !== 'struct') {
+    const pathStr = treePath.map(s => s.value).join('.');
+    throw new Error(`Path '${pathStr}' points to a dataset, not a tree`);
+  }
+
+  // Must be a tree ref
+  if (ref.type !== 'tree') {
+    const pathStr = treePath.map(s => s.value).join('.');
+    throw new Error(`Path '${pathStr}' has ref type '${ref.type}', expected 'tree'`);
+  }
+
+  return walkTree(repoPath, ref.value, structure, 0, maxDepth, includeTypes);
+}
+
+/**
+ * Recursively walk a tree and build TreeNode array.
+ */
+async function walkTree(
+  repoPath: string,
+  treeHash: string,
+  structure: Structure,
+  currentDepth: number,
+  maxDepth: number | undefined,
+  includeTypes: boolean | undefined
+): Promise<TreeNode[]> {
+  if (structure.type !== 'struct') {
+    throw new Error('Expected struct structure for tree walk');
+  }
+
+  const treeObject = await treeRead(repoPath, treeHash, structure);
+  const nodes: TreeNode[] = [];
+
+  for (const [fieldName, childRef] of Object.entries(treeObject)) {
+    const childStructure = structure.value.get(fieldName);
+    if (!childStructure) {
+      continue; // Skip unknown fields
+    }
+
+    if (childStructure.type === 'value') {
+      // This is a dataset (leaf node)
+      // The type is directly in the structure - no need to read the value
+      const node: TreeLeafNode = {
+        name: fieldName,
+        kind: 'dataset',
+        datasetType: includeTypes ? childStructure.value as EastTypeValue : undefined,
+      };
+
+      nodes.push(node);
+    } else if (childStructure.type === 'struct') {
+      // Check if this is a task subtree - show as leaf with output type
+      if (isTaskStructure(childStructure) && childRef.type === 'tree') {
+        const node: TreeLeafNode = {
+          name: fieldName,
+          kind: 'dataset',
+          datasetType: includeTypes ? getTaskOutputTypeFromStructure(childStructure) : undefined,
+        };
+
+        nodes.push(node);
+        continue;
+      }
+
+      // Regular subtree
+      let children: TreeNode[] = [];
+
+      // Recurse if we haven't hit max depth
+      if (maxDepth === undefined || currentDepth < maxDepth) {
+        if (childRef.type === 'tree') {
+          children = await walkTree(
+            repoPath,
+            childRef.value,
+            childStructure,
+            currentDepth + 1,
+            maxDepth,
+            includeTypes
+          );
+        }
+      }
+
+      const node: TreeBranchNode = {
+        name: fieldName,
+        kind: 'tree',
+        children,
+      };
+
+      nodes.push(node);
+    }
+  }
+
+  // Sort alphabetically for consistent output
+  nodes.sort((a, b) => a.name.localeCompare(b.name));
+
+  return nodes;
+}

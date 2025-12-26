@@ -11,11 +11,16 @@
  * All commands take a repository path as the first argument (`.` for current directory).
  */
 
+import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { initCommand } from './commands/init.js';
+
+const require = createRequire(import.meta.url);
+const packageJson = require('../../package.json') as { version: string };
 import { packageCommand } from './commands/package.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { listCommand } from './commands/list.js';
+import { treeCommand } from './commands/tree.js';
 import { getCommand } from './commands/get.js';
 import { setCommand } from './commands/set.js';
 import { startCommand } from './commands/start.js';
@@ -31,7 +36,7 @@ const program = new Command();
 program
   .name('e3')
   .description('East Execution Engine - Execute tasks across multiple runtimes')
-  .version('0.0.1-alpha.0');
+  .version(packageJson.version);
 
 // Repository commands
 program
@@ -132,6 +137,13 @@ program
   .command('list <repo> [path]')
   .description('List workspaces or tree contents at path (ws.path.to.tree)')
   .action(listCommand);
+
+program
+  .command('tree <repo> <path>')
+  .description('Show full tree structure at path (ws or ws.subtree)')
+  .option('--depth <n>', 'Maximum depth to display')
+  .option('--types', 'Show dataset types')
+  .action(treeCommand);
 
 program
   .command('get <repo> <path>')
