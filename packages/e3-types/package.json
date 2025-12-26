@@ -23,7 +23,7 @@
     "directory": "packages/e3-types"
   },
   "peerDependencies": {
-    "@elaraai/east": "^0.0.1-beta.17"
+    "@elaraai/east": "^0.0.1-beta.22"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.47.0",
