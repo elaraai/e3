@@ -214,8 +214,9 @@ jobs:
           npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
           cd ../..
 
-          # e3-cli depends on e3-core and e3-types
+          # e3-cli depends on e3, e3-core and e3-types
           cd packages/e3-cli
+          npm pkg set "dependencies.@elaraai/e3=^${E3_VERSION}"
           npm pkg set "dependencies.@elaraai/e3-core=^${E3_CORE_VERSION}"
           npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
           cd ../..
