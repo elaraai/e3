@@ -17,6 +17,7 @@ import {
   workspaceDeploy,
   workspaceExport,
   packageGetLatestVersion,
+  LocalBackend,
 } from '@elaraai/e3-core';
 import { decodeBody, sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
@@ -28,10 +29,11 @@ export function createWorkspaceRoutes(repoPath: string) {
   // GET /api/workspaces - List all workspaces
   app.get('/', async (c) => {
     try {
-      const workspaces = await workspaceList(repoPath);
+      const storage = new LocalBackend(repoPath);
+      const workspaces = await workspaceList(storage);
       const result = await Promise.all(
         workspaces.map(async (name) => {
-          const state = await workspaceGetState(repoPath, name);
+          const state = await workspaceGetState(storage, name);
           if (state) {
             return {
               name,
@@ -75,7 +77,8 @@ export function createWorkspaceRoutes(repoPath: string) {
   app.get('/:name', async (c) => {
     try {
       const name = c.req.param('name');
-      const state = await workspaceGetState(repoPath, name);
+      const storage = new LocalBackend(repoPath);
+      const state = await workspaceGetState(storage, name);
       if (!state) {
         // Workspace exists but not deployed - return error
         return sendError(c, WorkspaceStateType, errorToVariant(new Error(`Workspace '${name}' is not deployed`)));

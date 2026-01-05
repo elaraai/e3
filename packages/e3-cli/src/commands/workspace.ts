@@ -15,6 +15,7 @@ import {
   workspaceRemove,
   workspaceGetState,
   WorkspaceLockError,
+  LocalBackend,
 } from '@elaraai/e3-core';
 import { resolveRepo, parsePackageSpec, formatError, exitError } from '../utils.js';
 
@@ -83,7 +84,8 @@ export const workspaceCommand = {
   async list(repoArg: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      const workspaces = await workspaceList(repoPath);
+      const storage = new LocalBackend(repoPath);
+      const workspaces = await workspaceList(storage);
 
       if (workspaces.length === 0) {
         console.log('No workspaces');
@@ -92,7 +94,7 @@ export const workspaceCommand = {
 
       console.log('Workspaces:');
       for (const ws of workspaces) {
-        const state = await workspaceGetState(repoPath, ws);
+        const state = await workspaceGetState(storage, ws);
         if (state) {
           console.log(`  ${ws} (${state.packageName}@${state.packageVersion})`);
         } else {

@@ -14,9 +14,9 @@ import { join } from 'node:path';
 import { StringType } from '@elaraai/east';
 import e3 from '@elaraai/e3';
 import {
+  workspaceList,
   workspaceCreate,
   workspaceRemove,
-  workspaceList,
   workspaceGetState,
   workspaceGetPackage,
   workspaceGetRoot,
@@ -31,6 +31,7 @@ import {
 } from './errors.js';
 import { objectWrite } from './objects.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
+import { LocalBackend } from './storage/local/index.js';
 
 describe('workspaces', () => {
   let testRepo: string;
@@ -73,7 +74,8 @@ describe('workspaces', () => {
     it('creates empty file (undeployed)', async () => {
       await workspaceCreate(testRepo, 'empty');
 
-      const state = await workspaceGetState(testRepo, 'empty');
+      const storage = new LocalBackend(testRepo);
+      const state = await workspaceGetState(storage, 'empty');
       assert.strictEqual(state, null);
     });
   });
@@ -113,7 +115,8 @@ describe('workspaces', () => {
 
   describe('workspaceList', () => {
     it('returns empty array for no workspaces', async () => {
-      const workspaces = await workspaceList(testRepo);
+      const storage = new LocalBackend(testRepo);
+      const workspaces = await workspaceList(storage);
 
       assert.deepStrictEqual(workspaces, []);
     });
@@ -121,7 +124,8 @@ describe('workspaces', () => {
     it('lists single workspace', async () => {
       await workspaceCreate(testRepo, 'single');
 
-      const workspaces = await workspaceList(testRepo);
+      const storage = new LocalBackend(testRepo);
+      const workspaces = await workspaceList(storage);
 
       assert.deepStrictEqual(workspaces, ['single']);
     });
@@ -131,7 +135,8 @@ describe('workspaces', () => {
       await workspaceCreate(testRepo, 'ws-b');
       await workspaceCreate(testRepo, 'ws-c');
 
-      const workspaces = await workspaceList(testRepo);
+      const storage = new LocalBackend(testRepo);
+      const workspaces = await workspaceList(storage);
 
       assert.strictEqual(workspaces.length, 3);
       assert.ok(workspaces.includes('ws-a'));
@@ -157,7 +162,8 @@ describe('workspaces', () => {
       assert.ok(existsSync(wsFile));
 
       // Verify state content
-      const state = await workspaceGetState(testRepo, 'production');
+      const storage = new LocalBackend(testRepo);
+      const state = await workspaceGetState(storage, 'production');
       assert.ok(state !== null);
       assert.strictEqual(state.packageName, 'deploy-test');
       assert.strictEqual(state.packageVersion, '1.0.0');
@@ -181,7 +187,8 @@ describe('workspaces', () => {
       const pkgRoot = pkgObject.data.value;
 
       // Get workspace root
-      const wsRoot = await workspaceGetRoot(testRepo, 'ws');
+      const storage = new LocalBackend(testRepo);
+      const wsRoot = await workspaceGetRoot(storage, 'ws');
 
       assert.strictEqual(wsRoot, pkgRoot);
     });
@@ -195,7 +202,8 @@ describe('workspaces', () => {
       const expectedHash = await packageResolve(testRepo, 'hash-test', '1.0.0');
       await workspaceDeploy(testRepo, 'ws', 'hash-test', '1.0.0');
 
-      const { hash } = await workspaceGetPackage(testRepo, 'ws');
+      const storage = new LocalBackend(testRepo);
+      const { hash } = await workspaceGetPackage(storage, 'ws');
       assert.strictEqual(hash, expectedHash);
     });
 
@@ -210,7 +218,8 @@ describe('workspaces', () => {
       // Should not throw
       await workspaceDeploy(testRepo, 'preexisting', 'deploy-existing', '1.0.0');
 
-      const { name, version } = await workspaceGetPackage(testRepo, 'preexisting');
+      const storage = new LocalBackend(testRepo);
+      const { name, version } = await workspaceGetPackage(storage, 'preexisting');
       assert.strictEqual(name, 'deploy-existing');
       assert.strictEqual(version, '1.0.0');
     });
@@ -224,7 +233,8 @@ describe('workspaces', () => {
       await packageImport(testRepo, zipPath);
       await workspaceDeploy(testRepo, 'ws', 'getpkg-test', '2.0.0');
 
-      const { name, version, hash } = await workspaceGetPackage(testRepo, 'ws');
+      const storage = new LocalBackend(testRepo);
+      const { name, version, hash } = await workspaceGetPackage(storage, 'ws');
 
       assert.strictEqual(name, 'getpkg-test');
       assert.strictEqual(version, '2.0.0');
@@ -234,8 +244,9 @@ describe('workspaces', () => {
     it('throws for undeployed workspace', async () => {
       await workspaceCreate(testRepo, 'empty');
 
+      const storage = new LocalBackend(testRepo);
       await assert.rejects(
-        async () => await workspaceGetPackage(testRepo, 'empty'),
+        async () => await workspaceGetPackage(storage, 'empty'),
         WorkspaceNotDeployedError
       );
     });
@@ -249,7 +260,8 @@ describe('workspaces', () => {
       await packageImport(testRepo, zipPath);
       await workspaceDeploy(testRepo, 'ws', 'root-get', '1.0.0');
 
-      const root = await workspaceGetRoot(testRepo, 'ws');
+      const storage = new LocalBackend(testRepo);
+      const root = await workspaceGetRoot(storage, 'ws');
 
       assert.strictEqual(root.length, 64);
     });
@@ -267,7 +279,8 @@ describe('workspaces', () => {
 
       await workspaceSetRoot(testRepo, 'ws', newHash);
 
-      const root = await workspaceGetRoot(testRepo, 'ws');
+      const storage = new LocalBackend(testRepo);
+      const root = await workspaceGetRoot(storage, 'ws');
       assert.strictEqual(root, newHash);
     });
 
@@ -278,7 +291,8 @@ describe('workspaces', () => {
       await packageImport(testRepo, zipPath);
       await workspaceDeploy(testRepo, 'ws', 'root-time', '1.0.0');
 
-      const stateBefore = await workspaceGetState(testRepo, 'ws');
+      const storage = new LocalBackend(testRepo);
+      const stateBefore = await workspaceGetState(storage, 'ws');
       assert.ok(stateBefore !== null);
 
       // Wait a bit to ensure timestamp changes
@@ -288,7 +302,7 @@ describe('workspaces', () => {
       const newHash = await objectWrite(testRepo, newData);
       await workspaceSetRoot(testRepo, 'ws', newHash);
 
-      const stateAfter = await workspaceGetState(testRepo, 'ws');
+      const stateAfter = await workspaceGetState(storage, 'ws');
       assert.ok(stateAfter !== null);
       assert.ok(stateAfter.rootUpdatedAt > stateBefore.rootUpdatedAt);
       // deployedAt should not change
@@ -299,8 +313,9 @@ describe('workspaces', () => {
     });
 
     it('throws for non-existent workspace', async () => {
+      const storage = new LocalBackend(testRepo);
       await assert.rejects(
-        async () => await workspaceGetRoot(testRepo, 'nonexistent'),
+        async () => await workspaceGetRoot(storage, 'nonexistent'),
         WorkspaceNotFoundError
       );
     });
@@ -308,8 +323,9 @@ describe('workspaces', () => {
     it('throws for undeployed workspace', async () => {
       await workspaceCreate(testRepo, 'empty');
 
+      const storage = new LocalBackend(testRepo);
       await assert.rejects(
-        async () => await workspaceGetRoot(testRepo, 'empty'),
+        async () => await workspaceGetRoot(storage, 'empty'),
         WorkspaceNotDeployedError
       );
     });

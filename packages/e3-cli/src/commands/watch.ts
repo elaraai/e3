@@ -25,6 +25,7 @@ import {
   workspaceDeploy,
   dataflowExecute,
   DataflowAbortedError,
+  LocalBackend,
   type TaskExecutionResult,
 } from '@elaraai/e3-core';
 import { resolveRepo, formatError } from '../utils.js';
@@ -207,7 +208,8 @@ export async function watchCommand(
 
     // Ensure workspace exists
     try {
-      await workspaceGetState(repoPath, workspace);
+      const storage = new LocalBackend(repoPath);
+      await workspaceGetState(storage, workspace);
     } catch {
       // Workspace doesn't exist, create it
       try {

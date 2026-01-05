@@ -16,6 +16,7 @@ import {
   workspaceList,
   workspaceGetState,
   workspaceStatus,
+  LocalBackend,
   type WorkspaceStatusResult,
 } from '@elaraai/e3-core';
 import { resolveRepo, formatError, exitError } from '../utils.js';
@@ -57,13 +58,14 @@ async function showRepoStatus(repoPath: string): Promise<void> {
   console.log('');
 
   // List workspaces with status
-  const workspaces = await workspaceList(repoPath);
+  const storage = new LocalBackend(repoPath);
+  const workspaces = await workspaceList(storage);
   console.log('Workspaces:');
   if (workspaces.length === 0) {
     console.log('  (none)');
   } else {
     for (const ws of workspaces) {
-      const state = await workspaceGetState(repoPath, ws);
+      const state = await workspaceGetState(storage, ws);
       if (state) {
         console.log(`  ${ws}`);
         console.log(`    Package: ${state.packageName}@${state.packageVersion}`);
