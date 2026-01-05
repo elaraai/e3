@@ -11,6 +11,23 @@
  * used programmatically.
  */
 
+// =============================================================================
+// Storage and Execution Abstractions
+// =============================================================================
+// These interfaces enable e3-core to work against different backends:
+// - Local filesystem (default, CLI and local dev)
+// - AWS EFS (Lambda/Fargate cloud deployment)
+// - S3 + DynamoDB (future optimization)
+
+export * from './storage/index.js';
+export * from './execution/index.js';
+
+// =============================================================================
+// Repository Operations (filesystem-based)
+// =============================================================================
+// These functions use repoPath directly. Future versions will also accept
+// a StorageBackend for backend-agnostic operation.
+
 // Repository management
 export {
   repoInit,
@@ -48,9 +65,9 @@ export {
 
 // Workspace operations
 export {
+  workspaceList,
   workspaceCreate,
   workspaceRemove,
-  workspaceList,
   workspaceGetState,
   workspaceGetPackage,
   workspaceGetRoot,
@@ -110,7 +127,7 @@ export {
   // Logs
   executionReadLog,
   type LogReadOptions,
-  type LogChunk,
+  // Note: LogChunk is exported from './storage/index.js' (aligned interface)
   // Command IR evaluation
   evaluateCommandIr,
   // Process detection

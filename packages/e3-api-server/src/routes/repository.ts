@@ -6,7 +6,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { Hono } from 'hono';
-import { repoGc, packageList, workspaceList } from '@elaraai/e3-core';
+import { repoGc, packageList, workspaceList, LocalBackend } from '@elaraai/e3-core';
 import { decodeBody, sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
 import { RepositoryStatusType, GcRequestType, GcResultType } from '../types.js';
@@ -34,7 +34,8 @@ export function createRepositoryRoutes(repoPath: string) {
 
       // Count packages and workspaces
       const packages = await packageList(repoPath);
-      const workspaces = await workspaceList(repoPath);
+      const storage = new LocalBackend(repoPath);
+      const workspaces = await workspaceList(storage);
 
       const status = {
         path: repoPath,

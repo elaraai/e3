@@ -16,6 +16,7 @@ import {
   workspaceList,
   workspaceListTree,
   workspaceGetState,
+  LocalBackend,
 } from '@elaraai/e3-core';
 import { resolveRepo, parseDatasetPath, formatError, exitError } from '../utils.js';
 
@@ -28,7 +29,8 @@ export async function listCommand(repoArg: string, pathSpec?: string): Promise<v
 
     // If no path, list workspaces
     if (!pathSpec) {
-      const workspaces = await workspaceList(repoPath);
+      const storage = new LocalBackend(repoPath);
+      const workspaces = await workspaceList(storage);
 
       if (workspaces.length === 0) {
         console.log('No workspaces');
@@ -36,7 +38,7 @@ export async function listCommand(repoArg: string, pathSpec?: string): Promise<v
       }
 
       for (const ws of workspaces) {
-        const state = await workspaceGetState(repoPath, ws);
+        const state = await workspaceGetState(storage, ws);
         if (state) {
           console.log(`${ws}  (${state.packageName}@${state.packageVersion})`);
         } else {
