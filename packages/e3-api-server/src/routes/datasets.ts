@@ -11,6 +11,7 @@ import {
   workspaceGetDatasetHash,
   workspaceSetDataset,
   objectRead,
+  LocalBackend,
 } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
@@ -26,7 +27,8 @@ export function createDatasetRoutes(repoPath: string) {
       if (!workspace) {
         return sendError(c, ArrayType(StringType), errorToVariant(new Error('Missing workspace parameter')));
       }
-      const fields = await workspaceListTree(repoPath, workspace, []);
+      const storage = new LocalBackend(repoPath);
+      const fields = await workspaceListTree(storage, workspace, []);
       return sendSuccess(c, ArrayType(StringType), fields);
     } catch (err) {
       return sendError(c, ArrayType(StringType), errorToVariant(err));
@@ -40,9 +42,10 @@ export function createDatasetRoutes(repoPath: string) {
       if (!workspace) {
         return sendError(c, ArrayType(StringType), errorToVariant(new Error('Missing workspace parameter')));
       }
+      const storage = new LocalBackend(repoPath);
       const pathStr = extractWildcardPath(c.req.path, /^\/api\/workspaces\/[^/]+\/list\//);
       const treePath = urlPathToTreePath(pathStr);
-      const fields = await workspaceListTree(repoPath, workspace, treePath);
+      const fields = await workspaceListTree(storage, workspace, treePath);
       return sendSuccess(c, ArrayType(StringType), fields);
     } catch (err) {
       return sendError(c, ArrayType(StringType), errorToVariant(err));
@@ -56,6 +59,7 @@ export function createDatasetRoutes(repoPath: string) {
       if (!workspace) {
         return sendError(c, NullType, errorToVariant(new Error('Missing workspace parameter')));
       }
+      const storage = new LocalBackend(repoPath);
       const pathStr = extractWildcardPath(c.req.path, /^\/api\/workspaces\/[^/]+\/get\//);
       const treePath = urlPathToTreePath(pathStr);
 
@@ -63,7 +67,7 @@ export function createDatasetRoutes(repoPath: string) {
         return sendError(c, NullType, errorToVariant(new Error('Path required for get')));
       }
 
-      const { refType, hash } = await workspaceGetDatasetHash(repoPath, workspace, treePath);
+      const { refType, hash } = await workspaceGetDatasetHash(storage, workspace, treePath);
 
       if (refType === 'unassigned') {
         return sendError(c, NullType, errorToVariant(new Error('Dataset is unassigned (pending task output)')));
@@ -91,6 +95,7 @@ export function createDatasetRoutes(repoPath: string) {
       if (!workspace) {
         return sendError(c, NullType, errorToVariant(new Error('Missing workspace parameter')));
       }
+      const storage = new LocalBackend(repoPath);
       const pathStr = extractWildcardPath(c.req.path, /^\/api\/workspaces\/[^/]+\/set\//);
       const treePath = urlPathToTreePath(pathStr);
 
@@ -102,7 +107,7 @@ export function createDatasetRoutes(repoPath: string) {
       const buffer = await c.req.arrayBuffer();
       const { type, value } = decodeBeast2(new Uint8Array(buffer));
 
-      await workspaceSetDataset(repoPath, workspace, treePath, value, type);
+      await workspaceSetDataset(storage, workspace, treePath, value, type);
       return sendSuccess(c, NullType, null);
     } catch (err) {
       return sendError(c, NullType, errorToVariant(err));

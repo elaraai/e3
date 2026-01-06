@@ -20,14 +20,18 @@ import { objectWrite, objectRead } from './objects.js';
 import { packageImport, packageRemove } from './packages.js';
 import { ObjectNotFoundError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
+import { LocalBackend } from './storage/local/index.js';
+import type { StorageBackend } from './storage/interfaces.js';
 
 describe('gc', () => {
   let testRepo: string;
   let tempDir: string;
+  let storage: StorageBackend;
 
   beforeEach(() => {
     testRepo = createTestRepo();
     tempDir = createTempDir();
+    storage = new LocalBackend(testRepo);
   });
 
   afterEach(() => {
@@ -37,7 +41,7 @@ describe('gc', () => {
 
   describe('with no objects', () => {
     it('returns zero counts for empty repository', async () => {
-      const result = await repoGc(testRepo);
+      const result = await repoGc(storage);
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.strictEqual(result.deletedPartials, 0);
@@ -57,7 +61,7 @@ describe('gc', () => {
       assert.deepStrictEqual(new Uint8Array(loaded), data);
 
       // Run gc with minAge=0 to delete immediately
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 1);
       assert.strictEqual(result.retainedObjects, 0);
@@ -76,7 +80,7 @@ describe('gc', () => {
       await objectWrite(testRepo, new Uint8Array([2]));
       await objectWrite(testRepo, new Uint8Array([3]));
 
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 3);
       assert.strictEqual(result.retainedObjects, 0);
@@ -91,10 +95,10 @@ describe('gc', () => {
       const zipPath = join(tempDir, 'gc-test.zip');
       await e3.export(pkg, zipPath);
 
-      const importResult = await packageImport(testRepo, zipPath);
+      const importResult = await packageImport(storage, zipPath);
 
       // Run gc - should not delete anything
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.ok(result.retainedObjects >= 3, `Expected at least 3 retained objects, got ${result.retainedObjects}`);
@@ -110,14 +114,14 @@ describe('gc', () => {
       const zipPath = join(tempDir, 'remove-gc.zip');
       await e3.export(pkg, zipPath);
 
-      const importResult = await packageImport(testRepo, zipPath);
+      const importResult = await packageImport(storage, zipPath);
       const objectCount = importResult.objectCount;
 
       // Remove the package
-      await packageRemove(testRepo, 'remove-gc', '1.0.0');
+      await packageRemove(storage, 'remove-gc', '1.0.0');
 
       // Run gc - should delete all package objects
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, objectCount);
       assert.strictEqual(result.retainedObjects, 0);
@@ -134,14 +138,14 @@ describe('gc', () => {
       await e3.export(pkg1, zip1);
       await e3.export(pkg2, zip2);
 
-      await packageImport(testRepo, zip1);
-      await packageImport(testRepo, zip2);
+      await packageImport(storage, zip1);
+      await packageImport(storage, zip2);
 
       // Remove one package
-      await packageRemove(testRepo, 'shared-a', '1.0.0');
+      await packageRemove(storage, 'shared-a', '1.0.0');
 
       // Run gc
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       // Some objects may be deleted, but shared-b's objects are retained
       assert.ok(result.retainedObjects >= 2);
@@ -159,7 +163,7 @@ describe('gc', () => {
       assert.ok(existsSync(partialPath));
 
       // Run gc
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedPartials, 1);
       assert.ok(!existsSync(partialPath));
@@ -173,7 +177,7 @@ describe('gc', () => {
       writeFileSync(partialPath, 'in-progress data');
 
       // Run gc with default minAge (60s) - file is brand new
-      const result = await repoGc(testRepo, { minAge: 60000 });
+      const result = await repoGc(storage, { minAge: 60000 });
 
       assert.strictEqual(result.deletedPartials, 0);
       assert.strictEqual(result.skippedYoung, 1);
@@ -187,7 +191,7 @@ describe('gc', () => {
       const hash = await objectWrite(testRepo, new Uint8Array([42]));
 
       // Run gc with high minAge - object is too young
-      const result = await repoGc(testRepo, { minAge: 60000 });
+      const result = await repoGc(storage, { minAge: 60000 });
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.strictEqual(result.skippedYoung, 1);
@@ -201,7 +205,7 @@ describe('gc', () => {
       const hash = await objectWrite(testRepo, new Uint8Array([99]));
 
       // Run gc with minAge=0
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 1);
 
@@ -219,7 +223,7 @@ describe('gc', () => {
       const hash = await objectWrite(testRepo, data);
 
       // Run gc in dry run mode
-      const result = await repoGc(testRepo, { minAge: 0, dryRun: true });
+      const result = await repoGc(storage, { minAge: 0, dryRun: true });
 
       assert.strictEqual(result.deletedObjects, 1);
       assert.ok(result.bytesFreed > 0);
@@ -235,7 +239,7 @@ describe('gc', () => {
       const partialPath = join(partialDir, 'ghij.beast2.999999.dry123.partial');
       writeFileSync(partialPath, 'dry run test');
 
-      const result = await repoGc(testRepo, { minAge: 0, dryRun: true });
+      const result = await repoGc(storage, { minAge: 0, dryRun: true });
 
       assert.strictEqual(result.deletedPartials, 1);
       assert.ok(existsSync(partialPath)); // Still exists
@@ -265,7 +269,7 @@ describe('gc', () => {
       writeFileSync(join(refDir, '1.0.0'), hashA + '\n');
 
       // Run gc
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.strictEqual(result.retainedObjects, 3); // A, B, C all retained
@@ -294,7 +298,7 @@ describe('gc', () => {
       writeFileSync(join(refDir, '1.0.0'), hashA + '\n');
 
       // Run gc
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 1); // D deleted
       assert.strictEqual(result.retainedObjects, 2); // A, B retained
@@ -323,7 +327,7 @@ describe('gc', () => {
       writeFileSync(join(execDir, 'output'), hash + '\n');
 
       // Run gc
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.strictEqual(result.retainedObjects, 1);
@@ -358,7 +362,7 @@ describe('gc', () => {
       writeFileSync(join(wsDir, 'myworkspace.beast2'), encoder(state));
 
       // Run gc
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.strictEqual(result.retainedObjects, 2); // both rootHash and pkgHash
@@ -379,7 +383,7 @@ describe('gc', () => {
       writeFileSync(join(wsDir, 'undeployed.beast2'), '');
 
       // Run gc - orphaned object should be deleted
-      const result = await repoGc(testRepo, { minAge: 0 });
+      const result = await repoGc(storage, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 1);
       assert.strictEqual(result.retainedObjects, 0);

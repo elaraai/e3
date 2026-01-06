@@ -12,6 +12,7 @@ import {
   packageExport,
   packageList,
   packageRemove,
+  LocalBackend,
 } from '@elaraai/e3-core';
 import { resolveRepo, parsePackageSpec, formatError, exitError } from '../utils.js';
 
@@ -22,7 +23,8 @@ export const packageCommand = {
   async import(repoArg: string, zipPath: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      const result = await packageImport(repoPath, zipPath);
+      const storage = new LocalBackend(repoPath);
+      const result = await packageImport(storage, zipPath);
 
       console.log(`Imported ${result.name}@${result.version}`);
       console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
@@ -38,9 +40,10 @@ export const packageCommand = {
   async export(repoArg: string, pkgSpec: string, zipPath: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
+      const storage = new LocalBackend(repoPath);
       const { name, version } = parsePackageSpec(pkgSpec);
 
-      const result = await packageExport(repoPath, name, version, zipPath);
+      const result = await packageExport(storage, name, version, zipPath);
 
       console.log(`Exported ${name}@${version} to ${zipPath}`);
       console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
@@ -56,7 +59,8 @@ export const packageCommand = {
   async list(repoArg: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      const packages = await packageList(repoPath);
+      const storage = new LocalBackend(repoPath);
+      const packages = await packageList(storage);
 
       if (packages.length === 0) {
         console.log('No packages installed');
@@ -78,9 +82,10 @@ export const packageCommand = {
   async remove(repoArg: string, pkgSpec: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
+      const storage = new LocalBackend(repoPath);
       const { name, version } = parsePackageSpec(pkgSpec);
 
-      await packageRemove(repoPath, name, version);
+      await packageRemove(storage, name, version);
 
       console.log(`Removed ${name}@${version}`);
       console.log('Run `e3 gc` to reclaim disk space');

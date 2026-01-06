@@ -42,11 +42,12 @@ export async function statusCommand(repoArg: string, workspace?: string): Promis
  * Show repository-level status.
  */
 async function showRepoStatus(repoPath: string): Promise<void> {
+  const storage = new LocalBackend(repoPath);
   console.log(`Repository: ${repoPath}`);
   console.log('');
 
   // List packages
-  const packages = await packageList(repoPath);
+  const packages = await packageList(storage);
   console.log('Packages:');
   if (packages.length === 0) {
     console.log('  (none)');
@@ -56,9 +57,6 @@ async function showRepoStatus(repoPath: string): Promise<void> {
     }
   }
   console.log('');
-
-  // List workspaces with status
-  const storage = new LocalBackend(repoPath);
   const workspaces = await workspaceList(storage);
   console.log('Workspaces:');
   if (workspaces.length === 0) {
@@ -82,7 +80,8 @@ async function showRepoStatus(repoPath: string): Promise<void> {
  * Show detailed workspace status.
  */
 async function showWorkspaceStatus(repoPath: string, ws: string): Promise<void> {
-  const status = await workspaceStatus(repoPath, ws);
+  const storage = new LocalBackend(repoPath);
+  const status = await workspaceStatus(storage, ws);
 
   console.log(`Workspace: ${status.workspace}`);
   console.log('');

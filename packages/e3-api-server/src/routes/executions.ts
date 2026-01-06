@@ -16,7 +16,8 @@ import {
   executionListForTask,
   executionReadLog,
   inputsHash,
-  acquireWorkspaceLock,
+  LocalBackend,
+  WorkspaceLockError,
   type WorkspaceStatusResult as CoreWorkspaceStatusResult,
   type DatasetStatusInfo as CoreDatasetStatusInfo,
   type TaskStatusInfo as CoreTaskStatusInfo,
@@ -164,7 +165,7 @@ function convertDataflowResult(result: CoreDataflowResult): DataflowResult {
 function convertWorkspaceStatus(result: CoreWorkspaceStatusResult): WorkspaceStatusResult {
   return {
     workspace: result.workspace,
-    lock: result.lock
+    lock: result.lock && result.lock.pid !== undefined
       ? some({
           pid: BigInt(result.lock.pid),
           acquiredAt: result.lock.acquiredAt,
@@ -197,6 +198,7 @@ function convertWorkspaceStatus(result: CoreWorkspaceStatusResult): WorkspaceSta
 
 export function createExecutionRoutes(repoPath: string) {
   const app = new Hono();
+  const storage = new LocalBackend(repoPath);
 
   // POST /api/workspaces/:ws/start - Start dataflow execution (non-blocking)
   app.post('/start', async (c) => {
@@ -208,15 +210,18 @@ export function createExecutionRoutes(repoPath: string) {
     try {
       const body = await decodeBody(c, DataflowRequestType);
 
-      // Acquire lock first - this will throw WorkspaceLockError if already locked
-      const lock = await acquireWorkspaceLock(repoPath, workspace);
+      // Acquire lock first - returns null if already locked
+      const lock = await storage.locks.acquire(workspace, variant('dataflow', null));
+      if (!lock) {
+        throw new WorkspaceLockError(workspace);
+      }
 
       // Spawn dataflow execution in background
       const concurrency = body.concurrency.type === 'some' ? Number(body.concurrency.value) : 4;
       const filter = body.filter.type === 'some' ? body.filter.value : undefined;
 
       // Start execution without awaiting - it runs in background
-      dataflowStart(repoPath, workspace, {
+      dataflowStart(storage, workspace, {
         concurrency,
         force: body.force,
         filter,
@@ -247,7 +252,7 @@ export function createExecutionRoutes(repoPath: string) {
       const concurrency = body.concurrency.type === 'some' ? Number(body.concurrency.value) : 4;
       const filter = body.filter.type === 'some' ? body.filter.value : undefined;
 
-      const result = await dataflowExecute(repoPath, workspace, {
+      const result = await dataflowExecute(storage, workspace, {
         concurrency,
         force: body.force,
         filter,
@@ -267,7 +272,7 @@ export function createExecutionRoutes(repoPath: string) {
     }
 
     try {
-      const result = await workspaceStatus(repoPath, workspace);
+      const result = await workspaceStatus(storage, workspace);
       return sendSuccess(c, WorkspaceStatusResultType, convertWorkspaceStatus(result));
     } catch (err) {
       return sendError(c, WorkspaceStatusResultType, errorToVariant(err));
@@ -282,7 +287,7 @@ export function createExecutionRoutes(repoPath: string) {
     }
 
     try {
-      const graph = await dataflowGetGraph(repoPath, workspace);
+      const graph = await dataflowGetGraph(storage, workspace);
       return sendSuccess(c, DataflowGraphType, {
         tasks: graph.tasks.map((t) => ({
           name: t.name,
@@ -315,13 +320,13 @@ export function createExecutionRoutes(repoPath: string) {
       const limit = parseInt(c.req.query('limit') || '65536', 10);
 
       // Get task hash and current input hashes
-      const taskHash = await workspaceGetTaskHash(repoPath, workspace, taskName);
-      const task = await workspaceGetTask(repoPath, workspace, taskName);
+      const taskHash = await workspaceGetTaskHash(storage, workspace, taskName);
+      const task = await workspaceGetTask(storage, workspace, taskName);
 
       // Get current input hashes
       const currentInputHashes: string[] = [];
       for (const inputPath of task.inputs) {
-        const { refType, hash } = await workspaceGetDatasetHash(repoPath, workspace, inputPath);
+        const { refType, hash } = await workspaceGetDatasetHash(storage, workspace, inputPath);
         if (refType !== 'value' || hash === null) {
           return sendError(c, LogChunkType, errorToVariant(new Error('Task inputs not assigned')));
         }
@@ -331,7 +336,7 @@ export function createExecutionRoutes(repoPath: string) {
       const inHash = inputsHash(currentInputHashes);
 
       // Check if execution exists, fall back to most recent
-      const executions = await executionListForTask(repoPath, taskHash);
+      const executions = await executionListForTask(storage, taskHash);
       let execInHash = inHash;
       if (!executions.includes(inHash) && executions.length > 0) {
         execInHash = executions[0]!;
@@ -340,7 +345,7 @@ export function createExecutionRoutes(repoPath: string) {
       }
 
       // Read logs
-      const chunk = await executionReadLog(repoPath, taskHash, execInHash, stream, { offset, limit });
+      const chunk = await executionReadLog(storage, taskHash, execInHash, stream, { offset, limit });
 
       return sendSuccess(c, LogChunkType, {
         data: chunk.data,

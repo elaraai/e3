@@ -26,7 +26,8 @@ export const workspaceCommand = {
   async create(repoArg: string, name: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      await workspaceCreate(repoPath, name);
+      const storage = new LocalBackend(repoPath);
+      await workspaceCreate(storage, name);
 
       console.log(`Created workspace: ${name}`);
       console.log('Deploy a package with: e3 workspace deploy <repo> <ws> <pkg>[@<ver>]');
@@ -41,9 +42,10 @@ export const workspaceCommand = {
   async deploy(repoArg: string, ws: string, pkgSpec: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
+      const storage = new LocalBackend(repoPath);
       const { name, version } = parsePackageSpec(pkgSpec);
 
-      await workspaceDeploy(repoPath, ws, name, version);
+      await workspaceDeploy(storage, ws, name, version);
 
       console.log(`Deployed ${name}@${version} to workspace: ${ws}`);
     } catch (err) {
@@ -67,7 +69,8 @@ export const workspaceCommand = {
   ): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      const result = await workspaceExport(repoPath, ws, zipPath, options.name, options.version);
+      const storage = new LocalBackend(repoPath);
+      const result = await workspaceExport(storage, ws, zipPath, options.name, options.version);
 
       console.log(`Exported workspace ${ws} as ${result.name}@${result.version}`);
       console.log(`  Output: ${zipPath}`);
@@ -112,7 +115,8 @@ export const workspaceCommand = {
   async remove(repoArg: string, ws: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      await workspaceRemove(repoPath, ws);
+      const storage = new LocalBackend(repoPath);
+      await workspaceRemove(storage, ws);
 
       console.log(`Removed workspace: ${ws}`);
       console.log('Run `e3 gc` to reclaim disk space');

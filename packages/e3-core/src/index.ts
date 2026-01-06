@@ -46,7 +46,6 @@ export {
   objectWriteStream,
   objectRead,
   objectExists,
-  objectPath,
   objectAbbrev,
 } from './objects.js';
 
@@ -118,7 +117,6 @@ export {
 export {
   // Identity
   inputsHash,
-  executionPath,
   // Status
   executionGet,
   executionGetOutput,
@@ -153,7 +151,10 @@ export {
 // Workspace locking
 export {
   acquireWorkspaceLock,
+  getWorkspaceLockState,
   getWorkspaceLockHolder,
+  lockStateToHolderInfo,
+  isLockHolderAlive,
   workspaceLockPath,
   type WorkspaceLockHandle,
   type AcquireLockOptions,
@@ -181,6 +182,7 @@ export {
   WorkspaceExistsError,
   WorkspaceLockError,
   type LockHolder,
+  type LockHolderInfo,
   // Package
   PackageNotFoundError,
   PackageInvalidError,

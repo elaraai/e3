@@ -27,15 +27,18 @@ import {
 import { objectWrite } from './objects.js';
 import { workspaceDeploy } from './workspaces.js';
 import { workspaceGetDataset, workspaceSetDataset } from './trees.js';
-import { acquireWorkspaceLock } from './workspaceLock.js';
 import { WorkspaceLockError, DataflowAbortedError } from './errors.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
+import { LocalBackend } from './storage/local/index.js';
+import type { StorageBackend } from './storage/interfaces.js';
 
 describe('dataflow', () => {
   let testRepo: string;
+  let storage: StorageBackend;
 
   beforeEach(() => {
     testRepo = createTestRepo();
+    storage = new LocalBackend(testRepo);
   });
 
   afterEach(() => {
@@ -157,9 +160,9 @@ describe('dataflow', () => {
       } as unknown as Structure;
 
       await createPackageWithTasks(testRepo, [], structure);
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
 
-      const graph = await dataflowGetGraph(testRepo, 'test-ws');
+      const graph = await dataflowGetGraph(storage, 'test-ws');
       assert.strictEqual(graph.tasks.length, 0);
     });
 
@@ -186,9 +189,9 @@ describe('dataflow', () => {
         ],
         structure
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
 
-      const graph = await dataflowGetGraph(testRepo, 'test-ws');
+      const graph = await dataflowGetGraph(storage, 'test-ws');
       assert.strictEqual(graph.tasks.length, 2);
 
       const taskA = graph.tasks.find((t) => t.name === 'task-a');
@@ -230,12 +233,12 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
 
       // Set the input value in workspace
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'hello world', StringType);
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'hello world', StringType);
 
-      const result = await dataflowExecute(testRepo, 'test-ws');
+      const result = await dataflowExecute(storage, 'test-ws');
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.executed, 1);
@@ -244,7 +247,7 @@ describe('dataflow', () => {
       assert.strictEqual(result.tasks[0].state, 'success');
 
       // Verify output was written
-      const outputValue = await workspaceGetDataset(testRepo, 'test-ws', outputPath);
+      const outputValue = await workspaceGetDataset(storage, 'test-ws', outputPath);
       assert.strictEqual(outputValue, 'hello world');
     });
 
@@ -281,13 +284,13 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
 
       // Set the input value in workspace
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'chain test', StringType);
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'chain test', StringType);
 
       const completedOrder: string[] = [];
-      const result = await dataflowExecute(testRepo, 'test-ws', {
+      const result = await dataflowExecute(storage, 'test-ws', {
         onTaskComplete: (r) => completedOrder.push(r.name),
       });
 
@@ -297,7 +300,7 @@ describe('dataflow', () => {
       assert.strictEqual(completedOrder[1], 'task-b');
 
       // Verify final output
-      const outputValue = await workspaceGetDataset(testRepo, 'test-ws', outputPath);
+      const outputValue = await workspaceGetDataset(storage, 'test-ws', outputPath);
       assert.strictEqual(outputValue, 'chain test');
     });
 
@@ -334,12 +337,12 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
 
       // Set the input value
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'fail test', StringType);
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'fail test', StringType);
 
-      const result = await dataflowExecute(testRepo, 'test-ws');
+      const result = await dataflowExecute(storage, 'test-ws');
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(result.failed, 1);
@@ -381,16 +384,16 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'cache test', StringType);
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'cache test', StringType);
 
       // First execution
-      const result1 = await dataflowExecute(testRepo, 'test-ws');
+      const result1 = await dataflowExecute(storage, 'test-ws');
       assert.strictEqual(result1.executed, 1);
       assert.strictEqual(result1.cached, 0);
 
       // Second execution should be cached (output already assigned)
-      const result2 = await dataflowExecute(testRepo, 'test-ws');
+      const result2 = await dataflowExecute(storage, 'test-ws');
       assert.strictEqual(result2.executed, 0);
       assert.strictEqual(result2.cached, 1);
     });
@@ -432,14 +435,14 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'parallel test', StringType);
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'parallel test', StringType);
 
       // Track concurrent execution count
       let currentConcurrent = 0;
       let maxConcurrent = 0;
 
-      const result = await dataflowExecute(testRepo, 'test-ws', {
+      const result = await dataflowExecute(storage, 'test-ws', {
         concurrency: 2,
         onTaskStart: () => {
           currentConcurrent++;
@@ -484,18 +487,18 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'test', StringType);
 
       // Start first execution (don't await)
-      const firstExecution = dataflowExecute(testRepo, 'test-ws');
+      const firstExecution = dataflowExecute(storage, 'test-ws');
 
       // Give it a moment to acquire the lock
       await new Promise(resolve => setTimeout(resolve, 150));
 
       // Try to start second execution - should fail with WorkspaceLockError
       await assert.rejects(
-        dataflowExecute(testRepo, 'test-ws'),
+        dataflowExecute(storage, 'test-ws'),
         (err: Error) => {
           assert.ok(err instanceof WorkspaceLockError, `Expected WorkspaceLockError, got ${err.constructor.name}`);
           assert.strictEqual((err as WorkspaceLockError).workspace, 'test-ws');
@@ -535,15 +538,15 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'test', StringType);
 
       // First execution
-      const result1 = await dataflowExecute(testRepo, 'test-ws');
+      const result1 = await dataflowExecute(storage, 'test-ws');
       assert.strictEqual(result1.success, true);
 
       // Second execution (should succeed because first released the lock)
-      const result2 = await dataflowExecute(testRepo, 'test-ws');
+      const result2 = await dataflowExecute(storage, 'test-ws');
       assert.strictEqual(result2.success, true);
     });
 
@@ -574,28 +577,28 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'test', StringType);
 
       // Acquire lock externally
-      const lock = await acquireWorkspaceLock(testRepo, 'test-ws');
+      const lock = await storage.locks.acquire('test-ws', variant('dataflow', null));
+      assert.ok(lock);
 
       try {
         // Execute with external lock
-        const result = await dataflowExecute(testRepo, 'test-ws', { lock });
+        const result = await dataflowExecute(storage, 'test-ws', { lock });
         assert.strictEqual(result.success, true);
 
         // Lock should still be held (we can't acquire another)
-        await assert.rejects(
-          acquireWorkspaceLock(testRepo, 'test-ws'),
-          (err: Error) => err instanceof WorkspaceLockError
-        );
+        const attemptedLock = await storage.locks.acquire('test-ws', variant('dataflow', null));
+        assert.strictEqual(attemptedLock, null);
       } finally {
         await lock.release();
       }
 
       // Now lock should be released - can acquire again
-      const lock2 = await acquireWorkspaceLock(testRepo, 'test-ws');
+      const lock2 = await storage.locks.acquire('test-ws', variant('dataflow', null));
+      assert.ok(lock2);
       await lock2.release();
     });
 
@@ -628,13 +631,13 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'test', StringType);
 
       const controller = new AbortController();
 
       // Start execution
-      const executionPromise = dataflowExecute(testRepo, 'test-ws', {
+      const executionPromise = dataflowExecute(storage, 'test-ws', {
         signal: controller.signal,
       });
 
@@ -685,13 +688,13 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, 'test-ws', inputPath, 'test', StringType);
 
       const controller = new AbortController();
 
       // Start execution with concurrency 2 so both tasks start
-      const executionPromise = dataflowExecute(testRepo, 'test-ws', {
+      const executionPromise = dataflowExecute(storage, 'test-ws', {
         signal: controller.signal,
         concurrency: 2,
       });

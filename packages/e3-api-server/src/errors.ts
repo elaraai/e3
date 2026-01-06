@@ -37,7 +37,7 @@ export function errorToVariant(err: unknown): Error {
   if (err instanceof WorkspaceLockError) {
     return variant('workspace_locked', {
       workspace: err.workspace,
-      holder: err.holder
+      holder: err.holder && err.holder.pid !== undefined
         ? variant('known', {
             pid: BigInt(err.holder.pid),
             acquiredAt: err.holder.acquiredAt,

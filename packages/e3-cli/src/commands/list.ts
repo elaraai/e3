@@ -49,8 +49,9 @@ export async function listCommand(repoArg: string, pathSpec?: string): Promise<v
     }
 
     // Parse path and list tree contents
+    const storage = new LocalBackend(repoPath);
     const { ws, path } = parseDatasetPath(pathSpec);
-    const fields = await workspaceListTree(repoPath, ws, path);
+    const fields = await workspaceListTree(storage, ws, path);
 
     if (fields.length === 0) {
       console.log('(empty)');

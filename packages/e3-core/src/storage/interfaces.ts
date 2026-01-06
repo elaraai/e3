@@ -15,11 +15,11 @@
  * a StorageBackend, the same code can run locally or in the cloud.
  */
 
-import type { ExecutionStatus } from '@elaraai/e3-types';
-import type { LockHolder } from '../errors.js';
+import type { ExecutionStatus, LockState, LockOperation, LockHolder } from '@elaraai/e3-types';
+import type { LockHolderInfo } from '../errors.js';
 
-// Re-export LockHolder for consumers of this module
-export type { LockHolder };
+// Re-export lock types for consumers of this module
+export type { LockState, LockOperation, LockHolder, LockHolderInfo };
 
 // =============================================================================
 // Object Store
@@ -196,8 +196,6 @@ export interface RefStore {
 // Lock Service
 // =============================================================================
 
-// Note: LockHolder is imported from ../errors.js and re-exported above
-
 /**
  * Handle to a held lock.
  */
@@ -212,32 +210,42 @@ export interface LockHandle {
  * Distributed locking service for exclusive access.
  *
  * Used to prevent concurrent modifications to workspaces.
+ * The lock state is stored using the LockState type from e3-types,
+ * enabling cloud implementations to extend the holder variants.
  */
 export interface LockService {
   /**
    * Acquire an exclusive lock on a resource.
-   * @param resource - Resource identifier (e.g., workspace name)
-   * @param holder - Information about this lock holder
+   *
+   * The implementation gathers holder information (process ID for local,
+   * request ID for Lambda, etc.) and writes the lock state.
+   *
+   * @param resource - Resource identifier (e.g., "workspaces/production")
+   * @param operation - What operation is acquiring the lock
    * @param options - Lock options
    * @returns Lock handle, or null if lock couldn't be acquired
    */
   acquire(
     resource: string,
-    holder: Omit<LockHolder, 'acquiredAt'>,
+    operation: LockOperation,
     options?: { wait?: boolean; timeout?: number }
   ): Promise<LockHandle | null>;
 
   /**
-   * Get information about the current lock holder.
+   * Get the current lock state.
    * @param resource - Resource identifier
-   * @returns Lock holder info, or null if not locked
+   * @returns Lock state, or null if not locked
    */
-  getHolder(resource: string): Promise<LockHolder | null>;
+  getState(resource: string): Promise<LockState | null>;
 
   /**
    * Check if a lock holder is still alive.
-   * @param holder - Lock holder info
-   * @returns true if the holder process is still running
+   *
+   * For local process locks, checks if the PID is still running.
+   * For cloud locks, checks expiry or queries the cloud service.
+   *
+   * @param holder - Lock holder from a LockState
+   * @returns true if the holder is still active
    */
   isHolderAlive(holder: LockHolder): Promise<boolean>;
 }

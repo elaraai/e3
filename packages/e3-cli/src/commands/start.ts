@@ -12,7 +12,7 @@
  *   e3 start . my-workspace --force
  */
 
-import { dataflowExecute, DataflowAbortedError, type TaskExecutionResult, WorkspaceLockError } from '@elaraai/e3-core';
+import { dataflowExecute, DataflowAbortedError, LocalBackend, type TaskExecutionResult, WorkspaceLockError } from '@elaraai/e3-core';
 import { resolveRepo, formatError, exitError } from '../utils.js';
 
 /**
@@ -38,6 +38,7 @@ export async function startCommand(
 
   try {
     const repoPath = resolveRepo(repoArg);
+    const storage = new LocalBackend(repoPath);
     const concurrency = options.concurrency ? parseInt(options.concurrency, 10) : 4;
 
     console.log(`Starting tasks in workspace: ${ws}`);
@@ -50,7 +51,7 @@ export async function startCommand(
     }
     console.log('');
 
-    const result = await dataflowExecute(repoPath, ws, {
+    const result = await dataflowExecute(storage, ws, {
       concurrency,
       force: options.force,
       filter: options.filter,
