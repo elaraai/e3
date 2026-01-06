@@ -16,10 +16,10 @@ import { join } from 'node:path';
 import { East, IntegerType, variant } from '@elaraai/east';
 import e3 from '@elaraai/e3';
 import {
-  acquireWorkspaceLock,
   dataflowExecute,
   workspaceSetDataset,
   WorkspaceLockError,
+  LocalBackend,
 } from '@elaraai/e3-core';
 import {
   createTestDir,
@@ -290,13 +290,17 @@ export async function testRapidSetStartCycles(): Promise<ScenarioResult> {
 
       return (async (): Promise<BatchResult> => {
         try {
+          const storage = new LocalBackend(e3Dir);
           // Try to acquire lock (non-blocking)
-          const lock = await acquireWorkspaceLock(e3Dir, 'ws');
+          const lock = await storage.locks.acquire('ws', variant('dataflow', null));
+          if (!lock) {
+            return { value: Number(value), success: false, lockError: true };
+          }
           try {
             // Set the input value using the lock
-            await workspaceSetDataset(e3Dir, 'ws', [variant('field', 'inputs'), variant('field', 'x')], value, IntegerType, { lock });
+            await workspaceSetDataset(storage, 'ws', [variant('field', 'inputs'), variant('field', 'x')], value, IntegerType, { lock });
             // Execute dataflow using the lock
-            await dataflowExecute(e3Dir, 'ws', { lock });
+            await dataflowExecute(storage, 'ws', { lock });
             return { value: Number(value), success: true, lockError: false };
           } finally {
             await lock.release();

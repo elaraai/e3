@@ -15,7 +15,7 @@
 
 import { readFile } from 'fs/promises';
 import { extname } from 'path';
-import { WorkspaceLockError, workspaceSetDataset } from '@elaraai/e3-core';
+import { WorkspaceLockError, workspaceSetDataset, LocalBackend } from '@elaraai/e3-core';
 import {
   decodeBeast2,
   parseFor,
@@ -58,6 +58,7 @@ export async function setCommand(
 ): Promise<void> {
   try {
     const repoPath = resolveRepo(repoArg);
+    const storage = new LocalBackend(repoPath);
     const { ws, path } = parseDatasetPath(pathSpec);
 
     if (path.length === 0) {
@@ -138,7 +139,7 @@ export async function setCommand(
         exitError(`Unknown file extension: ${ext}. Supported: .beast2, .east, .json, .csv`);
     }
 
-    await workspaceSetDataset(repoPath, ws, path, value, type);
+    await workspaceSetDataset(storage, ws, path, value, type);
 
     console.log(`Set ${pathSpec} from ${filePath}`);
   } catch (err) {

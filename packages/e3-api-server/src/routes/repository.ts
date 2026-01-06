@@ -33,8 +33,8 @@ export function createRepositoryRoutes(repoPath: string) {
       }
 
       // Count packages and workspaces
-      const packages = await packageList(repoPath);
       const storage = new LocalBackend(repoPath);
+      const packages = await packageList(storage);
       const workspaces = await workspaceList(storage);
 
       const status = {
@@ -54,7 +54,8 @@ export function createRepositoryRoutes(repoPath: string) {
     try {
       const options = await decodeBody(c, GcRequestType);
       const minAge = options.minAge?.type === 'some' ? Number(options.minAge.value) : undefined;
-      const result = await repoGc(repoPath, { dryRun: options.dryRun, minAge });
+      const storage = new LocalBackend(repoPath);
+      const result = await repoGc(storage, { dryRun: options.dryRun, minAge });
       return sendSuccess(c, GcResultType, {
         deletedObjects: BigInt(result.deletedObjects),
         deletedPartials: BigInt(result.deletedPartials),

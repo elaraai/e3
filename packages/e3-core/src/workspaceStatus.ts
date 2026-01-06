@@ -24,7 +24,6 @@ import {
   type TreePath,
   type Structure,
 } from '@elaraai/e3-types';
-import { objectRead } from './objects.js';
 import {
   executionGet,
   inputsHash,
@@ -34,12 +33,10 @@ import { workspaceGetDatasetHash } from './trees.js';
 import {
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
-  isNotFoundError,
-  type LockHolder,
+  type LockHolderInfo,
 } from './errors.js';
-import { getWorkspaceLockHolder } from './workspaceLock.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { lockStateToHolderInfo } from './workspaceLock.js';
+import type { StorageBackend } from './storage/interfaces.js';
 
 // =============================================================================
 // Types
@@ -106,7 +103,7 @@ export interface WorkspaceStatusResult {
   /** Workspace name */
   workspace: string;
   /** Lock status - null if not locked */
-  lock: LockHolder | null;
+  lock: LockHolderInfo | null;
   /** Status of all datasets */
   datasets: DatasetStatusInfo[];
   /** Status of all tasks */
@@ -148,28 +145,22 @@ interface TaskNode {
 }
 
 // =============================================================================
-// Workspace State Reader (duplicated to avoid circular deps)
+// Workspace State Reader
 // =============================================================================
 
 /**
- * Read workspace state from file.
+ * Read workspace state.
  */
-async function readWorkspaceState(repoPath: string, ws: string) {
-  const stateFile = path.join(repoPath, 'workspaces', `${ws}.beast2`);
-  let data: Buffer;
-  try {
-    data = await fs.readFile(stateFile);
-  } catch (err) {
-    if (isNotFoundError(err)) {
-      throw new WorkspaceNotFoundError(ws);
-    }
-    throw err;
+async function readWorkspaceState(storage: StorageBackend, ws: string) {
+  const data = await storage.refs.workspaceRead(ws);
+  if (data === null) {
+    throw new WorkspaceNotFoundError(ws);
   }
   if (data.length === 0) {
     throw new WorkspaceNotDeployedError(ws);
   }
   const decoder = decodeBeast2For(WorkspaceStateType);
-  return decoder(data);
+  return decoder(Buffer.from(data));
 }
 
 // =============================================================================
@@ -187,24 +178,25 @@ async function readWorkspaceState(repoPath: string, ws: string) {
  * This is a read-only operation that does not modify workspace state
  * and does not require acquiring a lock.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
  * @param ws - Workspace name
  * @returns Complete status report
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace has no package deployed
  */
 export async function workspaceStatus(
-  repoPath: string,
+  storage: StorageBackend,
   ws: string
 ): Promise<WorkspaceStatusResult> {
   // Check lock status first
-  const lock = await getWorkspaceLockHolder(repoPath, ws);
+  const lockState = await storage.locks.getState(ws);
+  const lock = lockState ? lockStateToHolderInfo(lockState) : null;
 
   // Read workspace state
-  const state = await readWorkspaceState(repoPath, ws);
+  const state = await readWorkspaceState(storage, ws);
 
   // Read package object to get tasks and structure
-  const pkgData = await objectRead(repoPath, state.packageHash);
+  const pkgData = await storage.objects.read(state.packageHash);
   const pkgDecoder = decodeBeast2For(PackageObjectType);
   const pkgObject = pkgDecoder(Buffer.from(pkgData));
 
@@ -214,7 +206,7 @@ export async function workspaceStatus(
   const taskDecoder = decodeBeast2For(TaskObjectType);
 
   for (const [taskName, taskHash] of pkgObject.tasks) {
-    const taskData = await objectRead(repoPath, taskHash);
+    const taskData = await storage.objects.read(taskHash);
     const task = taskDecoder(Buffer.from(taskData));
 
     const outputPathStr = pathToString(task.output);
@@ -258,7 +250,7 @@ export async function workspaceStatus(
   // First pass: determine which tasks have valid cached executions
   for (const [taskName, node] of taskNodes) {
     const status = await computeTaskStatus(
-      repoPath,
+      storage,
       ws,
       node,
       outputToTask,
@@ -291,7 +283,7 @@ export async function workspaceStatus(
   const datasetStatusInfos: DatasetStatusInfo[] = [];
   for (const datasetPath of datasetPaths) {
     const pathStr = pathToString(datasetPath);
-    const { refType, hash } = await workspaceGetDatasetHash(repoPath, ws, datasetPath);
+    const { refType, hash } = await workspaceGetDatasetHash(storage, ws, datasetPath);
 
     const producerTask = outputToTask.get(pathStr) ?? null;
     const isTaskOutput = producerTask !== null;
@@ -382,7 +374,7 @@ function collectDatasetPaths(
  * Compute the status of a task.
  */
 async function computeTaskStatus(
-  repoPath: string,
+  storage: StorageBackend,
   ws: string,
   node: TaskNode,
   outputToTask: Map<string, string>,
@@ -390,7 +382,7 @@ async function computeTaskStatus(
   _taskIsStale: Map<string, boolean>
 ): Promise<TaskStatus> {
   // First, check if execution is in progress
-  const inProgressStatus = await checkInProgress(repoPath, node.hash);
+  const inProgressStatus = await checkInProgress(storage, node.hash);
   if (inProgressStatus) {
     return inProgressStatus;
   }
@@ -402,7 +394,7 @@ async function computeTaskStatus(
 
   for (const inputPath of node.inputPaths) {
     const inputPathStr = pathToString(inputPath);
-    const { refType, hash } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
+    const { refType, hash } = await workspaceGetDatasetHash(storage, ws, inputPath);
 
     if (refType === 'unassigned' || hash === null) {
       hasUnsetInputs = true;
@@ -441,7 +433,7 @@ async function computeTaskStatus(
 
   // Check the execution status for these inputs
   const inHash = inputsHash(currentInputHashes);
-  const execStatus = await executionGet(repoPath, node.hash, inHash);
+  const execStatus = await executionGet(storage, node.hash, inHash);
 
   if (execStatus === null) {
     // No execution attempted - task is ready to run
@@ -483,7 +475,7 @@ async function computeTaskStatus(
       // Execution succeeded - check if workspace output matches
       const cachedOutputHash = execStatus.value.outputHash;
       const { refType, hash: wsOutputHash } = await workspaceGetDatasetHash(
-        repoPath,
+        storage,
         ws,
         node.outputPath
       );
@@ -511,38 +503,31 @@ async function computeTaskStatus(
  * Only returns in-progress if the process is actually running.
  */
 async function checkInProgress(
-  repoPath: string,
+  storage: StorageBackend,
   taskHash: string
 ): Promise<TaskStatus | null> {
   // List all executions for this task
-  const execDir = path.join(repoPath, 'executions', taskHash);
+  const inputsHashes = await storage.refs.executionListForTask(taskHash);
 
-  try {
-    const entries = await fs.readdir(execDir);
-    for (const inHash of entries) {
-      if (!/^[a-f0-9]{64}$/.test(inHash)) continue;
+  for (const inHash of inputsHashes) {
+    const status = await storage.refs.executionGet(taskHash, inHash);
+    if (status?.type === 'running') {
+      // Found a running execution - verify process is actually alive
+      const pid = Number(status.value.pid);
+      const pidStartTime = Number(status.value.pidStartTime);
+      const bootId = status.value.bootId;
 
-      const status = await executionGet(repoPath, taskHash, inHash);
-      if (status?.type === 'running') {
-        // Found a running execution - verify process is actually alive
-        const pid = Number(status.value.pid);
-        const pidStartTime = Number(status.value.pidStartTime);
-        const bootId = status.value.bootId;
-
-        const alive = await isProcessAlive(pid, pidStartTime, bootId);
-        if (alive) {
-          return {
-            type: 'in-progress',
-            pid,
-            startedAt: status.value.startedAt.toISOString(),
-          };
-        }
-        // Process is dead - this is a stale running status, skip it
-        // (it will be reported as stale-running if it's the current inputs)
+      const alive = await isProcessAlive(pid, pidStartTime, bootId);
+      if (alive) {
+        return {
+          type: 'in-progress',
+          pid,
+          startedAt: status.value.startedAt.toISOString(),
+        };
       }
+      // Process is dead - this is a stale running status, skip it
+      // (it will be reported as stale-running if it's the current inputs)
     }
-  } catch {
-    // No executions directory
   }
 
   return null;

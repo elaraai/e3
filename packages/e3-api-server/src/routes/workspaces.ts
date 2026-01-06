@@ -60,8 +60,9 @@ export function createWorkspaceRoutes(repoPath: string) {
   // POST /api/workspaces - Create a new workspace
   app.post('/', async (c) => {
     try {
+      const storage = new LocalBackend(repoPath);
       const body = await decodeBody(c, CreateWorkspaceType);
-      await workspaceCreate(repoPath, body.name);
+      await workspaceCreate(storage, body.name);
       return sendSuccess(c, WorkspaceInfoType, {
         name: body.name,
         deployed: false,
@@ -92,8 +93,9 @@ export function createWorkspaceRoutes(repoPath: string) {
   // DELETE /api/workspaces/:name - Remove a workspace
   app.delete('/:name', async (c) => {
     try {
+      const storage = new LocalBackend(repoPath);
       const name = c.req.param('name');
-      await workspaceRemove(repoPath, name);
+      await workspaceRemove(storage, name);
       return sendSuccess(c, NullType, null);
     } catch (err) {
       return sendError(c, NullType, errorToVariant(err));
@@ -109,13 +111,14 @@ export function createWorkspaceRoutes(repoPath: string) {
       }
       const body = await decodeBody(c, DeployRequestType);
 
+      const storage = new LocalBackend(repoPath);
       const { name: pkgName, version: maybeVersion } = parsePackageRef(body.packageRef);
-      const pkgVersion = maybeVersion ?? await packageGetLatestVersion(repoPath, pkgName);
+      const pkgVersion = maybeVersion ?? await packageGetLatestVersion(storage, pkgName);
       if (!pkgVersion) {
         return sendError(c, NullType, errorToVariant(new Error(`Package not found: ${pkgName}`)));
       }
 
-      await workspaceDeploy(repoPath, name, pkgName, pkgVersion);
+      await workspaceDeploy(storage, name, pkgName, pkgVersion);
       return sendSuccess(c, NullType, null);
     } catch (err) {
       return sendError(c, NullType, errorToVariant(err));
@@ -131,10 +134,11 @@ export function createWorkspaceRoutes(repoPath: string) {
       }
 
       // Export to temp file
+      const storage = new LocalBackend(repoPath);
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'e3-ws-export-'));
       const tempPath = path.join(tempDir, 'workspace.zip');
       try {
-        await workspaceExport(repoPath, name, tempPath);
+        await workspaceExport(storage, name, tempPath);
         const archive = await fs.readFile(tempPath);
         return sendSuccess(c, BlobType, new Uint8Array(archive));
       } finally {

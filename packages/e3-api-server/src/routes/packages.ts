@@ -14,6 +14,7 @@ import {
   packageExport,
   packageRemove,
   packageRead,
+  LocalBackend,
 } from '@elaraai/e3-core';
 import { PackageObjectType } from '@elaraai/e3-types';
 import { sendSuccess, sendError } from '../beast2.js';
@@ -26,7 +27,8 @@ export function createPackageRoutes(repoPath: string) {
   // GET /api/packages - List all packages
   app.get('/', async (c) => {
     try {
-      const packages = await packageList(repoPath);
+      const storage = new LocalBackend(repoPath);
+      const packages = await packageList(storage);
       const result = packages.map((pkg) => ({
         name: pkg.name,
         version: pkg.version,
@@ -46,7 +48,8 @@ export function createPackageRoutes(repoPath: string) {
         return sendError(c, PackageObjectType, errorToVariant(new Error('Missing name or version parameter')));
       }
 
-      const pkg = await packageRead(repoPath, name, version);
+      const storage = new LocalBackend(repoPath);
+      const pkg = await packageRead(storage, name, version);
       return sendSuccess(c, PackageObjectType, pkg);
     } catch (err) {
       return sendError(c, PackageObjectType, errorToVariant(err));
@@ -75,7 +78,8 @@ export function createPackageRoutes(repoPath: string) {
       const tempPath = path.join(tempDir, 'package.zip');
       try {
         await fs.writeFile(tempPath, archive);
-        const result = await packageImport(repoPath, tempPath);
+        const storage = new LocalBackend(repoPath);
+        const result = await packageImport(storage, tempPath);
         return sendSuccess(c, PackageImportResultType, {
           name: result.name,
           version: result.version,
@@ -103,7 +107,8 @@ export function createPackageRoutes(repoPath: string) {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'e3-export-'));
       const tempPath = path.join(tempDir, 'package.zip');
       try {
-        await packageExport(repoPath, name, version, tempPath);
+        const storage = new LocalBackend(repoPath);
+        await packageExport(storage, name, version, tempPath);
         const archive = await fs.readFile(tempPath);
         return sendSuccess(c, BlobType, new Uint8Array(archive));
       } finally {
@@ -123,7 +128,8 @@ export function createPackageRoutes(repoPath: string) {
         return sendError(c, NullType, errorToVariant(new Error('Missing name or version parameter')));
       }
 
-      await packageRemove(repoPath, name, version);
+      const storage = new LocalBackend(repoPath);
+      await packageRemove(storage, name, version);
       return sendSuccess(c, NullType, null);
     } catch (err) {
       return sendError(c, NullType, errorToVariant(err));

@@ -3,25 +3,27 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import type { LockHolder, LockHandle, LockService } from '../interfaces.js';
+import type { LockState, LockOperation, LockHolder } from '@elaraai/e3-types';
+import type { LockHandle, LockService } from '../interfaces.js';
 import {
   acquireWorkspaceLock,
-  getWorkspaceLockHolder,
+  getWorkspaceLockState,
+  isLockHolderAlive,
   type AcquireLockOptions,
 } from '../../workspaceLock.js';
-import { isProcessAlive } from '../../executions.js';
 
 /**
  * Local filesystem implementation of LockService.
  *
- * Wraps the existing workspaceLock.ts functions.
+ * Uses flock() for kernel-managed locking with lock state
+ * stored in beast2 format using LockStateType.
  */
 export class LocalLockService implements LockService {
   constructor(private readonly repoPath: string) {}
 
   async acquire(
     resource: string,
-    holder: Omit<LockHolder, 'acquiredAt'>,
+    operation: LockOperation,
     options?: { wait?: boolean; timeout?: number }
   ): Promise<LockHandle | null> {
     const acquireOptions: AcquireLockOptions = {
@@ -30,7 +32,7 @@ export class LocalLockService implements LockService {
     };
 
     try {
-      const handle = await acquireWorkspaceLock(this.repoPath, resource, acquireOptions);
+      const handle = await acquireWorkspaceLock(this.repoPath, resource, operation, acquireOptions);
       return {
         resource,
         release: () => handle.release(),
@@ -41,15 +43,11 @@ export class LocalLockService implements LockService {
     }
   }
 
-  async getHolder(resource: string): Promise<LockHolder | null> {
-    return getWorkspaceLockHolder(this.repoPath, resource);
+  async getState(resource: string): Promise<LockState | null> {
+    return getWorkspaceLockState(this.repoPath, resource);
   }
 
   async isHolderAlive(holder: LockHolder): Promise<boolean> {
-    // If we don't have the required fields, assume alive (safer default)
-    if (holder.bootId === undefined || holder.startTime === undefined) {
-      return true;
-    }
-    return isProcessAlive(holder.pid, holder.startTime, holder.bootId);
+    return isLockHolderAlive(holder);
   }
 }

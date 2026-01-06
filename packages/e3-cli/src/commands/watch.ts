@@ -191,8 +191,9 @@ export async function watchCommand(
     }
 
     // Import into repository
+    const deployStorage = new LocalBackend(repoPath);
     try {
-      await packageImport(repoPath, tempZip);
+      await packageImport(deployStorage, tempZip);
     } catch (err) {
       console.log(`[${timestamp()}] Error importing package:`);
       console.log(`  ${err instanceof Error ? err.message : String(err)}`);
@@ -208,12 +209,11 @@ export async function watchCommand(
 
     // Ensure workspace exists
     try {
-      const storage = new LocalBackend(repoPath);
-      await workspaceGetState(storage, workspace);
+      await workspaceGetState(deployStorage, workspace);
     } catch {
       // Workspace doesn't exist, create it
       try {
-        await workspaceCreate(repoPath, workspace);
+        await workspaceCreate(deployStorage, workspace);
         console.log(`[${timestamp()}] Created workspace: ${workspace}`);
       } catch (err) {
         console.log(`[${timestamp()}] Error creating workspace:`);
@@ -224,7 +224,7 @@ export async function watchCommand(
 
     // Deploy to workspace
     try {
-      await workspaceDeploy(repoPath, workspace, pkg.name, pkg.version);
+      await workspaceDeploy(deployStorage, workspace, pkg.name, pkg.version);
       console.log(`[${timestamp()}] Deployed to workspace: ${workspace}`);
     } catch (err) {
       console.log(`[${timestamp()}] Error deploying:`);
@@ -235,6 +235,8 @@ export async function watchCommand(
     return { name: pkg.name, version: pkg.version, watchedFiles };
   }
 
+  const storage = new LocalBackend(repoPath);
+
   /**
    * Execute the dataflow in the workspace
    */
@@ -242,7 +244,7 @@ export async function watchCommand(
     console.log(`[${timestamp()}] Starting dataflow...`);
 
     try {
-      const result = await dataflowExecute(repoPath, workspace, {
+      const result = await dataflowExecute(storage, workspace, {
         concurrency,
         signal,
         onTaskStart: (name) => {

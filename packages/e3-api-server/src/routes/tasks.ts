@@ -9,6 +9,7 @@ import {
   workspaceListTasks,
   workspaceGetTask,
   workspaceGetTaskHash,
+  LocalBackend,
 } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
@@ -25,12 +26,13 @@ export function createTaskRoutes(repoPath: string) {
         return sendError(c, ArrayType(TaskInfoType), errorToVariant(new Error('Missing workspace parameter')));
       }
       // workspaceListTasks returns string[] of task names
-      const taskNames = await workspaceListTasks(repoPath, workspace);
+      const storage = new LocalBackend(repoPath);
+      const taskNames = await workspaceListTasks(storage, workspace);
 
       // Get hash for each task
       const result = await Promise.all(
         taskNames.map(async (name) => {
-          const hash = await workspaceGetTaskHash(repoPath, workspace, name);
+          const hash = await workspaceGetTaskHash(storage, workspace, name);
           return { name, hash };
         })
       );
@@ -51,8 +53,9 @@ export function createTaskRoutes(repoPath: string) {
       }
 
       // Get hash and task object
-      const hash = await workspaceGetTaskHash(repoPath, workspace, name);
-      const task = await workspaceGetTask(repoPath, workspace, name);
+      const storage = new LocalBackend(repoPath);
+      const hash = await workspaceGetTaskHash(storage, workspace, name);
+      const task = await workspaceGetTask(storage, workspace, name);
 
       return sendSuccess(c, TaskDetailsType, {
         name,

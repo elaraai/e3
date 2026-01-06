@@ -57,13 +57,18 @@ export class WorkspaceExistsError extends E3Error {
 }
 
 /**
- * Information about the process holding a workspace lock.
+ * Information about a lock holder for error display.
+ *
+ * This is a simplified flat structure used in error messages.
+ * The actual lock state uses the structured LockState type from e3-types.
  */
-export interface LockHolder {
-  /** Process ID of the lock holder */
-  pid: number;
+export interface LockHolderInfo {
+  /** Process ID of the lock holder (for local process locks) */
+  pid?: number;
   /** When the lock was acquired (ISO 8601) */
   acquiredAt: string;
+  /** What operation holds the lock */
+  operation?: string;
   /** System boot ID (to detect stale locks after reboot) */
   bootId?: string;
   /** Process start time in jiffies (to detect PID reuse) */
@@ -71,6 +76,11 @@ export interface LockHolder {
   /** Command that acquired the lock (for debugging) */
   command?: string;
 }
+
+/**
+ * @deprecated Use LockHolderInfo instead. This alias is kept for backwards compatibility.
+ */
+export type LockHolder = LockHolderInfo;
 
 /**
  * Thrown when a workspace is locked by another process.
@@ -82,11 +92,16 @@ export interface LockHolder {
 export class WorkspaceLockError extends E3Error {
   constructor(
     public readonly workspace: string,
-    public readonly holder?: LockHolder
+    public readonly holder?: LockHolderInfo
   ) {
-    const msg = holder
-      ? `Workspace '${workspace}' is locked by process ${holder.pid} (since ${holder.acquiredAt})`
-      : `Workspace '${workspace}' is locked by another process`;
+    let msg: string;
+    if (!holder) {
+      msg = `Workspace '${workspace}' is locked by another process`;
+    } else if (holder.pid !== undefined) {
+      msg = `Workspace '${workspace}' is locked by process ${holder.pid} (since ${holder.acquiredAt})`;
+    } else {
+      msg = `Workspace '${workspace}' is locked (since ${holder.acquiredAt})`;
+    }
     super(msg);
   }
 }

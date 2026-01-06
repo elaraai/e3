@@ -18,6 +18,7 @@ import {
   objectWrite,
   objectRead,
   taskExecute,
+  LocalBackend,
 } from '@elaraai/e3-core';
 import { decodeBeast2 } from '@elaraai/east';
 import { resolveRepo, parsePackageSpec, formatError, exitError } from '../utils.js';
@@ -57,6 +58,7 @@ export async function runCommand(
 ): Promise<void> {
   try {
     const repoPath = resolveRepo(repoArg);
+    const storage = new LocalBackend(repoPath);
 
     // Parse task specifier
     const { name, version, task } = parseTaskSpec(taskSpec);
@@ -67,7 +69,7 @@ export async function runCommand(
     }
 
     // Get package and find task hash
-    const pkg = await packageRead(repoPath, name, version);
+    const pkg = await packageRead(storage, name, version);
     const taskHash = pkg.tasks.get(task);
 
     if (!taskHash) {
@@ -98,7 +100,7 @@ export async function runCommand(
 
     // Execute the task
     const startTime = Date.now();
-    const result = await taskExecute(repoPath, taskHash, inputHashes, {
+    const result = await taskExecute(storage, taskHash, inputHashes, {
       force: options.force,
     });
 

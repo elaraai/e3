@@ -13,7 +13,7 @@
  *   e3 tree . dev --types         # Show dataset types
  */
 
-import { workspaceGetTree, type TreeNode } from '@elaraai/e3-core';
+import { workspaceGetTree, type TreeNode, LocalBackend } from '@elaraai/e3-core';
 import { printFor, EastTypeType } from '@elaraai/east';
 import { resolveRepo, parseDatasetPath, formatError, exitError } from '../utils.js';
 
@@ -69,12 +69,13 @@ export async function treeCommand(
 ): Promise<void> {
   try {
     const repoPath = resolveRepo(repoArg);
+    const storage = new LocalBackend(repoPath);
     const { ws, path } = parseDatasetPath(pathSpec);
 
     const maxDepth = options.depth !== undefined ? parseInt(options.depth, 10) : undefined;
     const includeTypes = options.types ?? false;
 
-    const nodes = await workspaceGetTree(repoPath, ws, path, {
+    const nodes = await workspaceGetTree(storage, ws, path, {
       maxDepth,
       includeTypes,
     });

@@ -13,14 +13,16 @@
  * Lock mechanism:
  * - Uses flock(LOCK_EX | LOCK_NB) via the `flock` command for kernel-managed locking
  * - Lock is automatically released when the process dies (kernel handles this)
- * - Metadata (PID, bootId, startTime) written to lock file for diagnostics
+ * - Lock state stored in beast2 format using LockStateType from e3-types
  * - Stale lock detection via bootId comparison (handles system restarts)
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
-import { WorkspaceLockError, type LockHolder } from './errors.js';
+import { encodeBeast2For, decodeBeast2For, variant, none } from '@elaraai/east';
+import { LockStateType, type LockState, type LockOperation, type LockHolder } from '@elaraai/e3-types';
+import { WorkspaceLockError, type LockHolderInfo } from './errors.js';
 import { getBootId, getPidStartTime, isProcessAlive } from './executions.js';
 
 // =============================================================================
@@ -32,6 +34,8 @@ import { getBootId, getPidStartTime, isProcessAlive } from './executions.js';
  * Call release() when done to free the lock.
  */
 export interface WorkspaceLockHandle {
+  /** The resource (workspace name) this lock is for - compatible with LockHandle */
+  readonly resource: string;
   /** The workspace name this lock is for */
   readonly workspace: string;
   /** Path to the lock file */
@@ -56,16 +60,8 @@ export interface AcquireLockOptions {
 }
 
 // =============================================================================
-// Lock File Metadata
+// Lock File Helpers
 // =============================================================================
-
-interface LockMetadata {
-  pid: number;
-  bootId: string;
-  startTime: number;
-  acquiredAt: string;
-  command: string;
-}
 
 /**
  * Get the lock file path for a workspace.
@@ -75,29 +71,62 @@ export function workspaceLockPath(repoPath: string, workspace: string): string {
 }
 
 /**
- * Read lock metadata from a lock file.
+ * Read lock state from a lock file.
  * Returns null if file doesn't exist or is invalid.
  */
-async function readLockMetadata(lockPath: string): Promise<LockMetadata | null> {
+async function readLockState(lockPath: string): Promise<LockState | null> {
   try {
-    const data = await fs.readFile(lockPath, 'utf-8');
-    return JSON.parse(data) as LockMetadata;
+    const data = await fs.readFile(lockPath);
+    if (data.length === 0) return null;
+    const decoder = decodeBeast2For(LockStateType);
+    return decoder(data);
   } catch {
     return null;
   }
 }
 
 /**
- * Convert internal metadata to public LockHolder interface.
+ * Write lock state to a lock file in beast2 format.
  */
-function metadataToHolder(metadata: LockMetadata): LockHolder {
-  return {
-    pid: metadata.pid,
-    acquiredAt: metadata.acquiredAt,
-    bootId: metadata.bootId,
-    startTime: metadata.startTime,
-    command: metadata.command,
+async function writeLockState(lockPath: string, state: LockState): Promise<void> {
+  const encoder = encodeBeast2For(LockStateType);
+  const data = encoder(state);
+  await fs.writeFile(lockPath, data);
+}
+
+/**
+ * Convert LockState to LockHolderInfo for error display.
+ */
+export function lockStateToHolderInfo(state: LockState): LockHolderInfo {
+  const info: LockHolderInfo = {
+    acquiredAt: state.acquiredAt.toISOString(),
+    operation: state.operation.type,
   };
+
+  // Extract process-specific fields if holder is a process
+  if (state.holder.type === 'process') {
+    info.pid = Number(state.holder.value.pid);
+    info.bootId = state.holder.value.bootId;
+    info.startTime = Number(state.holder.value.startTime);
+    info.command = state.holder.value.command;
+  }
+
+  return info;
+}
+
+/**
+ * Check if a lock holder is still alive.
+ */
+export async function isLockHolderAlive(holder: LockHolder): Promise<boolean> {
+  if (holder.type === 'process') {
+    return isProcessAlive(
+      Number(holder.value.pid),
+      Number(holder.value.startTime),
+      holder.value.bootId
+    );
+  }
+  // Unknown holder type - assume alive (safer default)
+  return true;
 }
 
 // =============================================================================
@@ -112,13 +141,14 @@ function metadataToHolder(metadata: LockMetadata): LockHolder {
  *
  * @param repoPath - Path to .e3 repository
  * @param workspace - Workspace name to lock
+ * @param operation - What operation is acquiring the lock
  * @param options - Lock acquisition options
  * @returns Lock handle - call release() when done
  * @throws {WorkspaceLockError} If workspace is locked by another process
  *
  * @example
  * ```typescript
- * const lock = await acquireWorkspaceLock(repoPath, 'production');
+ * const lock = await acquireWorkspaceLock(repoPath, 'production', { type: 'dataflow', value: null });
  * try {
  *   await dataflowExecute(repoPath, 'production', { lock });
  * } finally {
@@ -129,6 +159,7 @@ function metadataToHolder(metadata: LockMetadata): LockHolder {
 export async function acquireWorkspaceLock(
   repoPath: string,
   workspace: string,
+  operation: LockOperation,
   options: AcquireLockOptions = {}
 ): Promise<WorkspaceLockHandle> {
   const lockPath = workspaceLockPath(repoPath, workspace);
@@ -141,18 +172,28 @@ export async function acquireWorkspaceLock(
   const bootId = await getBootId();
   const startTime = await getPidStartTime(pid);
   const command = process.argv.join(' ');
-  const acquiredAt = new Date().toISOString();
+  const acquiredAt = new Date();
 
-  const metadata: LockMetadata = { pid, bootId, startTime, acquiredAt, command };
+  const lockState: LockState = {
+    operation,
+    holder: variant('process', {
+      pid: BigInt(pid),
+      bootId,
+      startTime: BigInt(startTime),
+      command,
+    }),
+    acquiredAt,
+    expiresAt: none,
+  };
 
   // Try to acquire flock via subprocess
   // The subprocess holds the lock and we communicate with it via stdin/signals
-  const flockProcess = await tryAcquireFlock(lockPath, metadata, options);
+  const flockProcess = await tryAcquireFlock(lockPath, lockState, options);
 
   if (!flockProcess) {
-    // Failed to acquire - read metadata to report who has it
-    const existingMetadata = await readLockMetadata(lockPath);
-    const holder = existingMetadata ? metadataToHolder(existingMetadata) : undefined;
+    // Failed to acquire - read lock state to report who has it
+    const existingState = await readLockState(lockPath);
+    const holder = existingState ? lockStateToHolderInfo(existingState) : undefined;
     throw new WorkspaceLockError(workspace, holder);
   }
 
@@ -160,6 +201,7 @@ export async function acquireWorkspaceLock(
   let released = false;
 
   const handle: WorkspaceLockHandle = {
+    resource: workspace,
     workspace,
     lockPath,
     async release() {
@@ -194,7 +236,7 @@ export async function acquireWorkspaceLock(
  */
 async function tryAcquireFlock(
   lockPath: string,
-  metadata: LockMetadata,
+  lockState: LockState,
   options: AcquireLockOptions
 ): Promise<ChildProcess | null> {
   // First, check if there's a stale lock we can clean up
@@ -234,9 +276,9 @@ async function tryAcquireFlock(
       if (!resolved && !child.killed && child.exitCode === null) {
         resolved = true;
 
-        // Write metadata to lock file now that we have the lock
+        // Write lock state to lock file now that we have the lock
         // Use void to explicitly ignore the promise (metadata is informational only)
-        void fs.writeFile(lockPath, JSON.stringify(metadata, null, 2)).catch(() => {});
+        void writeLockState(lockPath, lockState).catch(() => {});
 
         resolve(child);
       }
@@ -245,15 +287,15 @@ async function tryAcquireFlock(
 }
 
 /**
- * Check if a lock file exists with stale metadata and clean it up.
+ * Check if a lock file exists with stale lock state and clean it up.
  * A lock is stale if the holder process no longer exists.
  */
 async function checkAndCleanStaleLock(lockPath: string): Promise<void> {
-  const metadata = await readLockMetadata(lockPath);
-  if (!metadata) return;
+  const state = await readLockState(lockPath);
+  if (!state) return;
 
-  // Check if the process that created this lock is still alive
-  const alive = await isProcessAlive(metadata.pid, metadata.startTime, metadata.bootId);
+  // Check if the holder is still alive
+  const alive = await isLockHolderAlive(state.holder);
 
   if (!alive) {
     // Stale lock - try to remove it
@@ -266,23 +308,23 @@ async function checkAndCleanStaleLock(lockPath: string): Promise<void> {
 }
 
 /**
- * Check if a workspace is currently locked.
+ * Get the lock state for a workspace.
  *
  * @param repoPath - Path to .e3 repository
  * @param workspace - Workspace name to check
- * @returns Lock holder info if locked, null if not locked
+ * @returns Lock state if locked, null if not locked
  */
-export async function getWorkspaceLockHolder(
+export async function getWorkspaceLockState(
   repoPath: string,
   workspace: string
-): Promise<LockHolder | null> {
+): Promise<LockState | null> {
   const lockPath = workspaceLockPath(repoPath, workspace);
-  const metadata = await readLockMetadata(lockPath);
+  const state = await readLockState(lockPath);
 
-  if (!metadata) return null;
+  if (!state) return null;
 
   // Check if the holder is still alive
-  const alive = await isProcessAlive(metadata.pid, metadata.startTime, metadata.bootId);
+  const alive = await isLockHolderAlive(state.holder);
 
   if (!alive) {
     // Stale lock - clean it up and report as not locked
@@ -294,5 +336,21 @@ export async function getWorkspaceLockHolder(
     return null;
   }
 
-  return metadataToHolder(metadata);
+  return state;
+}
+
+/**
+ * Get lock holder info for a workspace (for backwards compatibility).
+ *
+ * @param repoPath - Path to .e3 repository
+ * @param workspace - Workspace name to check
+ * @returns Lock holder info if locked, null if not locked
+ * @deprecated Use getWorkspaceLockState for full lock information
+ */
+export async function getWorkspaceLockHolder(
+  repoPath: string,
+  workspace: string
+): Promise<LockHolderInfo | null> {
+  const state = await getWorkspaceLockState(repoPath, workspace);
+  return state ? lockStateToHolderInfo(state) : null;
 }

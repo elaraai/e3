@@ -20,9 +20,12 @@ export {
   // Reference store
   type RefStore,
   // Locking
-  // Note: LockHolder is exported from errors.ts (has optional fields for compat)
   type LockHandle,
   type LockService,
+  type LockState,
+  type LockOperation,
+  type LockHolder,
+  type LockHolderInfo,
   // Logging
   type LogChunk,
   type LogStore,
