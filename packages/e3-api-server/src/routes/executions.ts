@@ -10,12 +10,8 @@ import {
   dataflowExecute,
   dataflowGetGraph,
   workspaceStatus,
-  workspaceGetTaskHash,
-  workspaceGetTask,
-  workspaceGetDatasetHash,
-  executionListForTask,
+  executionFindCurrent,
   executionReadLog,
-  inputsHash,
   LocalBackend,
   WorkspaceLockError,
   type WorkspaceStatusResult as CoreWorkspaceStatusResult,
@@ -319,33 +315,14 @@ export function createExecutionRoutes(repoPath: string) {
       const offset = parseInt(c.req.query('offset') || '0', 10);
       const limit = parseInt(c.req.query('limit') || '65536', 10);
 
-      // Get task hash and current input hashes
-      const taskHash = await workspaceGetTaskHash(storage, workspace, taskName);
-      const task = await workspaceGetTask(storage, workspace, taskName);
-
-      // Get current input hashes
-      const currentInputHashes: string[] = [];
-      for (const inputPath of task.inputs) {
-        const { refType, hash } = await workspaceGetDatasetHash(storage, workspace, inputPath);
-        if (refType !== 'value' || hash === null) {
-          return sendError(c, LogChunkType, errorToVariant(new Error('Task inputs not assigned')));
-        }
-        currentInputHashes.push(hash);
-      }
-
-      const inHash = inputsHash(currentInputHashes);
-
-      // Check if execution exists, fall back to most recent
-      const executions = await executionListForTask(storage, taskHash);
-      let execInHash = inHash;
-      if (!executions.includes(inHash) && executions.length > 0) {
-        execInHash = executions[0]!;
-      } else if (executions.length === 0) {
+      // Find the current execution for this task
+      const execution = await executionFindCurrent(storage, workspace, taskName);
+      if (!execution) {
         return sendError(c, LogChunkType, errorToVariant(new Error('No executions found for task')));
       }
 
       // Read logs
-      const chunk = await executionReadLog(storage, taskHash, execInHash, stream, { offset, limit });
+      const chunk = await executionReadLog(storage, execution.taskHash, execution.inputsHash, stream, { offset, limit });
 
       return sendSuccess(c, LogChunkType, {
         data: chunk.data,

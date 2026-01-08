@@ -108,6 +108,72 @@ export async function executionList(
   return storage.refs.executionList();
 }
 
+/**
+ * Result of finding the current execution for a task
+ */
+export interface CurrentExecutionRef {
+  /** Hash of the task object */
+  taskHash: string;
+  /** Combined hash of input hashes */
+  inputsHash: string;
+  /** True if this matches the current workspace input state */
+  isCurrent: boolean;
+}
+
+/**
+ * Find the execution reference for a task in a workspace.
+ *
+ * This looks up the task's current input hashes from the workspace state
+ * and finds the matching execution. If no execution exists for the current
+ * inputs, falls back to the most recent execution.
+ *
+ * @param storage - Storage backend
+ * @param ws - Workspace name
+ * @param taskName - Task name
+ * @returns Execution reference or null if no executions exist
+ */
+export async function executionFindCurrent(
+  storage: StorageBackend,
+  ws: string,
+  taskName: string
+): Promise<CurrentExecutionRef | null> {
+  // Import here to avoid circular dependency
+  const { workspaceGetTaskHash, workspaceGetTask } = await import('./tasks.js');
+  const { workspaceGetDatasetHash } = await import('./trees.js');
+
+  const taskHash = await workspaceGetTaskHash(storage, ws, taskName);
+  const task = await workspaceGetTask(storage, ws, taskName);
+
+  // Get the current input hashes from the workspace
+  const currentInputHashes: string[] = [];
+  let allInputsAssigned = true;
+
+  for (const inputPath of task.inputs) {
+    const { refType, hash } = await workspaceGetDatasetHash(storage, ws, inputPath);
+    if (refType !== 'value' || hash === null) {
+      allInputsAssigned = false;
+      break;
+    }
+    currentInputHashes.push(hash);
+  }
+
+  const executions = await executionListForTask(storage, taskHash);
+
+  if (allInputsAssigned) {
+    const inHash = inputsHash(currentInputHashes);
+    if (executions.includes(inHash)) {
+      return { taskHash, inputsHash: inHash, isCurrent: true };
+    }
+  }
+
+  // Fall back to most recent execution
+  if (executions.length > 0) {
+    return { taskHash, inputsHash: executions[0]!, isCurrent: false };
+  }
+
+  return null;
+}
+
 // ============================================================================
 // Log Reading
 // ============================================================================
