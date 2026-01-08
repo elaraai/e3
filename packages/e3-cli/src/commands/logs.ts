@@ -18,9 +18,7 @@ import {
   executionListForTask,
   executionReadLog,
   executionGet,
-  inputsHash,
-  workspaceGetDatasetHash,
-  workspaceGetTask,
+  executionFindCurrent,
   isProcessAlive,
   LocalBackend,
   type StorageBackend,
@@ -93,44 +91,6 @@ async function listWorkspaceTasks(storage: StorageBackend, ws: string): Promise<
   console.log(`Use "e3 logs . ${ws}.<taskName>" to view logs.`);
 }
 
-/**
- * Find the inputs hash for the current workspace state of a task.
- * This matches the execution that corresponds to the current input values.
- */
-async function findCurrentExecution(
-  storage: StorageBackend,
-  ws: string,
-  taskName: string
-): Promise<{ taskHash: string; inHash: string } | null> {
-  const taskHash = await workspaceGetTaskHash(storage, ws, taskName);
-  const task = await workspaceGetTask(storage, ws, taskName);
-
-  // Get the current input hashes from the workspace
-  const currentInputHashes: string[] = [];
-  for (const inputPath of task.inputs) {
-    const { refType, hash } = await workspaceGetDatasetHash(storage, ws, inputPath);
-    if (refType !== 'value' || hash === null) {
-      // Input not assigned - can't find matching execution
-      return null;
-    }
-    currentInputHashes.push(hash);
-  }
-
-  const inHash = inputsHash(currentInputHashes);
-
-  // Check if this execution exists
-  const executions = await executionListForTask(storage, taskHash);
-  if (executions.includes(inHash)) {
-    return { taskHash, inHash };
-  }
-
-  // Fall back to the most recent execution if current inputs don't match
-  if (executions.length > 0) {
-    return { taskHash, inHash: executions[0] };
-  }
-
-  return null;
-}
 
 /**
  * Show logs for a specific execution.
@@ -232,17 +192,17 @@ export async function logsCommand(
     }
 
     // Find the execution for this task
-    const execution = await findCurrentExecution(storage, ws, taskName);
+    const execution = await executionFindCurrent(storage, ws, taskName);
 
     if (!execution) {
       exitError(`No executions found for task: ${ws}.${taskName}`);
     }
 
     console.log(`Task: ${ws}.${taskName}`);
-    console.log(`Execution: ${abbrev(execution.taskHash)}/${abbrev(execution.inHash)}`);
+    console.log(`Execution: ${abbrev(execution.taskHash)}/${abbrev(execution.inputsHash)}`);
     console.log('');
 
-    await showLogs(storage, execution.taskHash, execution.inHash, options.follow ?? false);
+    await showLogs(storage, execution.taskHash, execution.inputsHash, options.follow ?? false);
   } catch (err) {
     exitError(formatError(err));
   }

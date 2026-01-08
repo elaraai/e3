@@ -122,6 +122,9 @@ export {
   executionGetOutput,
   executionListForTask,
   executionList,
+  // Find current execution for a task in workspace
+  executionFindCurrent,
+  type CurrentExecutionRef,
   // Logs
   executionReadLog,
   type LogReadOptions,
