@@ -19,7 +19,7 @@ import {
   dataflowExecute,
   workspaceSetDataset,
   WorkspaceLockError,
-  LocalBackend,
+  LocalStorage,
 } from '@elaraai/e3-core';
 import {
   createTestDir,
@@ -290,17 +290,17 @@ export async function testRapidSetStartCycles(): Promise<ScenarioResult> {
 
       return (async (): Promise<BatchResult> => {
         try {
-          const storage = new LocalBackend(e3Dir);
+          const storage = new LocalStorage();
           // Try to acquire lock (non-blocking)
-          const lock = await storage.locks.acquire('ws', variant('dataflow', null));
+          const lock = await storage.locks.acquire(e3Dir, 'ws', variant('dataflow', null));
           if (!lock) {
             return { value: Number(value), success: false, lockError: true };
           }
           try {
             // Set the input value using the lock
-            await workspaceSetDataset(storage, 'ws', [variant('field', 'inputs'), variant('field', 'x')], value, IntegerType, { lock });
+            await workspaceSetDataset(storage, e3Dir, 'ws', [variant('field', 'inputs'), variant('field', 'x')], value, IntegerType, { lock });
             // Execute dataflow using the lock
-            await dataflowExecute(storage, 'ws', { lock });
+            await dataflowExecute(storage, e3Dir, 'ws', { lock });
             return { value: Number(value), success: true, lockError: false };
           } finally {
             await lock.release();

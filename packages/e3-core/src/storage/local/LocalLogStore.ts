@@ -14,13 +14,13 @@ import { isNotFoundError } from '../../errors.js';
  * Logs are stored as text files in the execution directory:
  *   executions/<taskHash>/<inputsHash>/stdout.txt
  *   executions/<taskHash>/<inputsHash>/stderr.txt
+ *
+ * The `repo` parameter is the path to the .e3 directory.
  */
 export class LocalLogStore implements LogStore {
-  constructor(private readonly repoPath: string) {}
-
-  private logPath(taskHash: string, inputsHash: string, stream: 'stdout' | 'stderr'): string {
+  private logPath(repo: string, taskHash: string, inputsHash: string, stream: 'stdout' | 'stderr'): string {
     return path.join(
-      this.repoPath,
+      repo,
       'executions',
       taskHash,
       inputsHash,
@@ -29,12 +29,13 @@ export class LocalLogStore implements LogStore {
   }
 
   async append(
+    repo: string,
     taskHash: string,
     inputsHash: string,
     stream: 'stdout' | 'stderr',
     data: string
   ): Promise<void> {
-    const logFile = this.logPath(taskHash, inputsHash, stream);
+    const logFile = this.logPath(repo, taskHash, inputsHash, stream);
     const dir = path.dirname(logFile);
 
     await fs.mkdir(dir, { recursive: true });
@@ -42,12 +43,13 @@ export class LocalLogStore implements LogStore {
   }
 
   async read(
+    repo: string,
     taskHash: string,
     inputsHash: string,
     stream: 'stdout' | 'stderr',
     options?: { offset?: number; limit?: number }
   ): Promise<LogChunk> {
-    const logFile = this.logPath(taskHash, inputsHash, stream);
+    const logFile = this.logPath(repo, taskHash, inputsHash, stream);
 
     const offset = options?.offset ?? 0;
     const limit = options?.limit ?? 65536; // 64KB default

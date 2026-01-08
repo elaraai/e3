@@ -24,17 +24,18 @@ import {
 import { objectRead } from './objects.js';
 import { PackageNotFoundError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir, zipEqual } from './test-helpers.js';
-import { LocalBackend } from './storage/local/index.js';
+import { LocalStorage } from './storage/local/index.js';
+import type { StorageBackend } from './storage/interfaces.js';
 
 describe('packages', () => {
   let testRepo: string;
   let tempDir: string;
-  let storage: LocalBackend;
+  let storage: StorageBackend;
 
   beforeEach(() => {
     testRepo = createTestRepo();
     tempDir = createTempDir();
-    storage = new LocalBackend(testRepo);
+    storage = new LocalStorage();
   });
 
   afterEach(() => {
@@ -50,7 +51,7 @@ describe('packages', () => {
       await e3.export(pkg, zipPath);
 
       // Import into repository
-      const result = await packageImport(storage, zipPath);
+      const result = await packageImport(storage, testRepo, zipPath);
 
       assert.strictEqual(result.name, 'empty-pkg');
       assert.strictEqual(result.version, '1.0.0');
@@ -65,7 +66,7 @@ describe('packages', () => {
       const zipPath = join(tempDir, 'input.zip');
       await e3.export(pkg, zipPath);
 
-      const result = await packageImport(storage, zipPath);
+      const result = await packageImport(storage, testRepo, zipPath);
 
       assert.strictEqual(result.name, 'input-pkg');
       assert.strictEqual(result.version, '2.0.0');
@@ -77,7 +78,7 @@ describe('packages', () => {
       const zipPath = join(tempDir, 'ref-test.zip');
       await e3.export(pkg, zipPath);
 
-      const result = await packageImport(storage, zipPath);
+      const result = await packageImport(storage, testRepo, zipPath);
 
       const refPath = join(testRepo, 'packages', 'ref-test', '1.2.3');
       assert.ok(existsSync(refPath), 'Package ref file should exist');
@@ -91,7 +92,7 @@ describe('packages', () => {
       const zipPath = join(tempDir, 'objects-test.zip');
       await e3.export(pkg, zipPath);
 
-      const result = await packageImport(storage, zipPath);
+      const result = await packageImport(storage, testRepo, zipPath);
 
       // Package object should be loadable
       const packageObjectData = await objectRead(testRepo, result.packageHash);
@@ -103,8 +104,8 @@ describe('packages', () => {
       const zipPath = join(tempDir, 'reimport-test.zip');
       await e3.export(pkg, zipPath);
 
-      const result1 = await packageImport(storage, zipPath);
-      const result2 = await packageImport(storage, zipPath);
+      const result1 = await packageImport(storage, testRepo, zipPath);
+      const result2 = await packageImport(storage, testRepo, zipPath);
 
       assert.strictEqual(result1.packageHash, result2.packageHash);
       assert.strictEqual(result1.name, result2.name);
@@ -114,7 +115,7 @@ describe('packages', () => {
 
   describe('packageList', () => {
     it('returns empty array for no packages', async () => {
-      const packages = await packageList(storage);
+      const packages = await packageList(storage, testRepo);
 
       assert.deepStrictEqual(packages, []);
     });
@@ -123,9 +124,9 @@ describe('packages', () => {
       const pkg = e3.package('list-test', '1.0.0') as any;
       const zipPath = join(tempDir, 'list-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
-      const packages = await packageList(storage);
+      const packages = await packageList(storage, testRepo);
 
       assert.strictEqual(packages.length, 1);
       assert.strictEqual(packages[0].name, 'list-test');
@@ -146,11 +147,11 @@ describe('packages', () => {
       await e3.export(pkg2, zip2);
       await e3.export(pkg3, zip3);
 
-      await packageImport(storage, zip1);
-      await packageImport(storage, zip2);
-      await packageImport(storage, zip3);
+      await packageImport(storage, testRepo, zip1);
+      await packageImport(storage, testRepo, zip2);
+      await packageImport(storage, testRepo, zip3);
 
-      const packages = await packageList(storage);
+      const packages = await packageList(storage, testRepo);
 
       assert.strictEqual(packages.length, 3);
 
@@ -172,15 +173,15 @@ describe('packages', () => {
       const zipPath = join(tempDir, 'resolve-test.zip');
       await e3.export(pkg, zipPath);
 
-      const importResult = await packageImport(storage, zipPath);
-      const resolvedHash = await packageResolve(storage, 'resolve-test', '1.0.0');
+      const importResult = await packageImport(storage, testRepo, zipPath);
+      const resolvedHash = await packageResolve(storage, testRepo, 'resolve-test', '1.0.0');
 
       assert.strictEqual(resolvedHash, importResult.packageHash);
     });
 
     it('throws for non-existent package', async () => {
       await assert.rejects(
-        async () => await packageResolve(storage, 'nonexistent', '1.0.0'),
+        async () => await packageResolve(storage, testRepo, 'nonexistent', '1.0.0'),
         PackageNotFoundError
       );
     });
@@ -191,23 +192,23 @@ describe('packages', () => {
       const pkg = e3.package('remove-test', '1.0.0') as any;
       const zipPath = join(tempDir, 'remove-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       // Verify package exists
-      let packages = await packageList(storage);
+      let packages = await packageList(storage, testRepo);
       assert.strictEqual(packages.length, 1);
 
       // Remove package
-      await packageRemove(storage, 'remove-test', '1.0.0');
+      await packageRemove(storage, testRepo, 'remove-test', '1.0.0');
 
       // Verify package is gone
-      packages = await packageList(storage);
+      packages = await packageList(storage, testRepo);
       assert.strictEqual(packages.length, 0);
     });
 
     it('throws for non-existent package', async () => {
       await assert.rejects(
-        async () => await packageRemove(storage, 'nonexistent', '1.0.0'),
+        async () => await packageRemove(storage, testRepo, 'nonexistent', '1.0.0'),
         PackageNotFoundError
       );
     });
@@ -222,13 +223,13 @@ describe('packages', () => {
       await e3.export(pkg1, zip1);
       await e3.export(pkg2, zip2);
 
-      await packageImport(storage, zip1);
-      await packageImport(storage, zip2);
+      await packageImport(storage, testRepo, zip1);
+      await packageImport(storage, testRepo, zip2);
 
       // Remove only v1
-      await packageRemove(storage, 'multi-ver', '1.0.0');
+      await packageRemove(storage, testRepo, 'multi-ver', '1.0.0');
 
-      const packages = await packageList(storage);
+      const packages = await packageList(storage, testRepo);
       assert.strictEqual(packages.length, 1);
       assert.strictEqual(packages[0].version, '2.0.0');
     });
@@ -239,10 +240,10 @@ describe('packages', () => {
       const pkg = e3.package('export-test', '1.0.0') as any;
       const importZip = join(tempDir, 'import.zip');
       await e3.export(pkg, importZip);
-      await packageImport(storage, importZip);
+      await packageImport(storage, testRepo, importZip);
 
       const exportZip = join(tempDir, 'export.zip');
-      const result = await packageExport(storage, 'export-test', '1.0.0', exportZip);
+      const result = await packageExport(storage, testRepo, 'export-test', '1.0.0', exportZip);
 
       assert.ok(existsSync(exportZip), 'Export zip should exist');
       assert.strictEqual(result.packageHash.length, 64);
@@ -254,10 +255,10 @@ describe('packages', () => {
       const pkg = e3.package('export-input', '1.0.0', myInput);
       const importZip = join(tempDir, 'import-input.zip');
       await e3.export(pkg, importZip);
-      await packageImport(storage, importZip);
+      await packageImport(storage, testRepo, importZip);
 
       const exportZip = join(tempDir, 'export-input.zip');
-      const result = await packageExport(storage, 'export-input', '1.0.0', exportZip);
+      const result = await packageExport(storage, testRepo, 'export-input', '1.0.0', exportZip);
 
       assert.ok(result.objectCount >= 3, `Expected at least 3 objects, got ${result.objectCount}`);
     });
@@ -267,10 +268,10 @@ describe('packages', () => {
       const pkg = e3.package('roundtrip', '1.0.0', myInput);
       const originalZip = join(tempDir, 'original.zip');
       await e3.export(pkg, originalZip);
-      await packageImport(storage, originalZip);
+      await packageImport(storage, testRepo, originalZip);
 
       const exportedZip = join(tempDir, 'exported.zip');
-      await packageExport(storage, 'roundtrip', '1.0.0', exportedZip);
+      await packageExport(storage, testRepo, 'roundtrip', '1.0.0', exportedZip);
 
       // Compare zip contents (not raw bytes, as order may differ)
       const result = await zipEqual(originalZip, exportedZip);
@@ -281,16 +282,16 @@ describe('packages', () => {
       const pkg = e3.package('reimport', '1.0.0') as any;
       const importZip = join(tempDir, 'reimport-import.zip');
       await e3.export(pkg, importZip);
-      await packageImport(storage, importZip);
+      await packageImport(storage, testRepo, importZip);
 
       const exportZip = join(tempDir, 'reimport-export.zip');
-      await packageExport(storage, 'reimport', '1.0.0', exportZip);
+      await packageExport(storage, testRepo, 'reimport', '1.0.0', exportZip);
 
       // Create a second repo and import the exported zip
       const testRepo2 = createTestRepo();
-      const storage2 = new LocalBackend(testRepo2);
+      const storage2 = new LocalStorage();
       try {
-        const result = await packageImport(storage2, exportZip);
+        const result = await packageImport(storage2, testRepo2, exportZip);
 
         assert.strictEqual(result.name, 'reimport');
         assert.strictEqual(result.version, '1.0.0');
@@ -303,7 +304,7 @@ describe('packages', () => {
       const exportZip = join(tempDir, 'nonexistent.zip');
 
       await assert.rejects(
-        async () => await packageExport(storage, 'nonexistent', '1.0.0', exportZip),
+        async () => await packageExport(storage, testRepo, 'nonexistent', '1.0.0', exportZip),
         PackageNotFoundError
       );
     });
@@ -328,12 +329,12 @@ describe('packages', () => {
       await e3.export(pkg, zipPath);
 
       // Import and read
-      const importResult = await packageImport(storage, zipPath);
+      const importResult = await packageImport(storage, testRepo, zipPath);
       assert.strictEqual(importResult.name, 'single-task');
       assert.strictEqual(importResult.version, '1.0.0');
 
       // Read the package object to verify tasks are present
-      const pkgObject = await packageRead(storage, 'single-task', '1.0.0');
+      const pkgObject = await packageRead(storage, testRepo, 'single-task', '1.0.0');
       assert.strictEqual(pkgObject.tasks.size, 1);
       assert.ok(pkgObject.tasks.has('double'), 'Should have double task');
     });
@@ -368,12 +369,12 @@ describe('packages', () => {
       await e3.export(pkg, zipPath);
 
       // Import
-      const importResult = await packageImport(storage, zipPath);
+      const importResult = await packageImport(storage, testRepo, zipPath);
       assert.strictEqual(importResult.name, 'two-task-test');
       assert.strictEqual(importResult.version, '1.0.0');
 
       // Read the package object
-      const pkgObject = await packageRead(storage, 'two-task-test', '1.0.0');
+      const pkgObject = await packageRead(storage, testRepo, 'two-task-test', '1.0.0');
 
       // Should have both tasks
       assert.strictEqual(pkgObject.tasks.size, 2);
@@ -422,12 +423,12 @@ describe('packages', () => {
       await e3.export(pkg, zipPath);
 
       // Import
-      const importResult = await packageImport(storage, zipPath);
+      const importResult = await packageImport(storage, testRepo, zipPath);
       assert.strictEqual(importResult.name, 'diamond-test');
       assert.strictEqual(importResult.version, '1.0.0');
 
       // Read the package object
-      const pkgObject = await packageRead(storage, 'diamond-test', '1.0.0');
+      const pkgObject = await packageRead(storage, testRepo, 'diamond-test', '1.0.0');
 
       // Should have all 3 tasks
       assert.strictEqual(pkgObject.tasks.size, 3);
@@ -456,22 +457,22 @@ describe('packages', () => {
       const pkg = e3.package('task-roundtrip', '1.0.0', task_double);
       const originalZip = join(tempDir, 'task-original.zip');
       await e3.export(pkg, originalZip);
-      await packageImport(storage, originalZip);
+      await packageImport(storage, testRepo, originalZip);
 
       // Export from repo
       const exportedZip = join(tempDir, 'task-exported.zip');
-      await packageExport(storage, 'task-roundtrip', '1.0.0', exportedZip);
+      await packageExport(storage, testRepo, 'task-roundtrip', '1.0.0', exportedZip);
 
       // Import into second repo
       const testRepo2 = createTestRepo();
-      const storage2 = new LocalBackend(testRepo2);
+      const storage2 = new LocalStorage();
       try {
-        const result = await packageImport(storage2, exportedZip);
+        const result = await packageImport(storage2, testRepo2, exportedZip);
         assert.strictEqual(result.name, 'task-roundtrip');
         assert.strictEqual(result.version, '1.0.0');
 
         // Verify tasks are preserved
-        const pkgObject = await packageRead(storage2, 'task-roundtrip', '1.0.0');
+        const pkgObject = await packageRead(storage2, testRepo2, 'task-roundtrip', '1.0.0');
         assert.strictEqual(pkgObject.tasks.size, 1);
         assert.ok(pkgObject.tasks.has('double'));
       } finally {

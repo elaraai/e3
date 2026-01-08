@@ -31,7 +31,7 @@ import {
 } from './errors.js';
 import { objectWrite } from './objects.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
-import { LocalBackend } from './storage/local/index.js';
+import { LocalStorage } from './storage/local/index.js';
 import type { StorageBackend } from './storage/interfaces.js';
 
 describe('workspaces', () => {
@@ -42,7 +42,7 @@ describe('workspaces', () => {
   beforeEach(() => {
     testRepo = createTestRepo();
     tempDir = createTempDir();
-    storage = new LocalBackend(testRepo);
+    storage = new LocalStorage();
   });
 
   afterEach(() => {
@@ -52,50 +52,50 @@ describe('workspaces', () => {
 
   describe('workspaceCreate', () => {
     it('creates workspace file', async () => {
-      await workspaceCreate(storage, 'myworkspace');
+      await workspaceCreate(storage, testRepo, 'myworkspace');
 
       const wsFile = join(testRepo, 'workspaces', 'myworkspace.beast2');
       assert.ok(existsSync(wsFile), 'Workspace file should exist');
     });
 
     it('throws if workspace already exists', async () => {
-      await workspaceCreate(storage, 'existing');
+      await workspaceCreate(storage, testRepo, 'existing');
 
       await assert.rejects(
-        async () => await workspaceCreate(storage, 'existing'),
+        async () => await workspaceCreate(storage, testRepo, 'existing'),
         /already exists/
       );
     });
 
     it('allows workspace names with dashes', async () => {
-      await workspaceCreate(storage, 'my-workspace');
+      await workspaceCreate(storage, testRepo, 'my-workspace');
 
       const wsFile = join(testRepo, 'workspaces', 'my-workspace.beast2');
       assert.ok(existsSync(wsFile));
     });
 
     it('creates empty file (undeployed)', async () => {
-      await workspaceCreate(storage, 'empty');
+      await workspaceCreate(storage, testRepo, 'empty');
 
-      const state = await workspaceGetState(storage, 'empty');
+      const state = await workspaceGetState(storage, testRepo, 'empty');
       assert.strictEqual(state, null);
     });
   });
 
   describe('workspaceRemove', () => {
     it('removes workspace file', async () => {
-      await workspaceCreate(storage, 'toremove');
+      await workspaceCreate(storage, testRepo, 'toremove');
       const wsFile = join(testRepo, 'workspaces', 'toremove.beast2');
       assert.ok(existsSync(wsFile));
 
-      await workspaceRemove(storage, 'toremove');
+      await workspaceRemove(storage, testRepo, 'toremove');
 
       assert.ok(!existsSync(wsFile), 'Workspace file should be removed');
     });
 
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
-        async () => await workspaceRemove(storage, 'nonexistent'),
+        async () => await workspaceRemove(storage, testRepo, 'nonexistent'),
         WorkspaceNotFoundError
       );
     });
@@ -105,10 +105,10 @@ describe('workspaces', () => {
       const pkg = e3.package('remove-test', '1.0.0') as any;
       const zipPath = join(tempDir, 'remove-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
-      await workspaceDeploy(storage, 'wsremove', 'remove-test', '1.0.0');
-      await workspaceRemove(storage, 'wsremove');
+      await workspaceDeploy(storage, testRepo, 'wsremove', 'remove-test', '1.0.0');
+      await workspaceRemove(storage, testRepo, 'wsremove');
 
       const wsFile = join(testRepo, 'workspaces', 'wsremove.beast2');
       assert.ok(!existsSync(wsFile));
@@ -117,25 +117,25 @@ describe('workspaces', () => {
 
   describe('workspaceList', () => {
     it('returns empty array for no workspaces', async () => {
-      const workspaces = await workspaceList(storage);
+      const workspaces = await workspaceList(storage, testRepo);
 
       assert.deepStrictEqual(workspaces, []);
     });
 
     it('lists single workspace', async () => {
-      await workspaceCreate(storage, 'single');
+      await workspaceCreate(storage, testRepo, 'single');
 
-      const workspaces = await workspaceList(storage);
+      const workspaces = await workspaceList(storage, testRepo);
 
       assert.deepStrictEqual(workspaces, ['single']);
     });
 
     it('lists multiple workspaces', async () => {
-      await workspaceCreate(storage, 'ws-a');
-      await workspaceCreate(storage, 'ws-b');
-      await workspaceCreate(storage, 'ws-c');
+      await workspaceCreate(storage, testRepo, 'ws-a');
+      await workspaceCreate(storage, testRepo, 'ws-b');
+      await workspaceCreate(storage, testRepo, 'ws-c');
 
-      const workspaces = await workspaceList(storage);
+      const workspaces = await workspaceList(storage, testRepo);
 
       assert.strictEqual(workspaces.length, 3);
       assert.ok(workspaces.includes('ws-a'));
@@ -151,17 +151,17 @@ describe('workspaces', () => {
       const pkg = e3.package('deploy-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'deploy-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       // Deploy to workspace
-      await workspaceDeploy(storage, 'production', 'deploy-test', '1.0.0');
+      await workspaceDeploy(storage, testRepo, 'production', 'deploy-test', '1.0.0');
 
       // Verify workspace file exists
       const wsFile = join(testRepo, 'workspaces', 'production.beast2');
       assert.ok(existsSync(wsFile));
 
       // Verify state content
-      const state = await workspaceGetState(storage, 'production');
+      const state = await workspaceGetState(storage, testRepo, 'production');
       assert.ok(state !== null);
       assert.strictEqual(state.packageName, 'deploy-test');
       assert.strictEqual(state.packageVersion, '1.0.0');
@@ -176,16 +176,16 @@ describe('workspaces', () => {
       const pkg = e3.package('root-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'root-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
-      await workspaceDeploy(storage, 'ws', 'root-test', '1.0.0');
+      await workspaceDeploy(storage, testRepo, 'ws', 'root-test', '1.0.0');
 
       // Get the package root
-      const pkgObject = await packageRead(storage, 'root-test', '1.0.0');
+      const pkgObject = await packageRead(storage, testRepo, 'root-test', '1.0.0');
       const pkgRoot = pkgObject.data.value;
 
       // Get workspace root
-      const wsRoot = await workspaceGetRoot(storage, 'ws');
+      const wsRoot = await workspaceGetRoot(storage, testRepo, 'ws');
 
       assert.strictEqual(wsRoot, pkgRoot);
     });
@@ -194,27 +194,27 @@ describe('workspaces', () => {
       const pkg = e3.package('hash-test', '1.0.0') as any;
       const zipPath = join(tempDir, 'hash-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
-      const expectedHash = await packageResolve(storage, 'hash-test', '1.0.0');
-      await workspaceDeploy(storage, 'ws', 'hash-test', '1.0.0');
+      const expectedHash = await packageResolve(storage, testRepo, 'hash-test', '1.0.0');
+      await workspaceDeploy(storage, testRepo, 'ws', 'hash-test', '1.0.0');
 
-      const { hash } = await workspaceGetPackage(storage, 'ws');
+      const { hash } = await workspaceGetPackage(storage, testRepo, 'ws');
       assert.strictEqual(hash, expectedHash);
     });
 
     it('can deploy to existing undeployed workspace', async () => {
-      await workspaceCreate(storage, 'preexisting');
+      await workspaceCreate(storage, testRepo, 'preexisting');
 
       const pkg = e3.package('deploy-existing', '1.0.0') as any;
       const zipPath = join(tempDir, 'deploy-existing.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       // Should not throw
-      await workspaceDeploy(storage, 'preexisting', 'deploy-existing', '1.0.0');
+      await workspaceDeploy(storage, testRepo, 'preexisting', 'deploy-existing', '1.0.0');
 
-      const { name, version } = await workspaceGetPackage(storage, 'preexisting');
+      const { name, version } = await workspaceGetPackage(storage, testRepo, 'preexisting');
       assert.strictEqual(name, 'deploy-existing');
       assert.strictEqual(version, '1.0.0');
     });
@@ -225,10 +225,10 @@ describe('workspaces', () => {
       const pkg = e3.package('getpkg-test', '2.0.0') as any;
       const zipPath = join(tempDir, 'getpkg-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
-      await workspaceDeploy(storage, 'ws', 'getpkg-test', '2.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'ws', 'getpkg-test', '2.0.0');
 
-      const { name, version, hash } = await workspaceGetPackage(storage, 'ws');
+      const { name, version, hash } = await workspaceGetPackage(storage, testRepo, 'ws');
 
       assert.strictEqual(name, 'getpkg-test');
       assert.strictEqual(version, '2.0.0');
@@ -236,10 +236,10 @@ describe('workspaces', () => {
     });
 
     it('throws for undeployed workspace', async () => {
-      await workspaceCreate(storage, 'empty');
+      await workspaceCreate(storage, testRepo, 'empty');
 
       await assert.rejects(
-        async () => await workspaceGetPackage(storage, 'empty'),
+        async () => await workspaceGetPackage(storage, testRepo, 'empty'),
         WorkspaceNotDeployedError
       );
     });
@@ -250,10 +250,10 @@ describe('workspaces', () => {
       const pkg = e3.package('root-get', '1.0.0') as any;
       const zipPath = join(tempDir, 'root-get.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
-      await workspaceDeploy(storage, 'ws', 'root-get', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'ws', 'root-get', '1.0.0');
 
-      const root = await workspaceGetRoot(storage, 'ws');
+      const root = await workspaceGetRoot(storage, testRepo, 'ws');
 
       assert.strictEqual(root.length, 64);
     });
@@ -262,16 +262,16 @@ describe('workspaces', () => {
       const pkg = e3.package('root-set', '1.0.0') as any;
       const zipPath = join(tempDir, 'root-set.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
-      await workspaceDeploy(storage, 'ws', 'root-set', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'ws', 'root-set', '1.0.0');
 
       // Create a new object to use as root
       const newData = new Uint8Array([1, 2, 3, 4, 5]);
       const newHash = await objectWrite(testRepo, newData);
 
-      await workspaceSetRoot(storage, 'ws', newHash);
+      await workspaceSetRoot(storage, testRepo, 'ws', newHash);
 
-      const root = await workspaceGetRoot(storage, 'ws');
+      const root = await workspaceGetRoot(storage, testRepo, 'ws');
       assert.strictEqual(root, newHash);
     });
 
@@ -279,10 +279,10 @@ describe('workspaces', () => {
       const pkg = e3.package('root-time', '1.0.0') as any;
       const zipPath = join(tempDir, 'root-time.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(storage, zipPath);
-      await workspaceDeploy(storage, 'ws', 'root-time', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'ws', 'root-time', '1.0.0');
 
-      const stateBefore = await workspaceGetState(storage, 'ws');
+      const stateBefore = await workspaceGetState(storage, testRepo, 'ws');
       assert.ok(stateBefore !== null);
 
       // Wait a bit to ensure timestamp changes
@@ -290,9 +290,9 @@ describe('workspaces', () => {
 
       const newData = new Uint8Array([1, 2, 3]);
       const newHash = await objectWrite(testRepo, newData);
-      await workspaceSetRoot(storage, 'ws', newHash);
+      await workspaceSetRoot(storage, testRepo, 'ws', newHash);
 
-      const stateAfter = await workspaceGetState(storage, 'ws');
+      const stateAfter = await workspaceGetState(storage, testRepo, 'ws');
       assert.ok(stateAfter !== null);
       assert.ok(stateAfter.rootUpdatedAt > stateBefore.rootUpdatedAt);
       // deployedAt should not change
@@ -304,16 +304,16 @@ describe('workspaces', () => {
 
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
-        async () => await workspaceGetRoot(storage, 'nonexistent'),
+        async () => await workspaceGetRoot(storage, testRepo, 'nonexistent'),
         WorkspaceNotFoundError
       );
     });
 
     it('throws for undeployed workspace', async () => {
-      await workspaceCreate(storage, 'empty');
+      await workspaceCreate(storage, testRepo, 'empty');
 
       await assert.rejects(
-        async () => await workspaceGetRoot(storage, 'empty'),
+        async () => await workspaceGetRoot(storage, testRepo, 'empty'),
         WorkspaceNotDeployedError
       );
     });
@@ -326,12 +326,12 @@ describe('workspaces', () => {
       const pkg = e3.package('export-test', '1.0.0', myInput);
       const importZip = join(tempDir, 'export-test.zip');
       await e3.export(pkg, importZip);
-      await packageImport(storage, importZip);
-      await workspaceDeploy(storage, 'ws', 'export-test', '1.0.0');
+      await packageImport(storage, testRepo, importZip);
+      await workspaceDeploy(storage, testRepo, 'ws', 'export-test', '1.0.0');
 
       // Export workspace
       const exportZip = join(tempDir, 'exported.zip');
-      const result = await workspaceExport(storage, 'ws', exportZip);
+      const result = await workspaceExport(storage, testRepo, 'ws', exportZip);
 
       assert.ok(existsSync(exportZip));
       assert.strictEqual(result.name, 'export-test');
@@ -343,11 +343,11 @@ describe('workspaces', () => {
       const pkg = e3.package('custom-export', '1.0.0') as any;
       const importZip = join(tempDir, 'custom-export.zip');
       await e3.export(pkg, importZip);
-      await packageImport(storage, importZip);
-      await workspaceDeploy(storage, 'ws', 'custom-export', '1.0.0');
+      await packageImport(storage, testRepo, importZip);
+      await workspaceDeploy(storage, testRepo, 'ws', 'custom-export', '1.0.0');
 
       const exportZip = join(tempDir, 'custom.zip');
-      const result = await workspaceExport(storage, 'ws', exportZip, 'new-name', '2.0.0');
+      const result = await workspaceExport(storage, testRepo, 'ws', exportZip, 'new-name', '2.0.0');
 
       assert.strictEqual(result.name, 'new-name');
       assert.strictEqual(result.version, '2.0.0');
@@ -358,18 +358,18 @@ describe('workspaces', () => {
       const pkg = e3.package('reimport-test', '1.0.0', myInput);
       const importZip = join(tempDir, 'reimport.zip');
       await e3.export(pkg, importZip);
-      await packageImport(storage, importZip);
-      await workspaceDeploy(storage, 'ws', 'reimport-test', '1.0.0');
+      await packageImport(storage, testRepo, importZip);
+      await workspaceDeploy(storage, testRepo, 'ws', 'reimport-test', '1.0.0');
 
       // Export and reimport
       const exportZip = join(tempDir, 'reimport-exported.zip');
-      await workspaceExport(storage, 'ws', exportZip, 'reimported', '2.0.0');
+      await workspaceExport(storage, testRepo, 'ws', exportZip, 'reimported', '2.0.0');
 
       // Create second repo and import
       const testRepo2 = createTestRepo();
-      const storage2 = new LocalBackend(testRepo2);
+      const storage2 = new LocalStorage();
       try {
-        const importResult = await packageImport(storage2, exportZip);
+        const importResult = await packageImport(storage2, testRepo2, exportZip);
 
         assert.strictEqual(importResult.name, 'reimported');
         assert.strictEqual(importResult.version, '2.0.0');
@@ -382,24 +382,24 @@ describe('workspaces', () => {
       const pkg = e3.package('modified-export', '1.0.0') as any;
       const importZip = join(tempDir, 'modified-export.zip');
       await e3.export(pkg, importZip);
-      await packageImport(storage, importZip);
-      await workspaceDeploy(storage, 'ws', 'modified-export', '1.0.0');
+      await packageImport(storage, testRepo, importZip);
+      await workspaceDeploy(storage, testRepo, 'ws', 'modified-export', '1.0.0');
 
       // Modify the workspace root
       const newData = new Uint8Array([99, 88, 77]);
       const newHash = await objectWrite(testRepo, newData);
-      await workspaceSetRoot(storage, 'ws', newHash);
+      await workspaceSetRoot(storage, testRepo, 'ws', newHash);
 
       // Export
       const exportZip = join(tempDir, 'modified.zip');
-      const result = await workspaceExport(storage, 'ws', exportZip);
+      const result = await workspaceExport(storage, testRepo, 'ws', exportZip);
 
       // Import to new repo and verify root changed
       const testRepo2 = createTestRepo();
-      const storage2 = new LocalBackend(testRepo2);
+      const storage2 = new LocalStorage();
       try {
-        await packageImport(storage2, exportZip);
-        const exportedPkg = await packageRead(storage2, result.name, result.version);
+        await packageImport(storage2, testRepo2, exportZip);
+        const exportedPkg = await packageRead(storage2, testRepo2, result.name, result.version);
 
         assert.strictEqual(exportedPkg.data.value, newHash);
       } finally {
@@ -412,18 +412,18 @@ describe('workspaces', () => {
       const pkg = e3.package('tasks-preserve', '1.0.0') as any;
       const importZip = join(tempDir, 'tasks-preserve.zip');
       await e3.export(pkg, importZip);
-      await packageImport(storage, importZip);
-      await workspaceDeploy(storage, 'ws', 'tasks-preserve', '1.0.0');
+      await packageImport(storage, testRepo, importZip);
+      await workspaceDeploy(storage, testRepo, 'ws', 'tasks-preserve', '1.0.0');
 
       const exportZip = join(tempDir, 'tasks-exported.zip');
-      await workspaceExport(storage, 'ws', exportZip, 'tasks-out', '1.0.0');
+      await workspaceExport(storage, testRepo, 'ws', exportZip, 'tasks-out', '1.0.0');
 
       const testRepo2 = createTestRepo();
-      const storage2 = new LocalBackend(testRepo2);
+      const storage2 = new LocalStorage();
       try {
-        await packageImport(storage2, exportZip);
-        const originalPkg = await packageRead(storage, 'tasks-preserve', '1.0.0');
-        const exportedPkg = await packageRead(storage2, 'tasks-out', '1.0.0');
+        await packageImport(storage2, testRepo2, exportZip);
+        const originalPkg = await packageRead(storage, testRepo, 'tasks-preserve', '1.0.0');
+        const exportedPkg = await packageRead(storage2, testRepo2, 'tasks-out', '1.0.0');
 
         // Tasks should be the same
         assert.strictEqual(exportedPkg.tasks.size, originalPkg.tasks.size);
@@ -433,11 +433,11 @@ describe('workspaces', () => {
     });
 
     it('throws for undeployed workspace', async () => {
-      await workspaceCreate(storage, 'empty');
+      await workspaceCreate(storage, testRepo, 'empty');
       const exportZip = join(tempDir, 'empty.zip');
 
       await assert.rejects(
-        async () => await workspaceExport(storage, 'empty', exportZip),
+        async () => await workspaceExport(storage, testRepo, 'empty', exportZip),
         WorkspaceNotDeployedError
       );
     });

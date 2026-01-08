@@ -53,6 +53,7 @@ export function inputsHash(inputHashes: string[]): string {
  * Get execution status.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @returns ExecutionStatus or null if execution doesn't exist
@@ -60,52 +61,59 @@ export function inputsHash(inputHashes: string[]): string {
  */
 export async function executionGet(
   storage: StorageBackend,
+  repo: string,
   taskHash: string,
   inHash: string
 ): Promise<ExecutionStatus | null> {
-  return storage.refs.executionGet(taskHash, inHash);
+  return storage.refs.executionGet(repo, taskHash, inHash);
 }
 
 /**
  * Get output hash for a completed execution.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @returns Output hash or null if not complete or failed
  */
 export async function executionGetOutput(
   storage: StorageBackend,
+  repo: string,
   taskHash: string,
   inHash: string
 ): Promise<string | null> {
-  return storage.refs.executionGetOutput(taskHash, inHash);
+  return storage.refs.executionGetOutput(repo, taskHash, inHash);
 }
 
 /**
  * List all input hashes that have executions for a given task.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param taskHash - Hash of the task object
  * @returns Array of input hashes
  */
 export async function executionListForTask(
   storage: StorageBackend,
+  repo: string,
   taskHash: string
 ): Promise<string[]> {
-  return storage.refs.executionListForTask(taskHash);
+  return storage.refs.executionListForTask(repo, taskHash);
 }
 
 /**
  * List all executions in the repository.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @returns Array of { taskHash, inputsHash } objects
  */
 export async function executionList(
-  storage: StorageBackend
+  storage: StorageBackend,
+  repo: string
 ): Promise<Array<{ taskHash: string; inputsHash: string }>> {
-  return storage.refs.executionList();
+  return storage.refs.executionList(repo);
 }
 
 /**
@@ -128,12 +136,14 @@ export interface CurrentExecutionRef {
  * inputs, falls back to the most recent execution.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param ws - Workspace name
  * @param taskName - Task name
  * @returns Execution reference or null if no executions exist
  */
 export async function executionFindCurrent(
   storage: StorageBackend,
+  repo: string,
   ws: string,
   taskName: string
 ): Promise<CurrentExecutionRef | null> {
@@ -141,15 +151,15 @@ export async function executionFindCurrent(
   const { workspaceGetTaskHash, workspaceGetTask } = await import('./tasks.js');
   const { workspaceGetDatasetHash } = await import('./trees.js');
 
-  const taskHash = await workspaceGetTaskHash(storage, ws, taskName);
-  const task = await workspaceGetTask(storage, ws, taskName);
+  const taskHash = await workspaceGetTaskHash(storage, repo, ws, taskName);
+  const task = await workspaceGetTask(storage, repo, ws, taskName);
 
   // Get the current input hashes from the workspace
   const currentInputHashes: string[] = [];
   let allInputsAssigned = true;
 
   for (const inputPath of task.inputs) {
-    const { refType, hash } = await workspaceGetDatasetHash(storage, ws, inputPath);
+    const { refType, hash } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
     if (refType !== 'value' || hash === null) {
       allInputsAssigned = false;
       break;
@@ -157,7 +167,7 @@ export async function executionFindCurrent(
     currentInputHashes.push(hash);
   }
 
-  const executions = await executionListForTask(storage, taskHash);
+  const executions = await executionListForTask(storage, repo, taskHash);
 
   if (allInputsAssigned) {
     const inHash = inputsHash(currentInputHashes);
@@ -195,6 +205,7 @@ export type { LogChunk };
  * Read execution logs with pagination support.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @param stream - Which log stream to read ('stdout' or 'stderr')
@@ -203,12 +214,13 @@ export type { LogChunk };
  */
 export async function executionReadLog(
   storage: StorageBackend,
+  repo: string,
   taskHash: string,
   inHash: string,
   stream: 'stdout' | 'stderr',
   options: LogReadOptions = {}
 ): Promise<LogChunk> {
-  return storage.logs.read(taskHash, inHash, stream, options);
+  return storage.logs.read(repo, taskHash, inHash, stream, options);
 }
 
 // ============================================================================
@@ -221,6 +233,7 @@ export async function executionReadLog(
  * The IR is an East function: (inputs: Array<String>, output: String) -> Array<String>
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param commandIrHash - Hash of the IR object
  * @param inputPaths - Paths to staged input files
  * @param outputPath - Path where output should be written
@@ -228,11 +241,12 @@ export async function executionReadLog(
  */
 export async function evaluateCommandIr(
   storage: StorageBackend,
+  repo: string,
   commandIrHash: string,
   inputPaths: string[],
   outputPath: string
 ): Promise<string[]> {
-  const irData = await storage.objects.read(commandIrHash);
+  const irData = await storage.objects.read(repo, commandIrHash);
 
   try {
     // Decode the IR from beast2 format
@@ -372,6 +386,7 @@ export interface ExecutionResult {
  * 6. Stores the output and updates status
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param taskHash - Hash of the task object
  * @param inputHashes - Array of input dataset hashes
  * @param options - Execution options
@@ -379,6 +394,7 @@ export interface ExecutionResult {
  */
 export async function taskExecute(
   storage: StorageBackend,
+  repo: string,
   taskHash: string,
   inputHashes: string[],
   options: ExecuteOptions = {}
@@ -388,9 +404,9 @@ export async function taskExecute(
 
   // Step 1: Check cache (unless force)
   if (!options.force) {
-    const existingOutput = await storage.refs.executionGetOutput(taskHash, inHash);
+    const existingOutput = await storage.refs.executionGetOutput(repo, taskHash, inHash);
     if (existingOutput !== null) {
-      const status = await storage.refs.executionGet(taskHash, inHash);
+      const status = await storage.refs.executionGet(repo, taskHash, inHash);
       if (status && status.type === 'success') {
         return {
           inputsHash: inHash,
@@ -408,7 +424,7 @@ export async function taskExecute(
   // Step 2: Read task object
   let task: TaskObject;
   try {
-    const taskData = await storage.objects.read(taskHash);
+    const taskData = await storage.objects.read(repo, taskHash);
     const decoder = decodeBeast2For(TaskObjectType);
     task = decoder(Buffer.from(taskData));
   } catch (err) {
@@ -437,7 +453,7 @@ export async function taskExecute(
     const inputPaths: string[] = [];
     for (let i = 0; i < inputHashes.length; i++) {
       const inputPath = path.join(scratchDir, `input-${i}.beast2`);
-      const inputData = await storage.objects.read(inputHashes[i]!);
+      const inputData = await storage.objects.read(repo, inputHashes[i]!);
       await fs.writeFile(inputPath, inputData);
       inputPaths.push(inputPath);
     }
@@ -446,7 +462,7 @@ export async function taskExecute(
     const outputPath = path.join(scratchDir, 'output.beast2');
     let args: string[];
     try {
-      args = await evaluateCommandIr(storage, task.commandIr, inputPaths, outputPath);
+      args = await evaluateCommandIr(storage, repo, task.commandIr, inputPaths, outputPath);
     } catch (err) {
       return {
         inputsHash: inHash,
@@ -477,6 +493,7 @@ export async function taskExecute(
     // Step 7: Execute command
     const result = await runCommand(
       storage,
+      repo,
       taskHash,
       inHash,
       args,
@@ -490,10 +507,10 @@ export async function taskExecute(
       // Success - read and store output
       try {
         const outputData = await fs.readFile(outputPath);
-        const outputHash = await storage.objects.write(outputData);
+        const outputHash = await storage.objects.write(repo, outputData);
 
         // Write output ref and success status
-        await storage.refs.executionWriteOutput(taskHash, inHash, outputHash);
+        await storage.refs.executionWriteOutput(repo, taskHash, inHash, outputHash);
 
         const status: ExecutionStatus = variant('success', {
           inputHashes,
@@ -501,7 +518,7 @@ export async function taskExecute(
           startedAt: new Date(startTime),
           completedAt: new Date(),
         });
-        await storage.refs.executionWrite(taskHash, inHash, status);
+        await storage.refs.executionWrite(repo, taskHash, inHash, status);
 
         return {
           inputsHash: inHash,
@@ -520,7 +537,7 @@ export async function taskExecute(
           completedAt: new Date(),
           message: `Failed to read output: ${err}`,
         });
-        await storage.refs.executionWrite(taskHash, inHash, status);
+        await storage.refs.executionWrite(repo, taskHash, inHash, status);
 
         return {
           inputsHash: inHash,
@@ -540,7 +557,7 @@ export async function taskExecute(
         completedAt: new Date(),
         exitCode: BigInt(result?.exitCode ?? -1),
       });
-      await storage.refs.executionWrite(taskHash, inHash, status);
+      await storage.refs.executionWrite(repo, taskHash, inHash, status);
 
       return {
         inputsHash: inHash,
@@ -567,6 +584,7 @@ export async function taskExecute(
  */
 async function runCommand(
   storage: StorageBackend,
+  repo: string,
   taskHash: string,
   inHash: string,
   args: string[],
@@ -618,7 +636,7 @@ async function runCommand(
   child.stdout?.on('data', (data: Buffer) => {
     const str = data.toString('utf-8');
     // Fire-and-forget log append (don't block on it)
-    storage.logs.append(taskHash, inHash, 'stdout', str).catch(() => {});
+    storage.logs.append(repo, taskHash, inHash, 'stdout', str).catch(() => {});
     if (options.onStdout) {
       options.onStdout(str);
     }
@@ -628,7 +646,7 @@ async function runCommand(
   child.stderr?.on('data', (data: Buffer) => {
     const str = data.toString('utf-8');
     // Fire-and-forget log append (don't block on it)
-    storage.logs.append(taskHash, inHash, 'stderr', str).catch(() => {});
+    storage.logs.append(repo, taskHash, inHash, 'stderr', str).catch(() => {});
     if (options.onStderr) {
       options.onStderr(str);
     }
@@ -672,7 +690,7 @@ async function runCommand(
     pidStartTime: BigInt(pidStartTime ?? -1),
     bootId,
   });
-  await storage.refs.executionWrite(taskHash, inHash, status);
+  await storage.refs.executionWrite(repo, taskHash, inHash, status);
 
   // Wait for process to complete
   const result = await resultPromise;

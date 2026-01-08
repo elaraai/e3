@@ -14,7 +14,7 @@ import {
   packageExport,
   packageRemove,
   packageRead,
-  LocalBackend,
+  LocalStorage,
 } from '@elaraai/e3-core';
 import { PackageObjectType } from '@elaraai/e3-types';
 import { sendSuccess, sendError } from '../beast2.js';
@@ -27,8 +27,8 @@ export function createPackageRoutes(repoPath: string) {
   // GET /api/packages - List all packages
   app.get('/', async (c) => {
     try {
-      const storage = new LocalBackend(repoPath);
-      const packages = await packageList(storage);
+      const storage = new LocalStorage();
+      const packages = await packageList(storage, repoPath);
       const result = packages.map((pkg) => ({
         name: pkg.name,
         version: pkg.version,
@@ -48,8 +48,8 @@ export function createPackageRoutes(repoPath: string) {
         return sendError(c, PackageObjectType, errorToVariant(new Error('Missing name or version parameter')));
       }
 
-      const storage = new LocalBackend(repoPath);
-      const pkg = await packageRead(storage, name, version);
+      const storage = new LocalStorage();
+      const pkg = await packageRead(storage, repoPath, name, version);
       return sendSuccess(c, PackageObjectType, pkg);
     } catch (err) {
       return sendError(c, PackageObjectType, errorToVariant(err));
@@ -78,8 +78,8 @@ export function createPackageRoutes(repoPath: string) {
       const tempPath = path.join(tempDir, 'package.zip');
       try {
         await fs.writeFile(tempPath, archive);
-        const storage = new LocalBackend(repoPath);
-        const result = await packageImport(storage, tempPath);
+        const storage = new LocalStorage();
+        const result = await packageImport(storage, repoPath, tempPath);
         return sendSuccess(c, PackageImportResultType, {
           name: result.name,
           version: result.version,
@@ -107,8 +107,8 @@ export function createPackageRoutes(repoPath: string) {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'e3-export-'));
       const tempPath = path.join(tempDir, 'package.zip');
       try {
-        const storage = new LocalBackend(repoPath);
-        await packageExport(storage, name, version, tempPath);
+        const storage = new LocalStorage();
+        await packageExport(storage, repoPath, name, version, tempPath);
         const archive = await fs.readFile(tempPath);
         return sendSuccess(c, BlobType, new Uint8Array(archive));
       } finally {
@@ -128,8 +128,8 @@ export function createPackageRoutes(repoPath: string) {
         return sendError(c, NullType, errorToVariant(new Error('Missing name or version parameter')));
       }
 
-      const storage = new LocalBackend(repoPath);
-      await packageRemove(storage, name, version);
+      const storage = new LocalStorage();
+      await packageRemove(storage, repoPath, name, version);
       return sendSuccess(c, NullType, null);
     } catch (err) {
       return sendError(c, NullType, errorToVariant(err));

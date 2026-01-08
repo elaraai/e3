@@ -17,15 +17,14 @@ import {
  * Local filesystem implementation of ObjectStore.
  *
  * Wraps the existing objects.ts functions.
+ * The `repo` parameter is the path to the .e3 directory.
  */
 export class LocalObjectStore implements ObjectStore {
-  constructor(private readonly repoPath: string) {}
-
-  async write(data: Uint8Array): Promise<string> {
-    return objectWrite(this.repoPath, data);
+  async write(repo: string, data: Uint8Array): Promise<string> {
+    return objectWrite(repo, data);
   }
 
-  async writeStream(stream: AsyncIterable<Uint8Array>): Promise<string> {
+  async writeStream(repo: string, stream: AsyncIterable<Uint8Array>): Promise<string> {
     // Convert AsyncIterable to ReadableStream for objectWriteStream
     const readableStream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -35,19 +34,19 @@ export class LocalObjectStore implements ObjectStore {
         controller.close();
       },
     });
-    return objectWriteStream(this.repoPath, readableStream);
+    return objectWriteStream(repo, readableStream);
   }
 
-  async read(hash: string): Promise<Uint8Array> {
-    return objectRead(this.repoPath, hash);
+  async read(repo: string, hash: string): Promise<Uint8Array> {
+    return objectRead(repo, hash);
   }
 
-  async exists(hash: string): Promise<boolean> {
-    return objectExists(this.repoPath, hash);
+  async exists(repo: string, hash: string): Promise<boolean> {
+    return objectExists(repo, hash);
   }
 
-  async list(): Promise<string[]> {
-    const objectsDir = path.join(this.repoPath, 'objects');
+  async list(repo: string): Promise<string[]> {
+    const objectsDir = path.join(repo, 'objects');
     const hashes: string[] = [];
 
     try {

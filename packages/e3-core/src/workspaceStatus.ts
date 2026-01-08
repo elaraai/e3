@@ -151,8 +151,8 @@ interface TaskNode {
 /**
  * Read workspace state.
  */
-async function readWorkspaceState(storage: StorageBackend, ws: string) {
-  const data = await storage.refs.workspaceRead(ws);
+async function readWorkspaceState(storage: StorageBackend, repo: string, ws: string) {
+  const data = await storage.refs.workspaceRead(repo, ws);
   if (data === null) {
     throw new WorkspaceNotFoundError(ws);
   }
@@ -179,6 +179,7 @@ async function readWorkspaceState(storage: StorageBackend, ws: string) {
  * and does not require acquiring a lock.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param ws - Workspace name
  * @returns Complete status report
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
@@ -186,17 +187,18 @@ async function readWorkspaceState(storage: StorageBackend, ws: string) {
  */
 export async function workspaceStatus(
   storage: StorageBackend,
+  repo: string,
   ws: string
 ): Promise<WorkspaceStatusResult> {
   // Check lock status first
-  const lockState = await storage.locks.getState(ws);
+  const lockState = await storage.locks.getState(repo, ws);
   const lock = lockState ? lockStateToHolderInfo(lockState) : null;
 
   // Read workspace state
-  const state = await readWorkspaceState(storage, ws);
+  const state = await readWorkspaceState(storage, repo, ws);
 
   // Read package object to get tasks and structure
-  const pkgData = await storage.objects.read(state.packageHash);
+  const pkgData = await storage.objects.read(repo, state.packageHash);
   const pkgDecoder = decodeBeast2For(PackageObjectType);
   const pkgObject = pkgDecoder(Buffer.from(pkgData));
 
@@ -206,7 +208,7 @@ export async function workspaceStatus(
   const taskDecoder = decodeBeast2For(TaskObjectType);
 
   for (const [taskName, taskHash] of pkgObject.tasks) {
-    const taskData = await storage.objects.read(taskHash);
+    const taskData = await storage.objects.read(repo, taskHash);
     const task = taskDecoder(Buffer.from(taskData));
 
     const outputPathStr = pathToString(task.output);
@@ -251,6 +253,7 @@ export async function workspaceStatus(
   for (const [taskName, node] of taskNodes) {
     const status = await computeTaskStatus(
       storage,
+      repo,
       ws,
       node,
       outputToTask,
@@ -283,7 +286,7 @@ export async function workspaceStatus(
   const datasetStatusInfos: DatasetStatusInfo[] = [];
   for (const datasetPath of datasetPaths) {
     const pathStr = pathToString(datasetPath);
-    const { refType, hash } = await workspaceGetDatasetHash(storage, ws, datasetPath);
+    const { refType, hash } = await workspaceGetDatasetHash(storage, repo, ws, datasetPath);
 
     const producerTask = outputToTask.get(pathStr) ?? null;
     const isTaskOutput = producerTask !== null;
@@ -375,6 +378,7 @@ function collectDatasetPaths(
  */
 async function computeTaskStatus(
   storage: StorageBackend,
+  repo: string,
   ws: string,
   node: TaskNode,
   outputToTask: Map<string, string>,
@@ -382,7 +386,7 @@ async function computeTaskStatus(
   _taskIsStale: Map<string, boolean>
 ): Promise<TaskStatus> {
   // First, check if execution is in progress
-  const inProgressStatus = await checkInProgress(storage, node.hash);
+  const inProgressStatus = await checkInProgress(storage, repo, node.hash);
   if (inProgressStatus) {
     return inProgressStatus;
   }
@@ -394,7 +398,7 @@ async function computeTaskStatus(
 
   for (const inputPath of node.inputPaths) {
     const inputPathStr = pathToString(inputPath);
-    const { refType, hash } = await workspaceGetDatasetHash(storage, ws, inputPath);
+    const { refType, hash } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
 
     if (refType === 'unassigned' || hash === null) {
       hasUnsetInputs = true;
@@ -433,7 +437,7 @@ async function computeTaskStatus(
 
   // Check the execution status for these inputs
   const inHash = inputsHash(currentInputHashes);
-  const execStatus = await executionGet(storage, node.hash, inHash);
+  const execStatus = await executionGet(storage, repo, node.hash, inHash);
 
   if (execStatus === null) {
     // No execution attempted - task is ready to run
@@ -476,6 +480,7 @@ async function computeTaskStatus(
       const cachedOutputHash = execStatus.value.outputHash;
       const { refType, hash: wsOutputHash } = await workspaceGetDatasetHash(
         storage,
+        repo,
         ws,
         node.outputPath
       );
@@ -504,13 +509,14 @@ async function computeTaskStatus(
  */
 async function checkInProgress(
   storage: StorageBackend,
+  repo: string,
   taskHash: string
 ): Promise<TaskStatus | null> {
   // List all executions for this task
-  const inputsHashes = await storage.refs.executionListForTask(taskHash);
+  const inputsHashes = await storage.refs.executionListForTask(repo, taskHash);
 
   for (const inHash of inputsHashes) {
-    const status = await storage.refs.executionGet(taskHash, inHash);
+    const status = await storage.refs.executionGet(repo, taskHash, inHash);
     if (status?.type === 'running') {
       // Found a running execution - verify process is actually alive
       const pid = Number(status.value.pid);

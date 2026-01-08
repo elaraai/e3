@@ -11,7 +11,7 @@
  *   e3 get . ws.path.to.dataset -f json
  */
 
-import { workspaceGetDatasetHash, datasetRead, LocalBackend } from '@elaraai/e3-core';
+import { workspaceGetDatasetHash, datasetRead, LocalStorage } from '@elaraai/e3-core';
 import { printFor, toJSONFor } from '@elaraai/east';
 import { resolveRepo, parseDatasetPath, formatError, exitError } from '../utils.js';
 
@@ -25,7 +25,7 @@ export async function getCommand(
 ): Promise<void> {
   try {
     const repoPath = resolveRepo(repoArg);
-    const storage = new LocalBackend(repoPath);
+    const storage = new LocalStorage();
     const { ws, path } = parseDatasetPath(pathSpec);
 
     if (path.length === 0) {
@@ -33,7 +33,7 @@ export async function getCommand(
     }
 
     // Get the hash first, then read with type info
-    const { refType, hash } = await workspaceGetDatasetHash(storage, ws, path);
+    const { refType, hash } = await workspaceGetDatasetHash(storage, repoPath, ws, path);
 
     if (refType === 'unassigned') {
       exitError('Dataset is unassigned (pending task output)');
@@ -45,7 +45,7 @@ export async function getCommand(
     }
 
     // Read the dataset to get both value and type
-    const { type, value } = await datasetRead(storage, hash);
+    const { type, value } = await datasetRead(storage, repoPath, hash);
 
     const format = options.format ?? 'east';
 

@@ -35,7 +35,8 @@ export {
 
 // Local filesystem implementation
 export {
-  LocalBackend,
+  LocalStorage,
+  LocalBackend,  // Backwards compatibility alias for LocalStorage
   LocalObjectStore,
   LocalRefStore,
   LocalLockService,
