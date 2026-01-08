@@ -43,11 +43,11 @@ export class LocalLockService implements LockService {
     }
   }
 
-  async getState(resource: string): Promise<LockState | null> {
+  getState(resource: string): Promise<LockState | null> {
     return getWorkspaceLockState(this.repoPath, resource);
   }
 
-  async isHolderAlive(holder: LockHolder): Promise<boolean> {
+  isHolderAlive(holder: LockHolder): Promise<boolean> {
     return isLockHolderAlive(holder);
   }
 }
