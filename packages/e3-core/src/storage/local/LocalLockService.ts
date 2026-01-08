@@ -17,11 +17,11 @@ import {
  *
  * Uses flock() for kernel-managed locking with lock state
  * stored in beast2 format using LockStateType.
+ * The `repo` parameter is the path to the .e3 directory.
  */
 export class LocalLockService implements LockService {
-  constructor(private readonly repoPath: string) {}
-
   async acquire(
+    repo: string,
     resource: string,
     operation: LockOperation,
     options?: { wait?: boolean; timeout?: number }
@@ -32,7 +32,7 @@ export class LocalLockService implements LockService {
     };
 
     try {
-      const handle = await acquireWorkspaceLock(this.repoPath, resource, operation, acquireOptions);
+      const handle = await acquireWorkspaceLock(repo, resource, operation, acquireOptions);
       return {
         resource,
         release: () => handle.release(),
@@ -43,8 +43,8 @@ export class LocalLockService implements LockService {
     }
   }
 
-  getState(resource: string): Promise<LockState | null> {
-    return getWorkspaceLockState(this.repoPath, resource);
+  getState(repo: string, resource: string): Promise<LockState | null> {
+    return getWorkspaceLockState(repo, resource);
   }
 
   isHolderAlive(holder: LockHolder): Promise<boolean> {

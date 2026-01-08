@@ -37,6 +37,7 @@ import type { StorageBackend } from './storage/interfaces.js';
  * List task names in a package.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Package name
  * @param version - Package version
  * @returns Array of task names
@@ -44,10 +45,11 @@ import type { StorageBackend } from './storage/interfaces.js';
  */
 export async function packageListTasks(
   storage: StorageBackend,
+  repo: string,
   name: string,
   version: string
 ): Promise<string[]> {
-  const pkg = await packageRead(storage, name, version);
+  const pkg = await packageRead(storage, repo, name, version);
   return Array.from(pkg.tasks.keys());
 }
 
@@ -55,6 +57,7 @@ export async function packageListTasks(
  * Get task details from a package.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Package name
  * @param version - Package version
  * @param taskName - Name of the task
@@ -64,18 +67,19 @@ export async function packageListTasks(
  */
 export async function packageGetTask(
   storage: StorageBackend,
+  repo: string,
   name: string,
   version: string,
   taskName: string
 ): Promise<TaskObject> {
-  const pkg = await packageRead(storage, name, version);
+  const pkg = await packageRead(storage, repo, name, version);
   const taskHash = pkg.tasks.get(taskName);
 
   if (!taskHash) {
     throw new TaskNotFoundError(taskName);
   }
 
-  const taskData = await storage.objects.read(taskHash);
+  const taskData = await storage.objects.read(repo, taskHash);
   const decoder = decodeBeast2For(TaskObjectType);
   return decoder(Buffer.from(taskData));
 }
@@ -89,8 +93,8 @@ export async function packageGetTask(
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace exists but not deployed
  */
-async function readWorkspaceState(storage: StorageBackend, ws: string) {
-  const data = await storage.refs.workspaceRead(ws);
+async function readWorkspaceState(storage: StorageBackend, repo: string, ws: string) {
+  const data = await storage.refs.workspaceRead(repo, ws);
 
   if (data === null) {
     throw new WorkspaceNotFoundError(ws);
@@ -107,9 +111,9 @@ async function readWorkspaceState(storage: StorageBackend, ws: string) {
 /**
  * Get the deployed package object for a workspace.
  */
-async function getWorkspacePackageObject(storage: StorageBackend, ws: string) {
-  const state = await readWorkspaceState(storage, ws);
-  const pkgData = await storage.objects.read(state.packageHash);
+async function getWorkspacePackageObject(storage: StorageBackend, repo: string, ws: string) {
+  const state = await readWorkspaceState(storage, repo, ws);
+  const pkgData = await storage.objects.read(repo, state.packageHash);
   const decoder = decodeBeast2For(PackageObjectType);
   return decoder(Buffer.from(pkgData));
 }
@@ -120,15 +124,17 @@ async function getWorkspacePackageObject(storage: StorageBackend, ws: string) {
  * Tasks are defined by the deployed package.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param ws - Workspace name
  * @returns Array of task names
  * @throws If workspace not found or not deployed
  */
 export async function workspaceListTasks(
   storage: StorageBackend,
+  repo: string,
   ws: string
 ): Promise<string[]> {
-  const pkg = await getWorkspacePackageObject(storage, ws);
+  const pkg = await getWorkspacePackageObject(storage, repo, ws);
   return Array.from(pkg.tasks.keys());
 }
 
@@ -136,6 +142,7 @@ export async function workspaceListTasks(
  * Get task hash from a workspace.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param ws - Workspace name
  * @param taskName - Name of the task
  * @returns The hash of the TaskObject
@@ -145,10 +152,11 @@ export async function workspaceListTasks(
  */
 export async function workspaceGetTaskHash(
   storage: StorageBackend,
+  repo: string,
   ws: string,
   taskName: string
 ): Promise<string> {
-  const pkg = await getWorkspacePackageObject(storage, ws);
+  const pkg = await getWorkspacePackageObject(storage, repo, ws);
   const taskHash = pkg.tasks.get(taskName);
 
   if (!taskHash) {
@@ -164,6 +172,7 @@ export async function workspaceGetTaskHash(
  * Tasks are defined by the deployed package.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param ws - Workspace name
  * @param taskName - Name of the task
  * @returns The TaskObject containing runner, inputs, and output
@@ -171,11 +180,12 @@ export async function workspaceGetTaskHash(
  */
 export async function workspaceGetTask(
   storage: StorageBackend,
+  repo: string,
   ws: string,
   taskName: string
 ): Promise<TaskObject> {
-  const taskHash = await workspaceGetTaskHash(storage, ws, taskName);
-  const taskData = await storage.objects.read(taskHash);
+  const taskHash = await workspaceGetTaskHash(storage, repo, ws, taskName);
+  const taskData = await storage.objects.read(repo, taskHash);
   const decoder = decodeBeast2For(TaskObjectType);
   return decoder(Buffer.from(taskData));
 }

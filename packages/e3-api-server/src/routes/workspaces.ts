@@ -17,7 +17,7 @@ import {
   workspaceDeploy,
   workspaceExport,
   packageGetLatestVersion,
-  LocalBackend,
+  LocalStorage,
 } from '@elaraai/e3-core';
 import { decodeBody, sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
@@ -29,11 +29,11 @@ export function createWorkspaceRoutes(repoPath: string) {
   // GET /api/workspaces - List all workspaces
   app.get('/', async (c) => {
     try {
-      const storage = new LocalBackend(repoPath);
-      const workspaces = await workspaceList(storage);
+      const storage = new LocalStorage();
+      const workspaces = await workspaceList(storage, repoPath);
       const result = await Promise.all(
         workspaces.map(async (name) => {
-          const state = await workspaceGetState(storage, name);
+          const state = await workspaceGetState(storage, repoPath, name);
           if (state) {
             return {
               name,
@@ -60,9 +60,9 @@ export function createWorkspaceRoutes(repoPath: string) {
   // POST /api/workspaces - Create a new workspace
   app.post('/', async (c) => {
     try {
-      const storage = new LocalBackend(repoPath);
+      const storage = new LocalStorage();
       const body = await decodeBody(c, CreateWorkspaceType);
-      await workspaceCreate(storage, body.name);
+      await workspaceCreate(storage, repoPath, body.name);
       return sendSuccess(c, WorkspaceInfoType, {
         name: body.name,
         deployed: false,
@@ -78,8 +78,8 @@ export function createWorkspaceRoutes(repoPath: string) {
   app.get('/:name', async (c) => {
     try {
       const name = c.req.param('name');
-      const storage = new LocalBackend(repoPath);
-      const state = await workspaceGetState(storage, name);
+      const storage = new LocalStorage();
+      const state = await workspaceGetState(storage, repoPath, name);
       if (!state) {
         // Workspace exists but not deployed - return error
         return sendError(c, WorkspaceStateType, errorToVariant(new Error(`Workspace '${name}' is not deployed`)));
@@ -93,9 +93,9 @@ export function createWorkspaceRoutes(repoPath: string) {
   // DELETE /api/workspaces/:name - Remove a workspace
   app.delete('/:name', async (c) => {
     try {
-      const storage = new LocalBackend(repoPath);
+      const storage = new LocalStorage();
       const name = c.req.param('name');
-      await workspaceRemove(storage, name);
+      await workspaceRemove(storage, repoPath, name);
       return sendSuccess(c, NullType, null);
     } catch (err) {
       return sendError(c, NullType, errorToVariant(err));
@@ -111,14 +111,14 @@ export function createWorkspaceRoutes(repoPath: string) {
       }
       const body = await decodeBody(c, DeployRequestType);
 
-      const storage = new LocalBackend(repoPath);
+      const storage = new LocalStorage();
       const { name: pkgName, version: maybeVersion } = parsePackageRef(body.packageRef);
-      const pkgVersion = maybeVersion ?? await packageGetLatestVersion(storage, pkgName);
+      const pkgVersion = maybeVersion ?? await packageGetLatestVersion(storage, repoPath, pkgName);
       if (!pkgVersion) {
         return sendError(c, NullType, errorToVariant(new Error(`Package not found: ${pkgName}`)));
       }
 
-      await workspaceDeploy(storage, name, pkgName, pkgVersion);
+      await workspaceDeploy(storage, repoPath, name, pkgName, pkgVersion);
       return sendSuccess(c, NullType, null);
     } catch (err) {
       return sendError(c, NullType, errorToVariant(err));
@@ -134,11 +134,11 @@ export function createWorkspaceRoutes(repoPath: string) {
       }
 
       // Export to temp file
-      const storage = new LocalBackend(repoPath);
+      const storage = new LocalStorage();
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'e3-ws-export-'));
       const tempPath = path.join(tempDir, 'workspace.zip');
       try {
-        await workspaceExport(storage, name, tempPath);
+        await workspaceExport(storage, repoPath, name, tempPath);
         const archive = await fs.readFile(tempPath);
         return sendSuccess(c, BlobType, new Uint8Array(archive));
       } finally {

@@ -10,7 +10,7 @@
  * StorageBackend that works with local repositories.
  */
 
-export { LocalBackend } from './LocalBackend.js';
+export { LocalStorage, LocalBackend } from './LocalBackend.js';
 export { LocalObjectStore } from './LocalObjectStore.js';
 export { LocalRefStore } from './LocalRefStore.js';
 export { LocalLockService } from './LocalLockService.js';

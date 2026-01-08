@@ -16,7 +16,7 @@ import * as path from 'path';
 import { decodeBeast2For } from '@elaraai/east';
 import { WorkspaceStateType } from '@elaraai/e3-types';
 import type { StorageBackend } from './storage/interfaces.js';
-import { LocalBackend } from './storage/local/index.js';
+import { LocalStorage } from './storage/local/index.js';
 
 /**
  * Options for garbage collection
@@ -69,40 +69,41 @@ export interface GcResult {
 /**
  * Run garbage collection on an e3 repository.
  *
- * Note: GC currently requires LocalBackend as it needs direct filesystem access
+ * Note: GC currently requires LocalStorage as it needs direct filesystem access
  * to enumerate and delete unreachable objects. Cloud backends will need their
  * own GC implementation (e.g., using S3 lifecycle policies).
  *
- * @param storage - Storage backend (must be LocalBackend)
+ * @param storage - Storage backend (must be LocalStorage)
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param options - GC options
  * @returns GC result with statistics
- * @throws Error if storage is not a LocalBackend
+ * @throws Error if storage is not a LocalStorage
  */
 export async function repoGc(
   storage: StorageBackend,
+  repo: string,
   options: GcOptions = {}
 ): Promise<GcResult> {
-  // GC requires direct filesystem access - verify we have LocalBackend
-  if (!(storage instanceof LocalBackend)) {
-    throw new Error('GC is only supported with LocalBackend storage');
+  // GC requires direct filesystem access - verify we have LocalStorage
+  if (!(storage instanceof LocalStorage)) {
+    throw new Error('GC is only supported with LocalStorage storage');
   }
-  const repoPath = storage.repoPath;
 
   const minAge = options.minAge ?? 60000; // Default 1 minute
   const dryRun = options.dryRun ?? false;
   const now = Date.now();
 
   // Step 1: Collect all root hashes
-  const roots = await collectRoots(repoPath);
+  const roots = await collectRoots(repo);
 
   // Step 2: Mark all reachable objects starting from roots
   const reachable = new Set<string>();
   for (const root of roots) {
-    await markReachable(storage, root, reachable);
+    await markReachable(storage, repo, root, reachable);
   }
 
   // Step 3: Sweep - enumerate all objects and delete unreachable ones
-  const result = await sweep(repoPath, reachable, minAge, now, dryRun);
+  const result = await sweep(repo, reachable, minAge, now, dryRun);
 
   return result;
 }
@@ -209,6 +210,7 @@ async function collectRefsFromDir(
  */
 async function markReachable(
   storage: StorageBackend,
+  repo: string,
   hash: string,
   reachable: Set<string>
 ): Promise<void> {
@@ -219,7 +221,7 @@ async function markReachable(
 
   // Try to load the object
   try {
-    const data = await storage.objects.read(hash);
+    const data = await storage.objects.read(repo, hash);
     reachable.add(hash);
 
     // Scan for hash patterns in the data
@@ -231,7 +233,7 @@ async function markReachable(
       const potentialHash = match[0];
       if (!reachable.has(potentialHash)) {
         // Recursively mark if it exists
-        await markReachable(storage, potentialHash, reachable);
+        await markReachable(storage, repo, potentialHash, reachable);
       }
     }
   } catch {

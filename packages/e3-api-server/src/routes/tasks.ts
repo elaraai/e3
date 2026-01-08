@@ -9,7 +9,7 @@ import {
   workspaceListTasks,
   workspaceGetTask,
   workspaceGetTaskHash,
-  LocalBackend,
+  LocalStorage,
 } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
@@ -26,13 +26,13 @@ export function createTaskRoutes(repoPath: string) {
         return sendError(c, ArrayType(TaskInfoType), errorToVariant(new Error('Missing workspace parameter')));
       }
       // workspaceListTasks returns string[] of task names
-      const storage = new LocalBackend(repoPath);
-      const taskNames = await workspaceListTasks(storage, workspace);
+      const storage = new LocalStorage();
+      const taskNames = await workspaceListTasks(storage, repoPath, workspace);
 
       // Get hash for each task
       const result = await Promise.all(
         taskNames.map(async (name) => {
-          const hash = await workspaceGetTaskHash(storage, workspace, name);
+          const hash = await workspaceGetTaskHash(storage, repoPath, workspace, name);
           return { name, hash };
         })
       );
@@ -53,9 +53,9 @@ export function createTaskRoutes(repoPath: string) {
       }
 
       // Get hash and task object
-      const storage = new LocalBackend(repoPath);
-      const hash = await workspaceGetTaskHash(storage, workspace, name);
-      const task = await workspaceGetTask(storage, workspace, name);
+      const storage = new LocalStorage();
+      const hash = await workspaceGetTaskHash(storage, repoPath, workspace, name);
+      const task = await workspaceGetTask(storage, repoPath, workspace, name);
 
       return sendSuccess(c, TaskDetailsType, {
         name,

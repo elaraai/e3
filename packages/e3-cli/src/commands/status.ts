@@ -16,7 +16,7 @@ import {
   workspaceList,
   workspaceGetState,
   workspaceStatus,
-  LocalBackend,
+  LocalStorage,
   type WorkspaceStatusResult,
 } from '@elaraai/e3-core';
 import { resolveRepo, formatError, exitError } from '../utils.js';
@@ -42,12 +42,12 @@ export async function statusCommand(repoArg: string, workspace?: string): Promis
  * Show repository-level status.
  */
 async function showRepoStatus(repoPath: string): Promise<void> {
-  const storage = new LocalBackend(repoPath);
+  const storage = new LocalStorage();
   console.log(`Repository: ${repoPath}`);
   console.log('');
 
   // List packages
-  const packages = await packageList(storage);
+  const packages = await packageList(storage, repoPath);
   console.log('Packages:');
   if (packages.length === 0) {
     console.log('  (none)');
@@ -57,13 +57,13 @@ async function showRepoStatus(repoPath: string): Promise<void> {
     }
   }
   console.log('');
-  const workspaces = await workspaceList(storage);
+  const workspaces = await workspaceList(storage, repoPath);
   console.log('Workspaces:');
   if (workspaces.length === 0) {
     console.log('  (none)');
   } else {
     for (const ws of workspaces) {
-      const state = await workspaceGetState(storage, ws);
+      const state = await workspaceGetState(storage, repoPath, ws);
       if (state) {
         console.log(`  ${ws}`);
         console.log(`    Package: ${state.packageName}@${state.packageVersion}`);
@@ -80,8 +80,8 @@ async function showRepoStatus(repoPath: string): Promise<void> {
  * Show detailed workspace status.
  */
 async function showWorkspaceStatus(repoPath: string, ws: string): Promise<void> {
-  const storage = new LocalBackend(repoPath);
-  const status = await workspaceStatus(storage, ws);
+  const storage = new LocalStorage();
+  const status = await workspaceStatus(storage, repoPath, ws);
 
   console.log(`Workspace: ${status.workspace}`);
   console.log('');

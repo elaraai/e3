@@ -11,7 +11,7 @@
  *   e3 gc . --dry-run
  */
 
-import { repoGc, LocalBackend } from '@elaraai/e3-core';
+import { repoGc, LocalStorage } from '@elaraai/e3-core';
 import { resolveRepo, formatError, exitError } from '../utils.js';
 
 /**
@@ -23,7 +23,7 @@ export async function gcCommand(
 ): Promise<void> {
   try {
     const repoPath = resolveRepo(repoArg);
-    const storage = new LocalBackend(repoPath);
+    const storage = new LocalStorage();
     const minAge = options.minAge ? parseInt(options.minAge, 10) : 60000;
 
     if (options.dryRun) {
@@ -32,7 +32,7 @@ export async function gcCommand(
     console.log(`Minimum age: ${minAge}ms`);
     console.log('');
 
-    const result = await repoGc(storage, {
+    const result = await repoGc(storage, repoPath, {
       dryRun: options.dryRun,
       minAge,
     });

@@ -12,7 +12,7 @@ import {
   workspaceStatus,
   executionFindCurrent,
   executionReadLog,
-  LocalBackend,
+  LocalStorage,
   WorkspaceLockError,
   type WorkspaceStatusResult as CoreWorkspaceStatusResult,
   type DatasetStatusInfo as CoreDatasetStatusInfo,
@@ -194,7 +194,7 @@ function convertWorkspaceStatus(result: CoreWorkspaceStatusResult): WorkspaceSta
 
 export function createExecutionRoutes(repoPath: string) {
   const app = new Hono();
-  const storage = new LocalBackend(repoPath);
+  const storage = new LocalStorage();
 
   // POST /api/workspaces/:ws/start - Start dataflow execution (non-blocking)
   app.post('/start', async (c) => {
@@ -207,7 +207,7 @@ export function createExecutionRoutes(repoPath: string) {
       const body = await decodeBody(c, DataflowRequestType);
 
       // Acquire lock first - returns null if already locked
-      const lock = await storage.locks.acquire(workspace, variant('dataflow', null));
+      const lock = await storage.locks.acquire(repoPath, workspace, variant('dataflow', null));
       if (!lock) {
         throw new WorkspaceLockError(workspace);
       }
@@ -217,7 +217,7 @@ export function createExecutionRoutes(repoPath: string) {
       const filter = body.filter.type === 'some' ? body.filter.value : undefined;
 
       // Start execution without awaiting - it runs in background
-      dataflowStart(storage, workspace, {
+      dataflowStart(storage, repoPath, workspace, {
         concurrency,
         force: body.force,
         filter,
@@ -248,7 +248,7 @@ export function createExecutionRoutes(repoPath: string) {
       const concurrency = body.concurrency.type === 'some' ? Number(body.concurrency.value) : 4;
       const filter = body.filter.type === 'some' ? body.filter.value : undefined;
 
-      const result = await dataflowExecute(storage, workspace, {
+      const result = await dataflowExecute(storage, repoPath, workspace, {
         concurrency,
         force: body.force,
         filter,
@@ -268,7 +268,7 @@ export function createExecutionRoutes(repoPath: string) {
     }
 
     try {
-      const result = await workspaceStatus(storage, workspace);
+      const result = await workspaceStatus(storage, repoPath, workspace);
       return sendSuccess(c, WorkspaceStatusResultType, convertWorkspaceStatus(result));
     } catch (err) {
       return sendError(c, WorkspaceStatusResultType, errorToVariant(err));
@@ -283,7 +283,7 @@ export function createExecutionRoutes(repoPath: string) {
     }
 
     try {
-      const graph = await dataflowGetGraph(storage, workspace);
+      const graph = await dataflowGetGraph(storage, repoPath, workspace);
       return sendSuccess(c, DataflowGraphType, {
         tasks: graph.tasks.map((t) => ({
           name: t.name,
@@ -316,13 +316,13 @@ export function createExecutionRoutes(repoPath: string) {
       const limit = parseInt(c.req.query('limit') || '65536', 10);
 
       // Find the current execution for this task
-      const execution = await executionFindCurrent(storage, workspace, taskName);
+      const execution = await executionFindCurrent(storage, repoPath, workspace, taskName);
       if (!execution) {
         return sendError(c, LogChunkType, errorToVariant(new Error('No executions found for task')));
       }
 
       // Read logs
-      const chunk = await executionReadLog(storage, execution.taskHash, execution.inputsHash, stream, { offset, limit });
+      const chunk = await executionReadLog(storage, repoPath, execution.taskHash, execution.inputsHash, stream, { offset, limit });
 
       return sendSuccess(c, LogChunkType, {
         data: chunk.data,

@@ -14,17 +14,15 @@ import { isNotFoundError, ExecutionCorruptError } from '../../errors.js';
 /**
  * Local filesystem implementation of RefStore.
  *
- * Wraps the existing packages.ts, workspaces.ts, and executions.ts functions.
+ * The `repo` parameter is the path to the .e3 directory.
  */
 export class LocalRefStore implements RefStore {
-  constructor(private readonly repoPath: string) {}
-
   // -------------------------------------------------------------------------
   // Package References
   // -------------------------------------------------------------------------
 
-  async packageList(): Promise<{ name: string; version: string }[]> {
-    const packagesDir = path.join(this.repoPath, 'packages');
+  async packageList(repo: string): Promise<{ name: string; version: string }[]> {
+    const packagesDir = path.join(repo, 'packages');
     const packages: { name: string; version: string }[] = [];
 
     try {
@@ -46,8 +44,8 @@ export class LocalRefStore implements RefStore {
     return packages;
   }
 
-  async packageResolve(name: string, version: string): Promise<string | null> {
-    const refPath = path.join(this.repoPath, 'packages', name, version);
+  async packageResolve(repo: string, name: string, version: string): Promise<string | null> {
+    const refPath = path.join(repo, 'packages', name, version);
     try {
       const content = await fs.readFile(refPath, 'utf-8');
       return content.trim();
@@ -59,15 +57,15 @@ export class LocalRefStore implements RefStore {
     }
   }
 
-  async packageWrite(name: string, version: string, hash: string): Promise<void> {
-    const refDir = path.join(this.repoPath, 'packages', name);
+  async packageWrite(repo: string, name: string, version: string, hash: string): Promise<void> {
+    const refDir = path.join(repo, 'packages', name);
     await fs.mkdir(refDir, { recursive: true });
     const refPath = path.join(refDir, version);
     await fs.writeFile(refPath, hash + '\n');
   }
 
-  async packageRemove(name: string, version: string): Promise<void> {
-    const refPath = path.join(this.repoPath, 'packages', name, version);
+  async packageRemove(repo: string, name: string, version: string): Promise<void> {
+    const refPath = path.join(repo, 'packages', name, version);
     try {
       await fs.unlink(refPath);
     } catch (err) {
@@ -78,7 +76,7 @@ export class LocalRefStore implements RefStore {
     }
 
     // Try to remove the package name directory if empty
-    const packageDir = path.join(this.repoPath, 'packages', name);
+    const packageDir = path.join(repo, 'packages', name);
     try {
       await fs.rmdir(packageDir);
     } catch {
@@ -90,8 +88,8 @@ export class LocalRefStore implements RefStore {
   // Workspace State
   // -------------------------------------------------------------------------
 
-  async workspaceList(): Promise<string[]> {
-    const workspacesDir = path.join(this.repoPath, 'workspaces');
+  async workspaceList(repo: string): Promise<string[]> {
+    const workspacesDir = path.join(repo, 'workspaces');
     const names: string[] = [];
 
     try {
@@ -108,8 +106,8 @@ export class LocalRefStore implements RefStore {
     return names;
   }
 
-  async workspaceRead(name: string): Promise<Uint8Array | null> {
-    const stateFile = path.join(this.repoPath, 'workspaces', `${name}.beast2`);
+  async workspaceRead(repo: string, name: string): Promise<Uint8Array | null> {
+    const stateFile = path.join(repo, 'workspaces', `${name}.beast2`);
 
     try {
       return await fs.readFile(stateFile);
@@ -121,8 +119,8 @@ export class LocalRefStore implements RefStore {
     }
   }
 
-  async workspaceWrite(name: string, state: Uint8Array): Promise<void> {
-    const wsDir = path.join(this.repoPath, 'workspaces');
+  async workspaceWrite(repo: string, name: string, state: Uint8Array): Promise<void> {
+    const wsDir = path.join(repo, 'workspaces');
     const stateFile = path.join(wsDir, `${name}.beast2`);
 
     await fs.mkdir(wsDir, { recursive: true });
@@ -134,8 +132,8 @@ export class LocalRefStore implements RefStore {
     await fs.rename(tempPath, stateFile);
   }
 
-  async workspaceRemove(name: string): Promise<void> {
-    const stateFile = path.join(this.repoPath, 'workspaces', `${name}.beast2`);
+  async workspaceRemove(repo: string, name: string): Promise<void> {
+    const stateFile = path.join(repo, 'workspaces', `${name}.beast2`);
     try {
       await fs.unlink(stateFile);
     } catch (err) {
@@ -150,12 +148,12 @@ export class LocalRefStore implements RefStore {
   // Execution Cache
   // -------------------------------------------------------------------------
 
-  private executionDir(taskHash: string, inputsHash: string): string {
-    return path.join(this.repoPath, 'executions', taskHash, inputsHash);
+  private executionDir(repo: string, taskHash: string, inputsHash: string): string {
+    return path.join(repo, 'executions', taskHash, inputsHash);
   }
 
-  async executionGet(taskHash: string, inputsHash: string): Promise<ExecutionStatus | null> {
-    const execDir = this.executionDir(taskHash, inputsHash);
+  async executionGet(repo: string, taskHash: string, inputsHash: string): Promise<ExecutionStatus | null> {
+    const execDir = this.executionDir(repo, taskHash, inputsHash);
     const statusPath = path.join(execDir, 'status.beast2');
 
     let data: Buffer;
@@ -180,16 +178,16 @@ export class LocalRefStore implements RefStore {
     }
   }
 
-  async executionWrite(taskHash: string, inputsHash: string, status: ExecutionStatus): Promise<void> {
-    const execDir = this.executionDir(taskHash, inputsHash);
+  async executionWrite(repo: string, taskHash: string, inputsHash: string, status: ExecutionStatus): Promise<void> {
+    const execDir = this.executionDir(repo, taskHash, inputsHash);
     await fs.mkdir(execDir, { recursive: true });
 
     const encoder = encodeBeast2For(ExecutionStatusType);
     await fs.writeFile(path.join(execDir, 'status.beast2'), encoder(status));
   }
 
-  async executionGetOutput(taskHash: string, inputsHash: string): Promise<string | null> {
-    const execDir = this.executionDir(taskHash, inputsHash);
+  async executionGetOutput(repo: string, taskHash: string, inputsHash: string): Promise<string | null> {
+    const execDir = this.executionDir(repo, taskHash, inputsHash);
     const outputPath = path.join(execDir, 'output');
 
     try {
@@ -203,14 +201,14 @@ export class LocalRefStore implements RefStore {
     }
   }
 
-  async executionWriteOutput(taskHash: string, inputsHash: string, outputHash: string): Promise<void> {
-    const execDir = this.executionDir(taskHash, inputsHash);
+  async executionWriteOutput(repo: string, taskHash: string, inputsHash: string, outputHash: string): Promise<void> {
+    const execDir = this.executionDir(repo, taskHash, inputsHash);
     await fs.mkdir(execDir, { recursive: true });
     await fs.writeFile(path.join(execDir, 'output'), outputHash + '\n');
   }
 
-  async executionList(): Promise<{ taskHash: string; inputsHash: string }[]> {
-    const executionsDir = path.join(this.repoPath, 'executions');
+  async executionList(repo: string): Promise<{ taskHash: string; inputsHash: string }[]> {
+    const executionsDir = path.join(repo, 'executions');
     const result: { taskHash: string; inputsHash: string }[] = [];
 
     try {
@@ -237,8 +235,8 @@ export class LocalRefStore implements RefStore {
     return result;
   }
 
-  async executionListForTask(taskHash: string): Promise<string[]> {
-    const taskDir = path.join(this.repoPath, 'executions', taskHash);
+  async executionListForTask(repo: string, taskHash: string): Promise<string[]> {
+    const taskDir = path.join(repo, 'executions', taskHash);
 
     try {
       const entries = await fs.readdir(taskDir);

@@ -39,11 +39,13 @@ export interface PackageImportResult {
  * Extracts objects to `objects/`, creates ref at `packages/<name>/<version>`.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param zipPath - Path to the .zip package file
  * @returns Import result with package name, version, and stats
  */
 export async function packageImport(
   storage: StorageBackend,
+  repo: string,
   zipPath: string
 ): Promise<PackageImportResult> {
   // Open the zip file
@@ -76,7 +78,7 @@ export async function packageImport(
           packageHash = data.toString('utf-8').trim();
 
           // Write the ref to the repository
-          await storage.refs.packageWrite(packageName, packageVersion, packageHash);
+          await storage.refs.packageWrite(repo, packageName, packageVersion, packageHash);
         }
         continue;
       }
@@ -86,7 +88,7 @@ export async function packageImport(
         const data = await getData();
 
         // Store the object (storage.objects.write will verify the hash matches)
-        await storage.objects.write(data);
+        await storage.objects.write(repo, data);
         objectCount++;
         continue;
       }
@@ -116,48 +118,54 @@ export async function packageImport(
  * Objects remain until gc is run.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Package name
  * @param version - Package version
  * @throws {PackageNotFoundError} If package doesn't exist
  */
 export async function packageRemove(
   storage: StorageBackend,
+  repo: string,
   name: string,
   version: string
 ): Promise<void> {
   // Check if package exists first (storage.refs.packageRemove is idempotent)
-  const hash = await storage.refs.packageResolve(name, version);
+  const hash = await storage.refs.packageResolve(repo, name, version);
   if (hash === null) {
     throw new PackageNotFoundError(name, version);
   }
 
-  await storage.refs.packageRemove(name, version);
+  await storage.refs.packageRemove(repo, name, version);
 }
 
 /**
  * List all installed packages.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @returns Array of (name, version) pairs
  */
 export async function packageList(
-  storage: StorageBackend
+  storage: StorageBackend,
+  repo: string
 ): Promise<Array<{ name: string; version: string }>> {
-  return storage.refs.packageList();
+  return storage.refs.packageList(repo);
 }
 
 /**
  * Get the latest version of a package.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Package name
  * @returns Latest version string, or undefined if package not found
  */
 export async function packageGetLatestVersion(
   storage: StorageBackend,
+  repo: string,
   name: string
 ): Promise<string | undefined> {
-  const packages = await packageList(storage);
+  const packages = await packageList(storage, repo);
   const versions = packages
     .filter(p => p.name === name)
     .map(p => p.version)
@@ -169,6 +177,7 @@ export async function packageGetLatestVersion(
  * Resolve a package to its PackageObject hash.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Package name
  * @param version - Package version
  * @returns PackageObject hash
@@ -176,10 +185,11 @@ export async function packageGetLatestVersion(
  */
 export async function packageResolve(
   storage: StorageBackend,
+  repo: string,
   name: string,
   version: string
 ): Promise<string> {
-  const hash = await storage.refs.packageResolve(name, version);
+  const hash = await storage.refs.packageResolve(repo, name, version);
   if (hash === null) {
     throw new PackageNotFoundError(name, version);
   }
@@ -190,6 +200,7 @@ export async function packageResolve(
  * Read and parse a PackageObject.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Package name
  * @param version - Package version
  * @returns Parsed PackageObject
@@ -197,11 +208,12 @@ export async function packageResolve(
  */
 export async function packageRead(
   storage: StorageBackend,
+  repo: string,
   name: string,
   version: string
 ): Promise<PackageObject> {
-  const hash = await packageResolve(storage, name, version);
-  const data = await storage.objects.read(hash);
+  const hash = await packageResolve(storage, repo, name, version);
+  const data = await storage.objects.read(repo, hash);
   const decoder = decodeBeast2For(PackageObjectType);
   return decoder(Buffer.from(data));
 }
@@ -225,6 +237,7 @@ const DETERMINISTIC_MTIME = new Date(0);
  * Collects the package object and all transitively referenced objects.
  *
  * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Package name
  * @param version - Package version
  * @param zipPath - Path to write the .zip file
@@ -232,6 +245,7 @@ const DETERMINISTIC_MTIME = new Date(0);
  */
 export async function packageExport(
   storage: StorageBackend,
+  repo: string,
   name: string,
   version: string,
   zipPath: string
@@ -239,7 +253,7 @@ export async function packageExport(
   const partialPath = `${zipPath}.partial`;
 
   // Resolve package to hash
-  const packageHash = await packageResolve(storage, name, version);
+  const packageHash = await packageResolve(storage, repo, name, version);
 
   // Create zip file
   const zipfile = new yazl.ZipFile();
@@ -252,7 +266,7 @@ export async function packageExport(
     if (addedObjects.has(hash)) return;
     addedObjects.add(hash);
 
-    const data = await storage.objects.read(hash);
+    const data = await storage.objects.read(repo, hash);
     const objPath = `objects/${hash.slice(0, 2)}/${hash.slice(2)}.beast2`;
     zipfile.addBuffer(Buffer.from(data), objPath, { mtime: DETERMINISTIC_MTIME });
   };
@@ -284,7 +298,7 @@ export async function packageExport(
       try {
         await addObject(potentialHash);
         // Recursively collect children from this object
-        const childData = await storage.objects.read(potentialHash);
+        const childData = await storage.objects.read(repo, potentialHash);
         await collectTreeChildren(childData);
       } catch {
         // Object doesn't exist, not a valid reference - remove from set
@@ -297,7 +311,7 @@ export async function packageExport(
   await addObject(packageHash);
 
   // Load and parse the package object
-  const packageData = await storage.objects.read(packageHash);
+  const packageData = await storage.objects.read(repo, packageHash);
   const decoder = decodeBeast2For(PackageObjectType);
   const packageObject: PackageObject = decoder(Buffer.from(packageData));
 
@@ -311,7 +325,7 @@ export async function packageExport(
   // Collect the root tree and all its children
   const rootTreeHash = packageObject.data.value;
   await addObject(rootTreeHash);
-  const rootTreeData = await storage.objects.read(rootTreeHash);
+  const rootTreeData = await storage.objects.read(repo, rootTreeHash);
   await collectTreeChildren(rootTreeData);
 
   // Write the package ref

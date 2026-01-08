@@ -6,7 +6,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { Hono } from 'hono';
-import { repoGc, packageList, workspaceList, LocalBackend } from '@elaraai/e3-core';
+import { repoGc, packageList, workspaceList, LocalStorage } from '@elaraai/e3-core';
 import { decodeBody, sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
 import { RepositoryStatusType, GcRequestType, GcResultType } from '../types.js';
@@ -33,9 +33,9 @@ export function createRepositoryRoutes(repoPath: string) {
       }
 
       // Count packages and workspaces
-      const storage = new LocalBackend(repoPath);
-      const packages = await packageList(storage);
-      const workspaces = await workspaceList(storage);
+      const storage = new LocalStorage();
+      const packages = await packageList(storage, repoPath);
+      const workspaces = await workspaceList(storage, repoPath);
 
       const status = {
         path: repoPath,
@@ -54,8 +54,8 @@ export function createRepositoryRoutes(repoPath: string) {
     try {
       const options = await decodeBody(c, GcRequestType);
       const minAge = options.minAge?.type === 'some' ? Number(options.minAge.value) : undefined;
-      const storage = new LocalBackend(repoPath);
-      const result = await repoGc(storage, { dryRun: options.dryRun, minAge });
+      const storage = new LocalStorage();
+      const result = await repoGc(storage, repoPath, { dryRun: options.dryRun, minAge });
       return sendSuccess(c, GcResultType, {
         deletedObjects: BigInt(result.deletedObjects),
         deletedPartials: BigInt(result.deletedPartials),

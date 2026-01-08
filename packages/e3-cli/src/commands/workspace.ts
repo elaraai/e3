@@ -15,7 +15,7 @@ import {
   workspaceRemove,
   workspaceGetState,
   WorkspaceLockError,
-  LocalBackend,
+  LocalStorage,
 } from '@elaraai/e3-core';
 import { resolveRepo, parsePackageSpec, formatError, exitError } from '../utils.js';
 
@@ -26,8 +26,8 @@ export const workspaceCommand = {
   async create(repoArg: string, name: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      const storage = new LocalBackend(repoPath);
-      await workspaceCreate(storage, name);
+      const storage = new LocalStorage();
+      await workspaceCreate(storage, repoPath, name);
 
       console.log(`Created workspace: ${name}`);
       console.log('Deploy a package with: e3 workspace deploy <repo> <ws> <pkg>[@<ver>]');
@@ -42,10 +42,10 @@ export const workspaceCommand = {
   async deploy(repoArg: string, ws: string, pkgSpec: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      const storage = new LocalBackend(repoPath);
+      const storage = new LocalStorage();
       const { name, version } = parsePackageSpec(pkgSpec);
 
-      await workspaceDeploy(storage, ws, name, version);
+      await workspaceDeploy(storage, repoPath, ws, name, version);
 
       console.log(`Deployed ${name}@${version} to workspace: ${ws}`);
     } catch (err) {
@@ -69,8 +69,8 @@ export const workspaceCommand = {
   ): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      const storage = new LocalBackend(repoPath);
-      const result = await workspaceExport(storage, ws, zipPath, options.name, options.version);
+      const storage = new LocalStorage();
+      const result = await workspaceExport(storage, repoPath, ws, zipPath, options.name, options.version);
 
       console.log(`Exported workspace ${ws} as ${result.name}@${result.version}`);
       console.log(`  Output: ${zipPath}`);
@@ -87,8 +87,8 @@ export const workspaceCommand = {
   async list(repoArg: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      const storage = new LocalBackend(repoPath);
-      const workspaces = await workspaceList(storage);
+      const storage = new LocalStorage();
+      const workspaces = await workspaceList(storage, repoPath);
 
       if (workspaces.length === 0) {
         console.log('No workspaces');
@@ -97,7 +97,7 @@ export const workspaceCommand = {
 
       console.log('Workspaces:');
       for (const ws of workspaces) {
-        const state = await workspaceGetState(storage, ws);
+        const state = await workspaceGetState(storage, repoPath, ws);
         if (state) {
           console.log(`  ${ws} (${state.packageName}@${state.packageVersion})`);
         } else {
@@ -115,8 +115,8 @@ export const workspaceCommand = {
   async remove(repoArg: string, ws: string): Promise<void> {
     try {
       const repoPath = resolveRepo(repoArg);
-      const storage = new LocalBackend(repoPath);
-      await workspaceRemove(storage, ws);
+      const storage = new LocalStorage();
+      await workspaceRemove(storage, repoPath, ws);
 
       console.log(`Removed workspace: ${ws}`);
       console.log('Run `e3 gc` to reclaim disk space');

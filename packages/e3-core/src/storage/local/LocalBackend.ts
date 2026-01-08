@@ -15,18 +15,22 @@ import { LocalLogStore } from './LocalLogStore.js';
  * This combines the local implementations of all storage interfaces,
  * providing a complete backend for local e3 repositories.
  *
+ * The `repo` parameter passed to each method is the path to the .e3 directory.
+ * This allows a single LocalStorage instance to be used for multiple repositories.
+ *
  * @example
  * ```typescript
- * import { LocalBackend } from '@elaraai/e3-core';
+ * import { LocalStorage } from '@elaraai/e3-core';
  *
- * const backend = new LocalBackend('/path/to/.e3');
+ * const storage = new LocalStorage();
+ * const repo = '/path/to/.e3';
  *
  * // Use the backend with storage-agnostic functions
- * const hash = await backend.objects.write(data);
- * const packages = await backend.refs.packageList();
+ * const hash = await storage.objects.write(repo, data);
+ * const packages = await storage.refs.packageList(repo);
  * ```
  */
-export class LocalBackend implements StorageBackend {
+export class LocalStorage implements StorageBackend {
   /** Content-addressed object storage */
   public readonly objects: ObjectStore;
 
@@ -40,14 +44,18 @@ export class LocalBackend implements StorageBackend {
   public readonly logs: LogStore;
 
   /**
-   * Create a new LocalBackend.
+   * Create a new LocalStorage instance.
    *
-   * @param repoPath - Path to the .e3 repository directory
+   * No configuration needed - the `repo` parameter (path to .e3 directory)
+   * is passed to each method call instead.
    */
-  constructor(public readonly repoPath: string) {
-    this.objects = new LocalObjectStore(repoPath);
-    this.refs = new LocalRefStore(repoPath);
-    this.locks = new LocalLockService(repoPath);
-    this.logs = new LocalLogStore(repoPath);
+  constructor() {
+    this.objects = new LocalObjectStore();
+    this.refs = new LocalRefStore();
+    this.locks = new LocalLockService();
+    this.logs = new LocalLogStore();
   }
 }
+
+// Re-export as LocalBackend for backwards compatibility during migration
+export { LocalStorage as LocalBackend };
