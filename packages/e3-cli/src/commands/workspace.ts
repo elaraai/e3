@@ -36,13 +36,13 @@ export const workspaceCommand = {
    */
   async create(repoArg: string, name: string): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
 
       if (location.type === 'local') {
         const storage = new LocalStorage();
         await workspaceCreate(storage, location.path, name);
       } else {
-        await workspaceCreateRemote(location.baseUrl, location.repo, name);
+        await workspaceCreateRemote(location.baseUrl, location.repo, name, { token: location.token });
       }
 
       console.log(`Created workspace: ${name}`);
@@ -57,7 +57,7 @@ export const workspaceCommand = {
    */
   async deploy(repoArg: string, ws: string, pkgSpec: string): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
       const { name, version } = parsePackageSpec(pkgSpec);
 
       if (location.type === 'local') {
@@ -66,7 +66,7 @@ export const workspaceCommand = {
       } else {
         // Remote API accepts packageRef string (name@version)
         const packageRef = version === 'latest' ? name : `${name}@${version}`;
-        await workspaceDeployRemote(location.baseUrl, location.repo, ws, packageRef);
+        await workspaceDeployRemote(location.baseUrl, location.repo, ws, packageRef, { token: location.token });
       }
 
       console.log(`Deployed ${name}@${version} to workspace: ${ws}`);
@@ -90,7 +90,7 @@ export const workspaceCommand = {
     options: { name?: string; version?: string }
   ): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
 
       if (location.type === 'local') {
         const storage = new LocalStorage();
@@ -106,7 +106,7 @@ export const workspaceCommand = {
         if (options.name || options.version) {
           console.warn('Warning: --name and --version options are not supported for remote export');
         }
-        const zipBytes = await workspaceExportRemote(location.baseUrl, location.repo, ws);
+        const zipBytes = await workspaceExportRemote(location.baseUrl, location.repo, ws, { token: location.token });
         writeFileSync(zipPath, zipBytes);
 
         console.log(`Exported workspace ${ws}`);
@@ -123,7 +123,7 @@ export const workspaceCommand = {
    */
   async list(repoArg: string): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
 
       if (location.type === 'local') {
         const storage = new LocalStorage();
@@ -145,7 +145,7 @@ export const workspaceCommand = {
         }
       } else {
         // Remote - workspaceListRemote returns WorkspaceInfo[] with package info
-        const workspaces = await workspaceListRemote(location.baseUrl, location.repo);
+        const workspaces = await workspaceListRemote(location.baseUrl, location.repo, { token: location.token });
 
         if (workspaces.length === 0) {
           console.log('No workspaces');
@@ -172,7 +172,7 @@ export const workspaceCommand = {
    */
   async remove(repoArg: string, ws: string): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
 
       if (location.type === 'local') {
         const storage = new LocalStorage();
@@ -180,7 +180,7 @@ export const workspaceCommand = {
         console.log(`Removed workspace: ${ws}`);
         console.log('Run `e3 repo gc` to reclaim disk space');
       } else {
-        await workspaceRemoveRemote(location.baseUrl, location.repo, ws);
+        await workspaceRemoveRemote(location.baseUrl, location.repo, ws, { token: location.token });
         console.log(`Removed workspace: ${ws}`);
       }
     } catch (err) {
@@ -198,7 +198,7 @@ export const workspaceCommand = {
    */
   async status(repoArg: string, ws: string): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
 
       let status: WorkspaceStatusResult;
 
@@ -206,7 +206,7 @@ export const workspaceCommand = {
         const storage = new LocalStorage();
         status = await workspaceStatus(storage, location.path, ws);
       } else {
-        const remoteStatus = await workspaceStatusRemote(location.baseUrl, location.repo, ws);
+        const remoteStatus = await workspaceStatusRemote(location.baseUrl, location.repo, ws, { token: location.token });
         // Convert remote status to local format
         status = {
           workspace: remoteStatus.workspace,
@@ -315,7 +315,7 @@ export const workspaceCommand = {
 /**
  * Convert remote task status to local format.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function convertTaskStatus(status: any): WorkspaceStatusResult['tasks'][0]['status'] {
   switch (status.type) {
     case 'up-to-date':

@@ -6,7 +6,7 @@
 import { ArrayType } from '@elaraai/east';
 import type { TaskListItem, TaskDetails } from './types.js';
 import { TaskListItemType, TaskDetailsType } from './types.js';
-import { get, unwrap } from './http.js';
+import { get, unwrap, type RequestOptions } from './http.js';
 
 /**
  * List tasks in a workspace.
@@ -14,13 +14,15 @@ import { get, unwrap } from './http.js';
  * @param url - Base URL of the e3 API server
  * @param repo - Repository name
  * @param workspace - Workspace name
+ * @param options - Request options including auth token
  * @returns Array of task info (name, hash)
  */
-export async function taskList(url: string, repo: string, workspace: string): Promise<TaskListItem[]> {
+export async function taskList(url: string, repo: string, workspace: string, options: RequestOptions): Promise<TaskListItem[]> {
   const response = await get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/tasks`,
-    ArrayType(TaskListItemType)
+    ArrayType(TaskListItemType),
+    options
   );
   return unwrap(response);
 }
@@ -32,18 +34,21 @@ export async function taskList(url: string, repo: string, workspace: string): Pr
  * @param repo - Repository name
  * @param workspace - Workspace name
  * @param name - Task name
+ * @param options - Request options including auth token
  * @returns Task details
  */
 export async function taskGet(
   url: string,
   repo: string,
   workspace: string,
-  name: string
+  name: string,
+  options: RequestOptions
 ): Promise<TaskDetails> {
   const response = await get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/tasks/${encodeURIComponent(name)}`,
-    TaskDetailsType
+    TaskDetailsType,
+    options
   );
   return unwrap(response);
 }

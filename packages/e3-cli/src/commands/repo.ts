@@ -25,6 +25,7 @@ import {
 } from '@elaraai/e3-api-client';
 import { some, none } from '@elaraai/east';
 import { parseRepoLocation, formatError, exitError } from '../utils.js';
+import { getValidToken } from '../credentials.js';
 
 /**
  * Parse repo URL for create command (doesn't validate existence).
@@ -54,7 +55,8 @@ export const repoCommand = {
       const location = parseRepoForCreate(repoArg);
 
       if (location.type === 'remote') {
-        await repoCreateRemote(location.baseUrl, location.repo);
+        const token = await getValidToken(location.baseUrl);
+        await repoCreateRemote(location.baseUrl, location.repo, { token });
         console.log(`Created repository: ${location.repo}`);
         console.log(`  URL: ${location.baseUrl}/repos/${location.repo}`);
       } else {
@@ -86,14 +88,14 @@ export const repoCommand = {
    */
   async remove(locationArg: string): Promise<void> {
     try {
-      const location = parseRepoLocation(locationArg);
+      const location = await parseRepoLocation(locationArg);
 
       if (location.type === 'local') {
         // Remove the .e3 directory
         rmSync(location.path, { recursive: true, force: true });
         console.log(`Removed repository at ${location.path}`);
       } else {
-        await repoRemoveRemote(location.baseUrl, location.repo);
+        await repoRemoveRemote(location.baseUrl, location.repo, { token: location.token });
         console.log(`Removed repository: ${location.repo}`);
       }
     } catch (err) {
@@ -106,7 +108,7 @@ export const repoCommand = {
    */
   async status(locationArg: string): Promise<void> {
     try {
-      const location = parseRepoLocation(locationArg);
+      const location = await parseRepoLocation(locationArg);
 
       if (location.type === 'local') {
         const storage = new LocalStorage();
@@ -144,7 +146,7 @@ export const repoCommand = {
           }
         }
       } else {
-        const status = await repoStatusRemote(location.baseUrl, location.repo);
+        const status = await repoStatusRemote(location.baseUrl, location.repo, { token: location.token });
         console.log(`Repository: ${location.repo}`);
         console.log('');
         console.log(`  Objects: ${status.objectCount}`);
@@ -161,7 +163,7 @@ export const repoCommand = {
    */
   async gc(locationArg: string, options: { dryRun?: boolean; minAge?: string }): Promise<void> {
     try {
-      const location = parseRepoLocation(locationArg);
+      const location = await parseRepoLocation(locationArg);
       const minAge = options.minAge ? parseInt(options.minAge, 10) : 60000;
 
       if (options.dryRun) {
@@ -191,7 +193,7 @@ export const repoCommand = {
         const result = await repoGcRemote(location.baseUrl, location.repo, {
           dryRun: options.dryRun ?? false,
           minAge: minAge ? some(BigInt(minAge)) : none,
-        });
+        }, { token: location.token });
 
         console.log('Garbage collection complete:');
         console.log(`  Objects retained: ${result.retainedObjects}`);

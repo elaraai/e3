@@ -5,7 +5,7 @@
 
 import { ArrayType, StringType } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
-import { get, unwrap } from './http.js';
+import { get, unwrap, type RequestOptions } from './http.js';
 
 /**
  * List field names at root of workspace dataset tree.
@@ -13,13 +13,15 @@ import { get, unwrap } from './http.js';
  * @param url - Base URL of the e3 API server
  * @param repo - Repository name
  * @param workspace - Workspace name
+ * @param options - Request options including auth token
  * @returns Array of field names at root
  */
-export async function datasetList(url: string, repo: string, workspace: string): Promise<string[]> {
+export async function datasetList(url: string, repo: string, workspace: string, options: RequestOptions): Promise<string[]> {
   const response = await get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`,
-    ArrayType(StringType)
+    ArrayType(StringType),
+    options
   );
   return unwrap(response);
 }
@@ -31,19 +33,22 @@ export async function datasetList(url: string, repo: string, workspace: string):
  * @param repo - Repository name
  * @param workspace - Workspace name
  * @param path - Path to the dataset (e.g., ['inputs', 'config'])
+ * @param options - Request options including auth token
  * @returns Array of field names at path
  */
 export async function datasetListAt(
   url: string,
   repo: string,
   workspace: string,
-  path: TreePath
+  path: TreePath,
+  options: RequestOptions
 ): Promise<string[]> {
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
   const response = await get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}?list=true`,
-    ArrayType(StringType)
+    ArrayType(StringType),
+    options
   );
   return unwrap(response);
 }
@@ -58,13 +63,15 @@ export async function datasetListAt(
  * @param repo - Repository name
  * @param workspace - Workspace name
  * @param path - Path to the dataset (e.g., ['inputs', 'config'])
+ * @param options - Request options including auth token
  * @returns Raw BEAST2 bytes
  */
 export async function datasetGet(
   url: string,
   repo: string,
   workspace: string,
-  path: TreePath
+  path: TreePath,
+  options: RequestOptions
 ): Promise<Uint8Array> {
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
   const response = await fetch(
@@ -73,9 +80,14 @@ export async function datasetGet(
       method: 'GET',
       headers: {
         'Accept': 'application/beast2',
+        'Authorization': `Bearer ${options.token}`,
       },
     }
   );
+
+  if (response.status === 401) {
+    throw new Error(`Authentication failed: ${await response.text()}`);
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to get dataset: ${response.status} ${response.statusText}`);
@@ -93,13 +105,15 @@ export async function datasetGet(
  * @param workspace - Workspace name
  * @param path - Path to the dataset (e.g., ['inputs', 'config'])
  * @param data - Raw BEAST2 encoded value
+ * @param options - Request options including auth token
  */
 export async function datasetSet(
   url: string,
   repo: string,
   workspace: string,
   path: TreePath,
-  data: Uint8Array
+  data: Uint8Array,
+  options: RequestOptions
 ): Promise<void> {
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
   const response = await fetch(
@@ -108,10 +122,15 @@ export async function datasetSet(
       method: 'PUT',
       headers: {
         'Content-Type': 'application/beast2',
+        'Authorization': `Bearer ${options.token}`,
       },
       body: data,
     }
   );
+
+  if (response.status === 401) {
+    throw new Error(`Authentication failed: ${await response.text()}`);
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to set dataset: ${response.status} ${response.statusText}`);

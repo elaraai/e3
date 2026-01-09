@@ -28,6 +28,7 @@ import { runCommand } from './commands/run.js';
 import { logsCommand } from './commands/logs.js';
 import { convertCommand } from './commands/convert.js';
 import { watchCommand } from './commands/watch.js';
+import { createAuthCommand, createLoginCommand, createLogoutCommand } from './commands/auth.js';
 
 const program = new Command();
 
@@ -214,5 +215,10 @@ program
   .option('-o, --output <path>', 'Output file path (default: stdout)')
   .option('--type <typespec>', 'Type specification in .east format')
   .action(convertCommand);
+
+// Authentication commands
+program.addCommand(createLoginCommand());
+program.addCommand(createLogoutCommand());
+program.addCommand(createAuthCommand());
 
 program.parse();
