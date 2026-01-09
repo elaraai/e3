@@ -11,10 +11,11 @@ import { get, post, unwrap } from './http.js';
  * Get repository status.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @returns Repository status including object, package, and workspace counts
  */
-export async function repoStatus(url: string): Promise<RepositoryStatus> {
-  const response = await get(url, '/api/status', RepositoryStatusType);
+export async function repoStatus(url: string, repo: string): Promise<RepositoryStatus> {
+  const response = await get(url, `/repos/${encodeURIComponent(repo)}/status`, RepositoryStatusType);
   return unwrap(response);
 }
 
@@ -22,10 +23,11 @@ export async function repoStatus(url: string): Promise<RepositoryStatus> {
  * Run garbage collection on the repository.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param options - GC options (dryRun to preview without deleting)
  * @returns GC result with counts and freed bytes
  */
-export async function repoGc(url: string, options: GcRequest): Promise<GcResult> {
-  const response = await post(url, '/api/gc', options, GcRequestType, GcResultType);
+export async function repoGc(url: string, repo: string, options: GcRequest): Promise<GcResult> {
+  const response = await post(url, `/repos/${encodeURIComponent(repo)}/gc`, options, GcRequestType, GcResultType);
   return unwrap(response);
 }

@@ -12,6 +12,7 @@ e3 provides git-like task management with cryptographic content addressing, allo
 - [Core Concepts](#core-concepts)
 - [SDK Reference](#sdk-reference)
 - [CLI Reference](#cli-reference)
+  - [Remote URLs](#remote-urls)
 - [Project Setup](#project-setup)
 - [Development Workflow](#development-workflow)
 - [File Formats](#file-formats)
@@ -285,6 +286,35 @@ e3 logs <repo> <path> [--follow]
 # Convert between formats
 e3 convert [input] [--from <fmt>] [--to <fmt>] [-o <output>] [--type <spec>]
 ```
+
+### Remote URLs
+
+All commands that take a `<repo>` argument also accept HTTP URLs. Start a server with `e3-api-server`, then use the same CLI commands:
+
+```bash
+# Start a server (serves all repos under ./repos/)
+e3-api-server --repos ./repos --port 3000
+
+# Use remote URL instead of local path
+e3 workspace list http://localhost:3000/repos/my-repo
+e3 workspace create http://localhost:3000/repos/my-repo dev
+e3 package import http://localhost:3000/repos/my-repo ./pkg.zip
+e3 workspace deploy http://localhost:3000/repos/my-repo dev myapp@1.0.0
+```
+
+**URL structure:**
+
+```
+User-facing URL:  http://localhost:3000/repos/my-repo
+                  └──────────┬───────┘ └─────┬──────┘
+                           origin      /repos/{name}
+
+API endpoint:     http://localhost:3000/api/repos/my-repo/workspaces
+                                        └─┬─┘
+                                    inserted by CLI
+```
+
+The CLI automatically inserts `/api` when making requests. This keeps user-facing URLs clean (shareable, works in browser) while the server handles API routes under `/api/repos/...`.
 
 ---
 

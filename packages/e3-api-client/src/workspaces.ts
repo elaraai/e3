@@ -18,10 +18,11 @@ import { get, post, del, unwrap } from './http.js';
  * List all workspaces in the repository.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @returns Array of workspace info
  */
-export async function workspaceList(url: string): Promise<WorkspaceInfo[]> {
-  const response = await get(url, '/api/workspaces', ArrayType(WorkspaceInfoType));
+export async function workspaceList(url: string, repo: string): Promise<WorkspaceInfo[]> {
+  const response = await get(url, `/repos/${encodeURIComponent(repo)}/workspaces`, ArrayType(WorkspaceInfoType));
   return unwrap(response);
 }
 
@@ -29,13 +30,14 @@ export async function workspaceList(url: string): Promise<WorkspaceInfo[]> {
  * Create a new empty workspace.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param name - Workspace name
  * @returns Created workspace info
  */
-export async function workspaceCreate(url: string, name: string): Promise<WorkspaceInfo> {
+export async function workspaceCreate(url: string, repo: string, name: string): Promise<WorkspaceInfo> {
   const response = await post(
     url,
-    '/api/workspaces',
+    `/repos/${encodeURIComponent(repo)}/workspaces`,
     { name },
     WorkspaceCreateRequestType,
     WorkspaceInfoType
@@ -47,13 +49,14 @@ export async function workspaceCreate(url: string, name: string): Promise<Worksp
  * Get workspace state (deployed package info and current root hash).
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param name - Workspace name
  * @returns Workspace state
  */
-export async function workspaceGet(url: string, name: string): Promise<WorkspaceState> {
+export async function workspaceGet(url: string, repo: string, name: string): Promise<WorkspaceState> {
   const response = await get(
     url,
-    `/api/workspaces/${encodeURIComponent(name)}`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}`,
     WorkspaceStateType
   );
   return unwrap(response);
@@ -65,13 +68,14 @@ export async function workspaceGet(url: string, name: string): Promise<Workspace
  * Use this to poll for execution progress after calling dataflowStart().
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param name - Workspace name
  * @returns Workspace status with datasets, tasks, and summary
  */
-export async function workspaceStatus(url: string, name: string): Promise<WorkspaceStatusResult> {
+export async function workspaceStatus(url: string, repo: string, name: string): Promise<WorkspaceStatusResult> {
   const response = await get(
     url,
-    `/api/workspaces/${encodeURIComponent(name)}/status`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}/status`,
     WorkspaceStatusResultType
   );
   return unwrap(response);
@@ -81,12 +85,13 @@ export async function workspaceStatus(url: string, name: string): Promise<Worksp
  * Remove a workspace.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param name - Workspace name
  */
-export async function workspaceRemove(url: string, name: string): Promise<void> {
+export async function workspaceRemove(url: string, repo: string, name: string): Promise<void> {
   const response = await del(
     url,
-    `/api/workspaces/${encodeURIComponent(name)}`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}`,
     NullType
   );
   unwrap(response);
@@ -96,17 +101,19 @@ export async function workspaceRemove(url: string, name: string): Promise<void> 
  * Deploy a package to a workspace.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param name - Workspace name
  * @param packageRef - Package reference (name or name@version)
  */
 export async function workspaceDeploy(
   url: string,
+  repo: string,
   name: string,
   packageRef: string
 ): Promise<void> {
   const response = await post(
     url,
-    `/api/workspaces/${encodeURIComponent(name)}/deploy`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}/deploy`,
     { packageRef },
     WorkspaceDeployRequestType,
     NullType
@@ -118,13 +125,14 @@ export async function workspaceDeploy(
  * Export workspace as a package zip archive.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param name - Workspace name
  * @returns Zip archive as bytes
  */
-export async function workspaceExport(url: string, name: string): Promise<Uint8Array> {
+export async function workspaceExport(url: string, repo: string, name: string): Promise<Uint8Array> {
   const response = await get(
     url,
-    `/api/workspaces/${encodeURIComponent(name)}/export`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}/export`,
     BlobType
   );
   return unwrap(response);

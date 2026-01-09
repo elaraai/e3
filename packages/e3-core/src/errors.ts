@@ -78,11 +78,6 @@ export interface LockHolderInfo {
 }
 
 /**
- * @deprecated Use LockHolderInfo instead. This alias is kept for backwards compatibility.
- */
-export type LockHolder = LockHolderInfo;
-
-/**
  * Thrown when a workspace is locked by another process.
  *
  * This error is thrown when attempting to acquire an exclusive lock on a

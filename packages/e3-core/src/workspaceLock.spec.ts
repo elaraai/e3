@@ -12,8 +12,8 @@ import assert from 'node:assert';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { variant, encodeBeast2For } from '@elaraai/east';
-import { LockStateType, type LockState } from '@elaraai/e3-types';
+import { variant, encodeBeast2For, printFor, VariantType } from '@elaraai/east';
+import { LockStateType, ProcessHolderType, type LockState } from '@elaraai/e3-types';
 import {
   acquireWorkspaceLock,
   getWorkspaceLockHolder,
@@ -155,14 +155,20 @@ describe('workspaceLock', () => {
     it('cleans up stale lock with dead PID', async () => {
       // Write a fake lock file in beast2 format with a non-existent PID
       const lockPath = workspaceLockPath(repoPath, 'test-ws');
+
+      // Create holder as East text string
+      const HolderVariantType = VariantType({ process: ProcessHolderType });
+      const printHolder = printFor(HolderVariantType);
+      const holderString = printHolder(variant('process', {
+        pid: 99999999n, // Very unlikely to exist
+        bootId: 'fake-boot-id',
+        startTime: 0n,
+        command: 'fake command',
+      }));
+
       const fakeLockState: LockState = {
         operation: variant('dataflow', null),
-        holder: variant('process', {
-          pid: 99999999n, // Very unlikely to exist
-          bootId: 'fake-boot-id',
-          startTime: 0n,
-          command: 'fake command',
-        }),
+        holder: holderString,
         acquiredAt: new Date(),
         expiresAt: variant('none', null),
       };

@@ -10,6 +10,8 @@ e3 is an automated, durable execution engine for [East](https://github.com/elara
 | [`@elaraai/e3-types`](packages/e3-types/) | Shared type definitions | [![npm](https://img.shields.io/npm/v/@elaraai/e3-types)](https://www.npmjs.com/package/@elaraai/e3-types) | [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](packages/e3-types/LICENSE.md) |
 | [`@elaraai/e3-core`](packages/e3-core/) | Core library (like libgit2 for git) | [![npm](https://img.shields.io/npm/v/@elaraai/e3-core)](https://www.npmjs.com/package/@elaraai/e3-core) | [![License](https://img.shields.io/badge/license-BSL--1.1-orange.svg)](packages/e3-core/LICENSE.md) |
 | [`@elaraai/e3-cli`](packages/e3-cli/) | Command-line interface | [![npm](https://img.shields.io/npm/v/@elaraai/e3-cli)](https://www.npmjs.com/package/@elaraai/e3-cli) | [![License](https://img.shields.io/badge/license-BSL--1.1-orange.svg)](packages/e3-cli/LICENSE.md) |
+| [`@elaraai/e3-api-client`](packages/e3-api-client/) | HTTP client for remote repositories | [![npm](https://img.shields.io/npm/v/@elaraai/e3-api-client)](https://www.npmjs.com/package/@elaraai/e3-api-client) | [![License](https://img.shields.io/badge/license-BSL--1.1-orange.svg)](packages/e3-api-client/LICENSE.md) |
+| [`@elaraai/e3-api-server`](packages/e3-api-server/) | HTTP server for remote access | [![npm](https://img.shields.io/npm/v/@elaraai/e3-api-server)](https://www.npmjs.com/package/@elaraai/e3-api-server) | [![License](https://img.shields.io/badge/license-BSL--1.1-orange.svg)](packages/e3-api-server/LICENSE.md) |
 
 ## Features
 
@@ -18,6 +20,7 @@ e3 is an automated, durable execution engine for [East](https://github.com/elara
 - **Durable Execution** - Tasks are queued and executed to completion
 - **Real-time Monitoring** - Stream logs from running tasks
 - **Type-Safe RPC** - Beast2 binary encoding for efficient data transfer
+- **Local or Remote** - Same CLI commands work with local paths or HTTP URLs
 
 ## Quick Start
 
@@ -62,6 +65,8 @@ This project uses multiple licenses:
 | `@elaraai/e3-types` | Dual AGPL-3.0 / Commercial |
 | `@elaraai/e3-core` | BSL 1.1 |
 | `@elaraai/e3-cli` | BSL 1.1 |
+| `@elaraai/e3-api-client` | BSL 1.1 |
+| `@elaraai/e3-api-server` | BSL 1.1 |
 
 **BSL 1.1 (Business Source License):**
 - Non-production use (evaluation, testing, development) is free

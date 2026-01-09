@@ -15,11 +15,11 @@
  * a StorageBackend, the same code can run locally or in the cloud.
  */
 
-import type { ExecutionStatus, LockState, LockOperation, LockHolder } from '@elaraai/e3-types';
+import type { ExecutionStatus, LockState, LockOperation } from '@elaraai/e3-types';
 import type { LockHolderInfo } from '../errors.js';
 
 // Re-export lock types for consumers of this module
-export type { LockState, LockOperation, LockHolder, LockHolderInfo };
+export type { LockState, LockOperation, LockHolderInfo };
 
 // =============================================================================
 // Object Store
@@ -272,10 +272,10 @@ export interface LockService {
    * For local process locks, checks if the PID is still running.
    * For cloud locks, checks expiry or queries the cloud service.
    *
-   * @param holder - Lock holder from a LockState
+   * @param holder - East text-encoded holder string from LockState
    * @returns true if the holder is still active
    */
-  isHolderAlive(holder: LockHolder): Promise<boolean>;
+  isHolderAlive(holder: string): Promise<boolean>;
 }
 
 // =============================================================================

@@ -13,7 +13,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 
 // e3-core for repo setup
 import {
@@ -60,18 +60,34 @@ import {
 
 describe('API round-trip', () => {
   let repoPath: string;
+  let reposDir: string;
+  let repoName: string;
   let tempDir: string;
   let server: Server;
   let baseUrl: string;
 
   beforeEach(async () => {
-    // Create temp repo
+    // Create temp repo - this creates path/to/temp/.e3
     repoPath = createTestRepo();
     tempDir = createTempDir();
 
+    // For multi-repo server, we need reposDir to contain repos as subdirs
+    // createTestRepo returns a path like /tmp/e3-test-xxx/.e3
+    // We need reposDir to be the parent of the parent, and repo name to be the second-to-last dir
+    // Actually, let's set up a proper structure:
+    // reposDir = parent temp dir
+    // reposDir/test-repo/.e3 = the actual repo
+
+    // Get the parent of .e3 (the repo root)
+    const repoRoot = dirname(repoPath); // e.g., /tmp/e3-test-xxx
+
+    // Use the repo root's parent as reposDir, and repo root's name as the repo name
+    reposDir = dirname(repoRoot);
+    repoName = repoRoot.split('/').pop()!;
+
     // Start server on random available port
     server = await createServer({
-      repo: repoPath,
+      reposDir,
       port: 0, // Let OS assign port
       host: 'localhost',
     });
@@ -87,7 +103,7 @@ describe('API round-trip', () => {
 
   describe('repository operations', () => {
     it('repoStatus returns repository info', async () => {
-      const status = await repoStatus(baseUrl);
+      const status = await repoStatus(baseUrl, repoName);
 
       assert.ok(status.path.includes('.e3'), 'path should contain .e3');
       assert.strictEqual(status.objectCount, 0n);
@@ -96,7 +112,7 @@ describe('API round-trip', () => {
     });
 
     it('repoGc with dryRun returns stats', async () => {
-      const result = await repoGc(baseUrl, { dryRun: true, minAge: variant('none', null) });
+      const result = await repoGc(baseUrl, repoName, { dryRun: true, minAge: variant('none', null) });
 
       // Empty repo - nothing to delete
       assert.strictEqual(result.deletedObjects, 0n);
@@ -128,29 +144,29 @@ describe('API round-trip', () => {
     });
 
     it('packageList returns empty initially', async () => {
-      const packages = await packageList(baseUrl);
+      const packages = await packageList(baseUrl, repoName);
       assert.deepStrictEqual(packages, []);
     });
 
     it('packageImport and packageList round-trip', async () => {
       // Import
-      const result = await packageImport(baseUrl, packageZip);
+      const result = await packageImport(baseUrl, repoName, packageZip);
       assert.strictEqual(result.name, 'test-pkg');
       assert.strictEqual(result.version, '1.0.0');
       assert.strictEqual(result.packageHash.length, 64); // SHA256 hex
       assert.ok(result.objectCount > 0n);
 
       // List
-      const packages = await packageList(baseUrl);
+      const packages = await packageList(baseUrl, repoName);
       assert.strictEqual(packages.length, 1);
       assert.strictEqual(packages[0].name, 'test-pkg');
       assert.strictEqual(packages[0].version, '1.0.0');
     });
 
     it('packageGet returns package object', async () => {
-      await packageImport(baseUrl, packageZip);
+      await packageImport(baseUrl, repoName, packageZip);
 
-      const pkg = await packageGet(baseUrl, 'test-pkg', '1.0.0');
+      const pkg = await packageGet(baseUrl, repoName, 'test-pkg', '1.0.0');
       // PackageObject has tasks Map with our 'double' task
       assert.ok(pkg.tasks instanceof Map);
       assert.strictEqual(pkg.tasks.size, 1);
@@ -158,9 +174,9 @@ describe('API round-trip', () => {
     });
 
     it('packageExport returns zip bytes', async () => {
-      await packageImport(baseUrl, packageZip);
+      await packageImport(baseUrl, repoName, packageZip);
 
-      const exported = await packageExport(baseUrl, 'test-pkg', '1.0.0');
+      const exported = await packageExport(baseUrl, repoName, 'test-pkg', '1.0.0');
       assert.ok(exported instanceof Uint8Array);
       assert.ok(exported.length > 0);
       // ZIP files start with PK signature
@@ -169,46 +185,46 @@ describe('API round-trip', () => {
     });
 
     it('packageRemove deletes package', async () => {
-      await packageImport(baseUrl, packageZip);
+      await packageImport(baseUrl, repoName, packageZip);
 
       // Verify exists
-      let packages = await packageList(baseUrl);
+      let packages = await packageList(baseUrl, repoName);
       assert.strictEqual(packages.length, 1);
 
       // Remove
-      await packageRemove(baseUrl, 'test-pkg', '1.0.0');
+      await packageRemove(baseUrl, repoName, 'test-pkg', '1.0.0');
 
       // Verify gone
-      packages = await packageList(baseUrl);
+      packages = await packageList(baseUrl, repoName);
       assert.strictEqual(packages.length, 0);
     });
   });
 
   describe('workspace operations', () => {
     it('workspaceList returns empty initially', async () => {
-      const workspaces = await workspaceList(baseUrl);
+      const workspaces = await workspaceList(baseUrl, repoName);
       assert.deepStrictEqual(workspaces, []);
     });
 
     it('workspaceCreate and workspaceList round-trip', async () => {
-      const info = await workspaceCreate(baseUrl, 'test-ws');
+      const info = await workspaceCreate(baseUrl, repoName, 'test-ws');
       assert.strictEqual(info.name, 'test-ws');
       assert.strictEqual(info.deployed, false);
 
-      const workspaces = await workspaceList(baseUrl);
+      const workspaces = await workspaceList(baseUrl, repoName);
       assert.strictEqual(workspaces.length, 1);
       assert.strictEqual(workspaces[0].name, 'test-ws');
     });
 
     it('workspaceRemove deletes workspace', async () => {
-      await workspaceCreate(baseUrl, 'to-delete');
+      await workspaceCreate(baseUrl, repoName, 'to-delete');
 
-      let workspaces = await workspaceList(baseUrl);
+      let workspaces = await workspaceList(baseUrl, repoName);
       assert.strictEqual(workspaces.length, 1);
 
-      await workspaceRemove(baseUrl, 'to-delete');
+      await workspaceRemove(baseUrl, repoName, 'to-delete');
 
-      workspaces = await workspaceList(baseUrl);
+      workspaces = await workspaceList(baseUrl, repoName);
       assert.strictEqual(workspaces.length, 0);
     });
   });
@@ -228,22 +244,22 @@ describe('API round-trip', () => {
       await e3.export(pkg, zipPath);
 
       const packageZip = readFileSync(zipPath);
-      await packageImport(baseUrl, packageZip);
+      await packageImport(baseUrl, repoName, packageZip);
 
       // Create workspace and deploy
-      await workspaceCreate(baseUrl, 'deployed-ws');
-      await workspaceDeploy(baseUrl, 'deployed-ws', 'compute-pkg@1.0.0');
+      await workspaceCreate(baseUrl, repoName, 'deployed-ws');
+      await workspaceDeploy(baseUrl, repoName, 'deployed-ws', 'compute-pkg@1.0.0');
     });
 
     it('workspaceGet returns deployed state', async () => {
-      const state = await workspaceGet(baseUrl, 'deployed-ws');
+      const state = await workspaceGet(baseUrl, repoName, 'deployed-ws');
       assert.ok(state !== null);
       assert.strictEqual(state.packageName, 'compute-pkg');
       assert.strictEqual(state.packageVersion, '1.0.0');
     });
 
     it('workspaceStatus returns datasets and tasks', async () => {
-      const status = await workspaceStatus(baseUrl, 'deployed-ws');
+      const status = await workspaceStatus(baseUrl, repoName, 'deployed-ws');
 
       assert.strictEqual(status.workspace, 'deployed-ws');
       // Should have input and output datasets
@@ -256,14 +272,14 @@ describe('API round-trip', () => {
     });
 
     it('datasetList returns field names', async () => {
-      const fields = await datasetList(baseUrl, 'deployed-ws');
+      const fields = await datasetList(baseUrl, repoName, 'deployed-ws');
       // Should have inputs and tasks (outputs are under tasks)
       assert.ok(fields.includes('inputs'));
       assert.ok(fields.includes('tasks'));
     });
 
     it('taskList returns task info', async () => {
-      const tasks = await taskList(baseUrl, 'deployed-ws');
+      const tasks = await taskList(baseUrl, repoName, 'deployed-ws');
       assert.ok(Array.isArray(tasks));
       assert.ok(tasks.length > 0, 'should have at least one task');
 
@@ -273,7 +289,7 @@ describe('API round-trip', () => {
     });
 
     it('taskGet returns task details', async () => {
-      const task = await taskGet(baseUrl, 'deployed-ws', 'compute');
+      const task = await taskGet(baseUrl, repoName, 'deployed-ws', 'compute');
       assert.strictEqual(task.name, 'compute');
       assert.ok(task.hash.length > 0);
       assert.ok(Array.isArray(task.inputs));
@@ -281,7 +297,7 @@ describe('API round-trip', () => {
     });
 
     it('dataflowGraph returns dependency graph', async () => {
-      const graph = await dataflowGraph(baseUrl, 'deployed-ws');
+      const graph = await dataflowGraph(baseUrl, repoName, 'deployed-ws');
       assert.ok(Array.isArray(graph.tasks));
       assert.ok(graph.tasks.length > 0);
 
@@ -308,10 +324,10 @@ describe('API round-trip', () => {
       await e3.export(pkg, zipPath);
 
       const packageZip = readFileSync(zipPath);
-      await packageImport(baseUrl, packageZip);
+      await packageImport(baseUrl, repoName, packageZip);
 
-      await workspaceCreate(baseUrl, 'dataset-ws');
-      await workspaceDeploy(baseUrl, 'dataset-ws', 'dataset-pkg@1.0.0');
+      await workspaceCreate(baseUrl, repoName, 'dataset-ws');
+      await workspaceDeploy(baseUrl, repoName, 'dataset-ws', 'dataset-pkg@1.0.0');
     });
 
     it('datasetSet and datasetGet round-trip', async () => {
@@ -325,10 +341,10 @@ describe('API round-trip', () => {
         variant('field', 'inputs'),
         variant('field', 'config'),
       ];
-      await datasetSet(baseUrl, 'dataset-ws', path, data);
+      await datasetSet(baseUrl, repoName, 'dataset-ws', path, data);
 
       // Get and decode
-      const retrieved = await datasetGet(baseUrl, 'dataset-ws', path);
+      const retrieved = await datasetGet(baseUrl, repoName, 'dataset-ws', path);
       assert.ok(retrieved instanceof Uint8Array);
 
       const decoded = decode(retrieved);
@@ -337,7 +353,7 @@ describe('API round-trip', () => {
 
     it('datasetListAt returns nested fields', async () => {
       const path = [variant('field', 'inputs')];
-      const fields = await datasetListAt(baseUrl, 'dataset-ws', path);
+      const fields = await datasetListAt(baseUrl, repoName, 'dataset-ws', path);
       assert.ok(Array.isArray(fields));
       assert.ok(fields.includes('config'), 'should have config field under inputs');
     });
@@ -358,14 +374,14 @@ describe('API round-trip', () => {
       await e3.export(pkg, zipPath);
 
       const packageZip = readFileSync(zipPath);
-      await packageImport(baseUrl, packageZip);
+      await packageImport(baseUrl, repoName, packageZip);
 
-      await workspaceCreate(baseUrl, 'exec-ws');
-      await workspaceDeploy(baseUrl, 'exec-ws', 'exec-pkg@1.0.0');
+      await workspaceCreate(baseUrl, repoName, 'exec-ws');
+      await workspaceDeploy(baseUrl, repoName, 'exec-ws', 'exec-pkg@1.0.0');
     });
 
     it('dataflowExecute runs tasks and returns result (blocking)', async () => {
-      const result = await dataflowExecute(baseUrl, 'exec-ws', { force: true });
+      const result = await dataflowExecute(baseUrl, repoName, 'exec-ws', { force: true });
 
       // Verify execution result
       assert.strictEqual(result.success, true);
@@ -376,7 +392,7 @@ describe('API round-trip', () => {
       assert.strictEqual(result.tasks[0].state.type, 'success');
 
       // Verify workspace status reflects completion
-      const status = await workspaceStatus(baseUrl, 'exec-ws');
+      const status = await workspaceStatus(baseUrl, repoName, 'exec-ws');
       const task = status.tasks[0];
       assert.strictEqual(task.name, 'square');
       assert.strictEqual(task.status.type, 'up-to-date');
@@ -388,15 +404,15 @@ describe('API round-trip', () => {
 
     it('dataflowStart triggers execution (non-blocking)', async () => {
       // Should return immediately
-      await dataflowStart(baseUrl, 'exec-ws', { force: true });
+      await dataflowStart(baseUrl, repoName, 'exec-ws', { force: true });
 
       // Poll until execution completes (wait for it to start first, then complete)
       const maxWait = 10000;
       const startTime = Date.now();
-      let status = await workspaceStatus(baseUrl, 'exec-ws');
+      let status = await workspaceStatus(baseUrl, repoName, 'exec-ws');
 
       while (Date.now() - startTime < maxWait) {
-        status = await workspaceStatus(baseUrl, 'exec-ws');
+        status = await workspaceStatus(baseUrl, repoName, 'exec-ws');
         const { upToDate } = status.summary.tasks;
         // Done when task is up-to-date
         if (upToDate === 1n) {
@@ -413,15 +429,15 @@ describe('API round-trip', () => {
   describe('platform function integration', () => {
     it('repoStatus platform function compiles and runs', async () => {
       // Define an East function that uses the platform function
-      const getStatus = East.asyncFunction([StringType], Platform.Types.RepositoryStatus, ($, url) => {
-        return Platform.repoStatus(url);
+      const getStatus = East.asyncFunction([StringType, StringType], Platform.Types.RepositoryStatus, ($, url, repo) => {
+        return Platform.repoStatus(url, repo);
       });
 
       // Compile with platform implementation
       const compiled = East.compileAsync(getStatus, PlatformImpl);
 
       // Run the compiled function
-      const status = await compiled(baseUrl);
+      const status = await compiled(baseUrl, repoName);
 
       // Verify results
       assert.ok(status.path.includes('.e3'), 'path should contain .e3');
@@ -432,14 +448,14 @@ describe('API round-trip', () => {
 
     it('workspaceList platform function compiles and runs', async () => {
       // Create a workspace first
-      await workspaceCreate(baseUrl, 'platform-test-ws');
+      await workspaceCreate(baseUrl, repoName, 'platform-test-ws');
 
       // Define an East function that lists workspaces
       const listWorkspaces = East.asyncFunction(
-        [StringType],
+        [StringType, StringType],
         ArrayType(Platform.Types.WorkspaceInfo),
-        ($, url) => {
-          return Platform.workspaceList(url);
+        ($, url, repo) => {
+          return Platform.workspaceList(url, repo);
         }
       );
 
@@ -447,26 +463,26 @@ describe('API round-trip', () => {
       const compiled = East.compileAsync(listWorkspaces, PlatformImpl);
 
       // Run the compiled function
-      const workspaces = await compiled(baseUrl);
+      const workspaces = await compiled(baseUrl, repoName);
 
       // Verify results
       assert.strictEqual(workspaces.length, 1);
       assert.strictEqual(workspaces[0].name, 'platform-test-ws');
 
       // Clean up
-      await workspaceRemove(baseUrl, 'platform-test-ws');
+      await workspaceRemove(baseUrl, repoName, 'platform-test-ws');
     });
 
     it('workspace create/remove flow via platform functions', async () => {
       // Define East function that creates and lists workspaces
       const createAndList = East.asyncFunction(
-        [StringType, StringType],
+        [StringType, StringType, StringType],
         ArrayType(Platform.Types.WorkspaceInfo),
-        ($, url, name) => {
+        ($, url, repo, name) => {
           // Create workspace
-          $.let(Platform.workspaceCreate(url, name));
+          $.let(Platform.workspaceCreate(url, repo, name));
           // Return list
-          return Platform.workspaceList(url);
+          return Platform.workspaceList(url, repo);
         }
       );
 
@@ -474,7 +490,7 @@ describe('API round-trip', () => {
       const compiled = East.compileAsync(createAndList, PlatformImpl);
 
       // Run the compiled function
-      const workspaces = await compiled(baseUrl, 'east-created-ws');
+      const workspaces = await compiled(baseUrl, repoName, 'east-created-ws');
 
       // Verify workspace was created
       assert.strictEqual(workspaces.length, 1);
@@ -482,22 +498,22 @@ describe('API round-trip', () => {
       assert.strictEqual(workspaces[0].deployed, false);
 
       // Clean up using platform function
-      const removeWs = East.asyncFunction([StringType, StringType], NullType, ($, url, name) => {
-        return Platform.workspaceRemove(url, name);
+      const removeWs = East.asyncFunction([StringType, StringType, StringType], NullType, ($, url, repo, name) => {
+        return Platform.workspaceRemove(url, repo, name);
       });
       const compiledRemove = East.compileAsync(removeWs, PlatformImpl);
-      await compiledRemove(baseUrl, 'east-created-ws');
+      await compiledRemove(baseUrl, repoName, 'east-created-ws');
 
       // Verify removed
-      const finalList = await workspaceList(baseUrl);
+      const finalList = await workspaceList(baseUrl, repoName);
       assert.strictEqual(finalList.length, 0);
     });
 
     it('$.let correctly infers array type from platform function', async () => {
       // This test verifies the type inference fix - $.let should produce ArrayExpr not StructExpr
-      const listAndCount = East.asyncFunction([StringType], IntegerType, ($, url) => {
+      const listAndCount = East.asyncFunction([StringType, StringType], IntegerType, ($, url, repo) => {
         // $.let should correctly infer this as ArrayExpr
-        const packages = $.let(Platform.packageList(url));
+        const packages = $.let(Platform.packageList(url, repo));
         // .size() should work since it's an array
         return packages.size();
       });
@@ -506,7 +522,7 @@ describe('API round-trip', () => {
       const compiled = East.compileAsync(listAndCount, PlatformImpl);
 
       // Run the compiled function
-      const count = await compiled(baseUrl);
+      const count = await compiled(baseUrl, repoName);
 
       // Empty repo should have 0 packages
       assert.strictEqual(count, 0n);

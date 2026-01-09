@@ -19,7 +19,7 @@ export async function get<T extends EastType>(
   path: string,
   successType: T
 ): Promise<Response<ValueTypeOf<T>>> {
-  const response = await fetch(`${url}${path}`, {
+  const response = await fetch(`${url}/api${path}`, {
     method: 'GET',
     headers: {
       'Accept': 'application/beast2',
@@ -40,7 +40,7 @@ export async function post<Req extends EastType, Res extends EastType>(
   successType: Res
 ): Promise<Response<ValueTypeOf<Res>>> {
   const encode = encodeBeast2For(requestType);
-  const response = await fetch(`${url}${path}`, {
+  const response = await fetch(`${url}/api${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/beast2',
@@ -63,7 +63,7 @@ export async function put<Req extends EastType, Res extends EastType>(
   successType: Res
 ): Promise<Response<ValueTypeOf<Res>>> {
   const encode = encodeBeast2For(requestType);
-  const response = await fetch(`${url}${path}`, {
+  const response = await fetch(`${url}/api${path}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/beast2',
@@ -83,7 +83,7 @@ export async function del<T extends EastType>(
   path: string,
   successType: T
 ): Promise<Response<ValueTypeOf<T>>> {
-  const response = await fetch(`${url}${path}`, {
+  const response = await fetch(`${url}/api${path}`, {
     method: 'DELETE',
     headers: {
       'Accept': 'application/beast2',

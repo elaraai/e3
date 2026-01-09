@@ -17,7 +17,15 @@ import {
   WorkspaceLockError,
   LocalStorage,
 } from '@elaraai/e3-core';
-import { resolveRepo, parsePackageSpec, formatError, exitError } from '../utils.js';
+import {
+  workspaceCreate as workspaceCreateRemote,
+  workspaceDeploy as workspaceDeployRemote,
+  workspaceExport as workspaceExportRemote,
+  workspaceList as workspaceListRemote,
+  workspaceRemove as workspaceRemoveRemote,
+} from '@elaraai/e3-api-client';
+import { writeFileSync } from 'node:fs';
+import { parseRepoLocation, parsePackageSpec, formatError, exitError } from '../utils.js';
 
 export const workspaceCommand = {
   /**
@@ -25,9 +33,14 @@ export const workspaceCommand = {
    */
   async create(repoArg: string, name: string): Promise<void> {
     try {
-      const repoPath = resolveRepo(repoArg);
-      const storage = new LocalStorage();
-      await workspaceCreate(storage, repoPath, name);
+      const location = parseRepoLocation(repoArg);
+
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        await workspaceCreate(storage, location.path, name);
+      } else {
+        await workspaceCreateRemote(location.baseUrl, location.repo, name);
+      }
 
       console.log(`Created workspace: ${name}`);
       console.log('Deploy a package with: e3 workspace deploy <repo> <ws> <pkg>[@<ver>]');
@@ -41,11 +54,17 @@ export const workspaceCommand = {
    */
   async deploy(repoArg: string, ws: string, pkgSpec: string): Promise<void> {
     try {
-      const repoPath = resolveRepo(repoArg);
-      const storage = new LocalStorage();
+      const location = parseRepoLocation(repoArg);
       const { name, version } = parsePackageSpec(pkgSpec);
 
-      await workspaceDeploy(storage, repoPath, ws, name, version);
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        await workspaceDeploy(storage, location.path, ws, name, version);
+      } else {
+        // Remote API accepts packageRef string (name@version)
+        const packageRef = version === 'latest' ? name : `${name}@${version}`;
+        await workspaceDeployRemote(location.baseUrl, location.repo, ws, packageRef);
+      }
 
       console.log(`Deployed ${name}@${version} to workspace: ${ws}`);
     } catch (err) {
@@ -68,14 +87,29 @@ export const workspaceCommand = {
     options: { name?: string; version?: string }
   ): Promise<void> {
     try {
-      const repoPath = resolveRepo(repoArg);
-      const storage = new LocalStorage();
-      const result = await workspaceExport(storage, repoPath, ws, zipPath, options.name, options.version);
+      const location = parseRepoLocation(repoArg);
 
-      console.log(`Exported workspace ${ws} as ${result.name}@${result.version}`);
-      console.log(`  Output: ${zipPath}`);
-      console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
-      console.log(`  Objects: ${result.objectCount}`);
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        const result = await workspaceExport(storage, location.path, ws, zipPath, options.name, options.version);
+
+        console.log(`Exported workspace ${ws} as ${result.name}@${result.version}`);
+        console.log(`  Output: ${zipPath}`);
+        console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
+        console.log(`  Objects: ${result.objectCount}`);
+      } else {
+        // Remote export - fetch zip bytes and write to local file
+        // Note: Remote export doesn't support custom name/version options
+        if (options.name || options.version) {
+          console.warn('Warning: --name and --version options are not supported for remote export');
+        }
+        const zipBytes = await workspaceExportRemote(location.baseUrl, location.repo, ws);
+        writeFileSync(zipPath, zipBytes);
+
+        console.log(`Exported workspace ${ws}`);
+        console.log(`  Output: ${zipPath}`);
+        console.log(`  Size: ${zipBytes.length} bytes`);
+      }
     } catch (err) {
       exitError(formatError(err));
     }
@@ -86,22 +120,43 @@ export const workspaceCommand = {
    */
   async list(repoArg: string): Promise<void> {
     try {
-      const repoPath = resolveRepo(repoArg);
-      const storage = new LocalStorage();
-      const workspaces = await workspaceList(storage, repoPath);
+      const location = parseRepoLocation(repoArg);
 
-      if (workspaces.length === 0) {
-        console.log('No workspaces');
-        return;
-      }
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        const workspaces = await workspaceList(storage, location.path);
 
-      console.log('Workspaces:');
-      for (const ws of workspaces) {
-        const state = await workspaceGetState(storage, repoPath, ws);
-        if (state) {
-          console.log(`  ${ws} (${state.packageName}@${state.packageVersion})`);
-        } else {
-          console.log(`  ${ws} (not deployed)`);
+        if (workspaces.length === 0) {
+          console.log('No workspaces');
+          return;
+        }
+
+        console.log('Workspaces:');
+        for (const ws of workspaces) {
+          const state = await workspaceGetState(storage, location.path, ws);
+          if (state) {
+            console.log(`  ${ws} (${state.packageName}@${state.packageVersion})`);
+          } else {
+            console.log(`  ${ws} (not deployed)`);
+          }
+        }
+      } else {
+        // Remote - workspaceListRemote returns WorkspaceInfo[] with package info
+        const workspaces = await workspaceListRemote(location.baseUrl, location.repo);
+
+        if (workspaces.length === 0) {
+          console.log('No workspaces');
+          return;
+        }
+
+        console.log('Workspaces:');
+        for (const info of workspaces) {
+          if (info.deployed && info.packageName.type === 'some') {
+            const pkgVersion = info.packageVersion.type === 'some' ? info.packageVersion.value : 'unknown';
+            console.log(`  ${info.name} (${info.packageName.value}@${pkgVersion})`);
+          } else {
+            console.log(`  ${info.name} (not deployed)`);
+          }
         }
       }
     } catch (err) {
@@ -114,12 +169,17 @@ export const workspaceCommand = {
    */
   async remove(repoArg: string, ws: string): Promise<void> {
     try {
-      const repoPath = resolveRepo(repoArg);
-      const storage = new LocalStorage();
-      await workspaceRemove(storage, repoPath, ws);
+      const location = parseRepoLocation(repoArg);
 
-      console.log(`Removed workspace: ${ws}`);
-      console.log('Run `e3 gc` to reclaim disk space');
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        await workspaceRemove(storage, location.path, ws);
+        console.log(`Removed workspace: ${ws}`);
+        console.log('Run `e3 gc` to reclaim disk space');
+      } else {
+        await workspaceRemoveRemote(location.baseUrl, location.repo, ws);
+        console.log(`Removed workspace: ${ws}`);
+      }
     } catch (err) {
       if (err instanceof WorkspaceLockError) {
         console.log('');

@@ -24,7 +24,6 @@ export {
   type LockService,
   type LockState,
   type LockOperation,
-  type LockHolder,
   type LockHolderInfo,
   // Logging
   type LogChunk,

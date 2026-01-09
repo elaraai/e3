@@ -32,17 +32,19 @@ export interface DataflowOptions {
  * Use workspaceStatus() to poll for progress.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
  * @param options - Execution options
  */
 export async function dataflowStart(
   url: string,
+  repo: string,
   workspace: string,
   options: DataflowOptions = {}
 ): Promise<void> {
   const response = await post(
     url,
-    `/api/workspaces/${encodeURIComponent(workspace)}/start`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow`,
     {
       concurrency: options.concurrency != null ? some(BigInt(options.concurrency)) : none,
       force: options.force ?? false,
@@ -60,18 +62,20 @@ export async function dataflowStart(
  * Waits for execution to complete and returns the result.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
  * @param options - Execution options
  * @returns Dataflow execution result
  */
 export async function dataflowExecute(
   url: string,
+  repo: string,
   workspace: string,
   options: DataflowOptions = {}
 ): Promise<DataflowResult> {
   const response = await post(
     url,
-    `/api/workspaces/${encodeURIComponent(workspace)}/execute`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/execute`,
     {
       concurrency: options.concurrency != null ? some(BigInt(options.concurrency)) : none,
       force: options.force ?? false,
@@ -87,16 +91,18 @@ export async function dataflowExecute(
  * Get the dependency graph for a workspace.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
  * @returns Dataflow graph with tasks and dependencies
  */
 export async function dataflowGraph(
   url: string,
+  repo: string,
   workspace: string
 ): Promise<DataflowGraph> {
   const response = await get(
     url,
-    `/api/workspaces/${encodeURIComponent(workspace)}/graph`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/graph`,
     DataflowGraphType
   );
   return unwrap(response);
@@ -118,6 +124,7 @@ export interface LogOptions {
  * Read task logs from a workspace.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
  * @param task - Task name
  * @param options - Log reading options
@@ -125,6 +132,7 @@ export interface LogOptions {
  */
 export async function taskLogs(
   url: string,
+  repo: string,
   workspace: string,
   task: string,
   options: LogOptions = {}
@@ -135,7 +143,7 @@ export async function taskLogs(
   if (options.limit != null) params.set('limit', String(options.limit));
 
   const query = params.toString();
-  const path = `/api/workspaces/${encodeURIComponent(workspace)}/logs/${encodeURIComponent(task)}${query ? `?${query}` : ''}`;
+  const path = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/logs/${encodeURIComponent(task)}${query ? `?${query}` : ''}`;
 
   const response = await get(url, path, LogChunkType);
   return unwrap(response);

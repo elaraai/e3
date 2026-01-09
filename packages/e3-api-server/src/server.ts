@@ -3,28 +3,37 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
+import * as path from 'node:path';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve, type ServerType } from '@hono/node-server';
-import { createRepositoryRoutes } from './routes/repository.js';
+import { LocalStorage } from '@elaraai/e3-core';
+import type { StorageBackend } from '@elaraai/e3-core';
+import { createAuthMiddleware, type AuthConfig } from './middleware/auth.js';
+import { listRepos } from './handlers/repos.js';
 import { createPackageRoutes } from './routes/packages.js';
 import { createWorkspaceRoutes } from './routes/workspaces.js';
 import { createDatasetRoutes } from './routes/datasets.js';
 import { createTaskRoutes } from './routes/tasks.js';
 import { createExecutionRoutes } from './routes/executions.js';
+import { createRepositoryRoutes } from './routes/repository.js';
+
+export type { AuthConfig } from './middleware/auth.js';
 
 /**
  * Server configuration options.
  */
 export interface ServerConfig {
-  /** Path to e3 repository (required) */
-  repo: string;
+  /** Directory containing repositories (each subdirectory with .e3/ is a repo) */
+  reposDir: string;
   /** HTTP port (default: 3000) */
   port?: number;
   /** Bind address (default: "localhost") */
   host?: string;
   /** Enable CORS for cross-origin requests (default: false) */
   cors?: boolean;
+  /** Optional JWT authentication config */
+  auth?: AuthConfig;
 }
 
 /**
@@ -44,11 +53,24 @@ export interface Server {
 /**
  * Create an e3 API server.
  *
+ * The server operates in multi-repo mode, serving multiple repositories
+ * from subdirectories of the configured reposDir.
+ *
+ * URL structure:
+ * - GET /api/repos - List available repositories
+ * - /api/repos/:repo/... - Repository-specific endpoints
+ *
  * @param config - Server configuration
  * @returns Server instance
  */
-export function createServer(config: ServerConfig): Server {
-  const { repo: repoPath, port = 3000, host = 'localhost', cors: enableCors = false } = config;
+export async function createServer(config: ServerConfig): Promise<Server> {
+  const { reposDir, port = 3000, host = 'localhost', cors: enableCors = false, auth } = config;
+
+  // Single storage instance shared across all requests
+  const storage: StorageBackend = new LocalStorage();
+
+  // Helper to compute repo path from repo name
+  const getRepoPath = (repoName: string) => path.join(reposDir, repoName, '.e3');
 
   const app = new Hono();
 
@@ -57,27 +79,37 @@ export function createServer(config: ServerConfig): Server {
     app.use('*', cors({ origin: '*' }));
   }
 
-  // Repository routes: /api/status, /api/gc
-  app.route('/api', createRepositoryRoutes(repoPath));
+  // Apply auth middleware to all repo-specific routes if configured
+  if (auth) {
+    const authMiddleware = await createAuthMiddleware(auth);
+    app.use('/api/repos/:repo/*', authMiddleware);
+  }
 
-  // Package routes: /api/packages/*
-  app.route('/api/packages', createPackageRoutes(repoPath));
+  // GET /api/repos - List available repositories
+  app.get('/api/repos', async () => {
+    return listRepos(reposDir);
+  });
 
-  // Workspace routes: /api/workspaces/*
-  const workspaceRoutes = createWorkspaceRoutes(repoPath);
-  app.route('/api/workspaces', workspaceRoutes);
+  // Mount repository-specific routes
+  // Each route file creates a sub-app that uses getRepoPath to resolve the repo
 
-  // Dataset routes mounted under workspaces: /api/workspaces/:ws/list, /get, /set
-  const datasetRoutes = createDatasetRoutes(repoPath);
-  app.route('/api/workspaces/:ws', datasetRoutes);
+  // Repository status and GC: /api/repos/:repo/status, /api/repos/:repo/gc
+  app.route('/api/repos/:repo', createRepositoryRoutes(storage, getRepoPath));
 
-  // Task routes: /api/workspaces/:ws/tasks/*
-  const taskRoutes = createTaskRoutes(repoPath);
-  app.route('/api/workspaces/:ws/tasks', taskRoutes);
+  // Package routes: /api/repos/:repo/packages/*
+  app.route('/api/repos/:repo/packages', createPackageRoutes(storage, getRepoPath));
 
-  // Execution routes: /api/workspaces/:ws/start, /status, /graph, /logs/:task
-  const executionRoutes = createExecutionRoutes(repoPath);
-  app.route('/api/workspaces/:ws', executionRoutes);
+  // Workspace routes: /api/repos/:repo/workspaces/*
+  app.route('/api/repos/:repo/workspaces', createWorkspaceRoutes(storage, getRepoPath));
+
+  // Dataset routes: /api/repos/:repo/workspaces/:ws/datasets/*
+  app.route('/api/repos/:repo/workspaces/:ws/datasets', createDatasetRoutes(storage, getRepoPath));
+
+  // Task routes: /api/repos/:repo/workspaces/:ws/tasks/*
+  app.route('/api/repos/:repo/workspaces/:ws/tasks', createTaskRoutes(storage, getRepoPath));
+
+  // Execution/Dataflow routes: /api/repos/:repo/workspaces/:ws/dataflow/*
+  app.route('/api/repos/:repo/workspaces/:ws/dataflow', createExecutionRoutes(storage, getRepoPath));
 
   let httpServer: ServerType | null = null;
   let actualPort = port;
