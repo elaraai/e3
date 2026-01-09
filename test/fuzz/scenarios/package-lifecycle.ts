@@ -92,7 +92,7 @@ export async function testPackageLifecycle(config: PackageLifecycleConfig = {}):
     assert(deployResult.exitCode === 0, `deploy failed: ${deployResult.stderr}`);
 
     // Step 7: Verify status
-    const statusResult = await runE3Command(['status', repoDir], testDir);
+    const statusResult = await runE3Command(['repo', 'status', repoDir], testDir);
     assert(statusResult.exitCode === 0, `status failed: ${statusResult.stderr}`);
 
     // Clean up on success

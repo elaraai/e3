@@ -2,8 +2,8 @@
 #
 # server-client.sh - Proof-of-concept for e3 remote URL support
 #
-# This script demonstrates running e3-api-server and using e3 CLI
-# commands against remote HTTP URLs.
+# This script demonstrates running e3-api-server with OIDC authentication
+# and using e3 CLI commands against remote HTTP URLs.
 #
 # Usage: ./contrib/server-client.sh
 #
@@ -30,6 +30,7 @@ E3_SERVER="e3-api-server"
 # Temp directory for test data
 TEMP_DIR=""
 SERVER_PID=""
+CREDENTIALS_PATH=""
 
 cleanup() {
     echo -e "\n${YELLOW}Cleaning up...${NC}"
@@ -64,7 +65,7 @@ step() {
 
 run_cmd() {
     echo -e "${YELLOW}\$ $*${NC}"
-    "$@"
+    E3_CREDENTIALS_PATH="$CREDENTIALS_PATH" "$@"
 }
 
 # Check we're in the right directory
@@ -87,18 +88,21 @@ step "Creating test environment..."
 TEMP_DIR=$(mktemp -d)
 REPOS_DIR="$TEMP_DIR/repos"
 REPO_NAME="demo-repo"
+CREDENTIALS_PATH="$TEMP_DIR/credentials.json"
 
 mkdir -p "$REPOS_DIR"
 echo "Created: $REPOS_DIR"
+echo "Credentials: $CREDENTIALS_PATH"
 
-# Start server
-step "Starting e3-api-server..."
+# Start server with OIDC authentication enabled and auto-approve for CI
+step "Starting e3-api-server with OIDC (auto-approve enabled)..."
 PORT=9876
 SERVER_LOG="$TEMP_DIR/server.log"
-$E3_SERVER --repos "$REPOS_DIR" --port $PORT > "$SERVER_LOG" 2>&1 &
+E3_AUTH_AUTO_APPROVE=1 $E3_SERVER --repos "$REPOS_DIR" --port $PORT --oidc > "$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 echo "Server PID: $SERVER_PID"
 echo "Server log: $SERVER_LOG"
+echo "OIDC: enabled (auto-approve: true)"
 
 # Wait for server to be ready
 echo "Waiting for server to start..."
@@ -119,6 +123,11 @@ done
 SERVER_URL="http://localhost:$PORT"
 REMOTE_URL="$SERVER_URL/repos/$REPO_NAME"
 echo -e "\nServer URL: ${YELLOW}$SERVER_URL${NC}"
+
+header "Authenticating with OIDC"
+
+step "Logging in (server auto-approves, no browser needed)..."
+E3_CREDENTIALS_PATH="$CREDENTIALS_PATH" $E3_CLI login --no-browser "$SERVER_URL"
 
 header "Testing Repository Commands"
 
@@ -192,25 +201,33 @@ header "Summary"
 echo -e "
 ${GREEN}Success!${NC} The proof-of-concept demonstrates:
 
-  1. ${YELLOW}e3-api-server${NC} running on port $PORT
+  1. ${YELLOW}e3-api-server${NC} running on port $PORT with OIDC
      - Serving repositories at: $REPOS_DIR
      - API prefix: /api/repos/:repo/...
+     - OIDC authentication enabled
 
-  2. ${YELLOW}e3 CLI${NC} using remote URLs
+  2. ${YELLOW}OIDC Device Flow${NC} authentication
+     - Auto-approved login (E3_AUTH_AUTO_APPROVE=1)
+     - Credentials stored in: $CREDENTIALS_PATH
+     - JWTs for access and refresh tokens
+
+  3. ${YELLOW}e3 CLI${NC} using remote URLs
      - Server URL: $SERVER_URL
      - Repository URL: $REMOTE_URL
-     - Works exactly like local paths
+     - Works exactly like local paths (after login)
 
-  3. ${YELLOW}Operations tested:${NC}
+  4. ${YELLOW}Operations tested:${NC}
+     - login (OIDC device flow)
      - repo create/status (via remote API)
      - workspace list/create/remove/deploy
      - package list/import
 
 The same CLI commands work with both local paths and remote URLs:
-  ${YELLOW}e3 repo create .${NC}                       # local
-  ${YELLOW}e3 repo create $REMOTE_URL${NC}  # remote
-  ${YELLOW}e3 workspace list .${NC}                    # local
-  ${YELLOW}e3 workspace list $REMOTE_URL${NC}  # remote
+  ${YELLOW}e3 login $SERVER_URL${NC}                   # authenticate
+  ${YELLOW}e3 repo create .${NC}                       # local (no auth)
+  ${YELLOW}e3 repo create $REMOTE_URL${NC}  # remote (uses token)
+  ${YELLOW}e3 workspace list .${NC}                    # local (no auth)
+  ${YELLOW}e3 workspace list $REMOTE_URL${NC}  # remote (uses token)
 "
 
 echo -e "${BLUE}Press Enter to cleanup and exit...${NC}"

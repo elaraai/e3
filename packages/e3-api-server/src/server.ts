@@ -11,6 +11,7 @@ import { serve, type ServerType } from '@hono/node-server';
 import { LocalStorage, repoInit } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
 import { createAuthMiddleware, type AuthConfig } from './middleware/auth.js';
+import { createOidcProvider, type OidcProvider, type OidcConfig } from './auth/index.js';
 import { listRepos } from './handlers/repos.js';
 import { sendSuccess, sendError, sendSuccessWithStatus } from './beast2.js';
 import { StringType, NullType, variant } from '@elaraai/east';
@@ -22,6 +23,7 @@ import { createExecutionRoutes } from './routes/executions.js';
 import { createRepositoryRoutes } from './routes/repository.js';
 
 export type { AuthConfig } from './middleware/auth.js';
+export type { OidcConfig } from './auth/index.js';
 
 /**
  * Server configuration options.
@@ -35,8 +37,10 @@ export interface ServerConfig {
   host?: string;
   /** Enable CORS for cross-origin requests (default: false) */
   cors?: boolean;
-  /** Optional JWT authentication config */
+  /** Optional JWT authentication config (for external JWKS validation) */
   auth?: AuthConfig;
+  /** Optional OIDC provider config (enables built-in auth server) */
+  oidc?: OidcConfig;
 }
 
 /**
@@ -67,7 +71,7 @@ export interface Server {
  * @returns Server instance
  */
 export async function createServer(config: ServerConfig): Promise<Server> {
-  const { reposDir, port = 3000, host = 'localhost', cors: enableCors = false, auth } = config;
+  const { reposDir, port = 3000, host = 'localhost', cors: enableCors = false, auth, oidc } = config;
 
   // Single storage instance shared across all requests
   const storage: StorageBackend = new LocalStorage();
@@ -82,9 +86,28 @@ export async function createServer(config: ServerConfig): Promise<Server> {
     app.use('*', cors({ origin: '*' }));
   }
 
+  // Create OIDC provider if configured (built-in auth server)
+  let oidcProvider: OidcProvider | undefined;
+  if (oidc) {
+    oidcProvider = createOidcProvider(oidc);
+    // Mount OIDC routes at root (/.well-known/*, /oauth2/*, /device)
+    app.route('/', oidcProvider.routes);
+  }
+
   // Apply auth middleware to all repo-specific routes if configured
+  // If OIDC is enabled but auth is not separately configured, use OIDC keys for validation
   if (auth) {
     const authMiddleware = await createAuthMiddleware(auth);
+    app.use('/api/repos/:repo/*', authMiddleware);
+  } else if (oidcProvider) {
+    // Use the OIDC provider's keys for JWT validation
+    const authMiddleware = await createAuthMiddleware({
+      jwksUrl: `${oidc!.baseUrl}/.well-known/jwks.json`,
+      issuer: oidc!.baseUrl,
+      audience: oidc!.baseUrl,
+      // Provide keys directly to avoid HTTP fetch to self
+      _internalKeys: oidcProvider.keys,
+    });
     app.use('/api/repos/:repo/*', authMiddleware);
   }
 

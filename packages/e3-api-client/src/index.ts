@@ -34,6 +34,10 @@ export type {
   DataflowResult,
 } from './types.js';
 
+// HTTP utilities and auth
+export { ApiError, AuthError } from './http.js';
+export type { RequestOptions, Response } from './http.js';
+
 // Repository
 export { repoStatus, repoGc, repoCreate, repoRemove } from './repository.js';
 

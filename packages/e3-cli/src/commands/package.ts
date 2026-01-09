@@ -29,7 +29,7 @@ export const packageCommand = {
    */
   async import(repoArg: string, zipPath: string): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
 
       if (location.type === 'local') {
         const storage = new LocalStorage();
@@ -41,7 +41,7 @@ export const packageCommand = {
       } else {
         // Remote import - read local zip and send to server
         const zipBytes = readFileSync(zipPath);
-        const result = await packageImportRemote(location.baseUrl, location.repo, new Uint8Array(zipBytes));
+        const result = await packageImportRemote(location.baseUrl, location.repo, new Uint8Array(zipBytes), { token: location.token });
 
         console.log(`Imported ${result.name}@${result.version}`);
         console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
@@ -57,7 +57,7 @@ export const packageCommand = {
    */
   async export(repoArg: string, pkgSpec: string, zipPath: string): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
       const { name, version } = parsePackageSpec(pkgSpec);
 
       if (location.type === 'local') {
@@ -69,7 +69,7 @@ export const packageCommand = {
         console.log(`  Objects: ${result.objectCount}`);
       } else {
         // Remote export - fetch zip bytes and write locally
-        const zipBytes = await packageExportRemote(location.baseUrl, location.repo, name, version);
+        const zipBytes = await packageExportRemote(location.baseUrl, location.repo, name, version, { token: location.token });
         writeFileSync(zipPath, zipBytes);
 
         console.log(`Exported ${name}@${version} to ${zipPath}`);
@@ -85,7 +85,7 @@ export const packageCommand = {
    */
   async list(repoArg: string): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
 
       let packages: Array<{ name: string; version: string }>;
 
@@ -93,7 +93,7 @@ export const packageCommand = {
         const storage = new LocalStorage();
         packages = await packageList(storage, location.path);
       } else {
-        packages = await packageListRemote(location.baseUrl, location.repo);
+        packages = await packageListRemote(location.baseUrl, location.repo, { token: location.token });
       }
 
       if (packages.length === 0) {
@@ -115,7 +115,7 @@ export const packageCommand = {
    */
   async remove(repoArg: string, pkgSpec: string): Promise<void> {
     try {
-      const location = parseRepoLocation(repoArg);
+      const location = await parseRepoLocation(repoArg);
       const { name, version } = parsePackageSpec(pkgSpec);
 
       if (location.type === 'local') {
@@ -124,7 +124,7 @@ export const packageCommand = {
         console.log(`Removed ${name}@${version}`);
         console.log('Run `e3 gc` to reclaim disk space');
       } else {
-        await packageRemoveRemote(location.baseUrl, location.repo, name, version);
+        await packageRemoveRemote(location.baseUrl, location.repo, name, version, { token: location.token });
         console.log(`Removed ${name}@${version}`);
       }
     } catch (err) {

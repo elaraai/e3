@@ -67,24 +67,38 @@ export interface CliResult {
 }
 
 /**
+ * Options for running an e3 CLI command
+ */
+export interface RunE3Options {
+  /** Optional stdin input */
+  input?: string;
+  /** Environment variables to add/override */
+  env?: Record<string, string>;
+}
+
+/**
  * Run an e3 CLI command
  *
  * @param args - Command arguments (e.g., ['repo', 'create', '.'])
  * @param cwd - Working directory for the command
- * @param input - Optional stdin input
+ * @param options - Optional settings (input, env)
  * @returns Promise with exit code, stdout, and stderr
  */
 export async function runE3Command(
   args: string[],
   cwd: string,
-  input?: string
+  options?: RunE3Options | string
 ): Promise<CliResult> {
+  // Support legacy signature: runE3Command(args, cwd, input)
+  const opts: RunE3Options = typeof options === 'string' ? { input: options } : (options ?? {});
+
   return new Promise((resolve, reject) => {
     const cliPath = getE3CliPath();
 
     const child = spawn('node', [cliPath, ...args], {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, ...opts.env },
     });
 
     let stdout = '';
@@ -111,8 +125,8 @@ export async function runE3Command(
     });
 
     // Write input if provided
-    if (input !== undefined) {
-      child.stdin.write(input);
+    if (opts.input !== undefined) {
+      child.stdin.write(opts.input);
       child.stdin.end();
     } else {
       child.stdin.end();
@@ -166,17 +180,20 @@ export interface RunningCliProcess {
  *
  * @param args - Command arguments (e.g., ['start', '.', 'ws'])
  * @param cwd - Working directory for the command
+ * @param options - Optional settings (env)
  * @returns Handle to the running process
  */
 export function spawnE3Command(
   args: string[],
-  cwd: string
+  cwd: string,
+  options?: { env?: Record<string, string> }
 ): RunningCliProcess {
   const cliPath = getE3CliPath();
 
   const child = spawn('node', [cliPath, ...args], {
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, ...options?.env },
   });
 
   let stdout = '';

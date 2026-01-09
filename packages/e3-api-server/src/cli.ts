@@ -17,19 +17,28 @@ program
   .option('-p, --port <port>', 'HTTP port', '3000')
   .option('-H, --host <host>', 'Bind address', 'localhost')
   .option('--cors', 'Enable CORS')
-  .option('--auth-key <path>', 'JWT public key path')
-  .option('--auth-issuer <iss>', 'Expected JWT issuer')
-  .option('--auth-audience <aud>', 'Expected JWT audience')
+  .option('--oidc', 'Enable built-in OIDC authentication provider')
+  .option('--token-expiry <duration>', 'Access token expiry (e.g., "5s", "15m", "1h")', '1h')
+  .option('--refresh-token-expiry <duration>', 'Refresh token expiry (e.g., "1h", "7d", "90d")', '90d')
+  .option('--auth-key <path>', 'JWT public key path (external auth)')
+  .option('--auth-issuer <iss>', 'Expected JWT issuer (external auth)')
+  .option('--auth-audience <aud>', 'Expected JWT audience (external auth)')
   .action(async (options: {
     repos: string;
     port: string;
     host: string;
     cors?: boolean;
+    oidc?: boolean;
+    tokenExpiry: string;
+    refreshTokenExpiry: string;
     authKey?: string;
     authIssuer?: string;
     authAudience?: string;
   }) => {
-    // Build auth config if all auth options provided
+    const port = parseInt(options.port, 10);
+    const host = options.host;
+
+    // Build auth config if all auth options provided (external provider)
     const auth = options.authKey && options.authIssuer && options.authAudience
       ? {
           publicKeyPath: options.authKey,
@@ -38,16 +47,32 @@ program
         }
       : undefined;
 
+    // Build OIDC config if enabled (built-in provider)
+    const oidc = options.oidc
+      ? {
+          baseUrl: `http://${host}:${port}`,
+          tokenExpiry: options.tokenExpiry,
+          refreshTokenExpiry: options.refreshTokenExpiry,
+        }
+      : undefined;
+
     const server = await createServer({
       reposDir: options.repos,
-      port: parseInt(options.port, 10),
-      host: options.host,
+      port,
+      host,
       cors: options.cors,
       auth,
+      oidc,
     });
 
     await server.start();
-    console.log(`e3-api-server listening on http://${options.host}:${server.port}`);
+    console.log(`e3-api-server listening on http://${host}:${server.port}`);
+    if (oidc) {
+      console.log(`OIDC provider enabled (token expiry: ${options.tokenExpiry})`);
+      if (process.env.E3_AUTH_AUTO_APPROVE === '1') {
+        console.log('  Auto-approve mode enabled (E3_AUTH_AUTO_APPROVE=1)');
+      }
+    }
 
     // Handle shutdown signals
     const shutdown = async () => {
