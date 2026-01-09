@@ -13,10 +13,10 @@
 
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
-import { initCommand } from './commands/init.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../../package.json') as { version: string };
+import { repoCommand } from './commands/repo.js';
 import { packageCommand } from './commands/package.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { listCommand } from './commands/list.js';
@@ -26,8 +26,6 @@ import { setCommand } from './commands/set.js';
 import { startCommand } from './commands/start.js';
 import { runCommand } from './commands/run.js';
 import { logsCommand } from './commands/logs.js';
-import { statusCommand } from './commands/status.js';
-import { gcCommand } from './commands/gc.js';
 import { convertCommand } from './commands/convert.js';
 import { watchCommand } from './commands/watch.js';
 
@@ -40,21 +38,34 @@ program
 
 // Repository commands
 program
-  .command('init <repo>')
-  .description('Initialize a new e3 repository')
-  .action(initCommand);
-
-program
-  .command('status <repo> [workspace]')
-  .description('Show repository status, or detailed workspace status if workspace provided')
-  .action(statusCommand);
-
-program
-  .command('gc <repo>')
-  .description('Remove unreferenced objects')
-  .option('--dry-run', 'Report what would be deleted without deleting')
-  .option('--min-age <ms>', 'Minimum file age in ms before deletion', '60000')
-  .action(gcCommand);
+  .command('repo')
+  .description('Repository operations')
+  .addCommand(
+    new Command('create')
+      .description('Create a new repository')
+      .argument('<repo>', 'Repository path or URL')
+      .action(repoCommand.create)
+  )
+  .addCommand(
+    new Command('remove')
+      .description('Remove a repository')
+      .argument('<repo>', 'Repository path or URL')
+      .action(repoCommand.remove)
+  )
+  .addCommand(
+    new Command('status')
+      .description('Show repository status')
+      .argument('<repo>', 'Repository path or URL')
+      .action(repoCommand.status)
+  )
+  .addCommand(
+    new Command('gc')
+      .description('Remove unreferenced objects')
+      .argument('<repo>', 'Repository path or URL')
+      .option('--dry-run', 'Report what would be deleted without deleting')
+      .option('--min-age <ms>', 'Minimum file age in ms before deletion', '60000')
+      .action(repoCommand.gc)
+  );
 
 // Package commands
 program
@@ -130,6 +141,13 @@ program
       .argument('<repo>', 'Repository path')
       .argument('<ws>', 'Workspace name')
       .action(workspaceCommand.remove)
+  )
+  .addCommand(
+    new Command('status')
+      .description('Show detailed workspace status (tasks, datasets, locks)')
+      .argument('<repo>', 'Repository path')
+      .argument('<ws>', 'Workspace name')
+      .action(workspaceCommand.status)
   );
 
 // Dataset commands

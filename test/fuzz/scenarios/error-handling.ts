@@ -50,7 +50,7 @@ export async function testDivisionByZero(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -114,7 +114,7 @@ export async function testArrayOutOfBounds(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -174,7 +174,7 @@ export async function testCustomTaskFailure(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -236,7 +236,7 @@ export async function testNaNHandling(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -295,7 +295,7 @@ export async function testInfinityHandling(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -352,7 +352,7 @@ export async function testEmptyStringHandling(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -409,7 +409,7 @@ export async function testEmptyArrayHandling(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);

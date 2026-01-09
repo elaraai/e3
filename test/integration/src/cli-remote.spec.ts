@@ -41,7 +41,7 @@ describe('CLI remote operations', () => {
     mkdirSync(repoDir, { recursive: true });
 
     // Initialize the repository using CLI
-    const initResult = await runE3Command(['init', '.'], repoDir);
+    const initResult = await runE3Command(['repo', 'create', '.'], repoDir);
     assert.strictEqual(initResult.exitCode, 0, `Failed to init repo: ${initResult.stderr}`);
 
     // Start server
@@ -59,6 +59,41 @@ describe('CLI remote operations', () => {
   afterEach(async () => {
     await server.stop();
     removeTestDir(tempDir);
+  });
+
+  describe('repo commands', () => {
+    it('creates repository via remote URL', async () => {
+      const newRepoUrl = `http://localhost:${server.port}/repos/new-remote-repo`;
+
+      // Create a new repo on the server using the full URL
+      const result = await runE3Command(['repo', 'create', newRepoUrl], tempDir);
+
+      assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /Created repository: new-remote-repo/);
+    });
+
+    it('removes repository via remote URL', async () => {
+      const repoToDeleteUrl = `http://localhost:${server.port}/repos/repo-to-delete`;
+
+      // Create repo first
+      await runE3Command(['repo', 'create', repoToDeleteUrl], tempDir);
+
+      // Remove it using the same URL format
+      const result = await runE3Command(['repo', 'remove', repoToDeleteUrl], tempDir);
+
+      assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /Removed repository: repo-to-delete/);
+    });
+
+    it('shows status via remote URL', async () => {
+      const result = await runE3Command(['repo', 'status', remoteUrl], tempDir);
+
+      assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /Repository: test-repo/);
+      assert.match(result.stdout, /Objects:/);
+      assert.match(result.stdout, /Packages:/);
+      assert.match(result.stdout, /Workspaces:/);
+    });
   });
 
   describe('workspace commands', () => {

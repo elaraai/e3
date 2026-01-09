@@ -25,20 +25,22 @@ e3 is an automated, durable execution engine for [East](https://github.com/elara
 ## Quick Start
 
 ```bash
-# Initialize repository
-e3 init
+# Create repository
+e3 repo create .
 
-# Submit a task
-e3 run pipeline ./pipeline.east ./data.east
+# Import a package and deploy to workspace
+e3 package import . ./my-package.zip
+e3 workspace create . dev
+e3 workspace deploy . dev my-package@1.0.0
+
+# Run tasks
+e3 start . dev
 
 # Watch logs in real-time
-e3 logs pipeline --follow
+e3 logs . dev.my-task --follow
 
 # Get result
-e3 get pipeline
-
-# List all tasks
-e3 list
+e3 get . dev.tasks.my-task.output
 ```
 
 ## Repository Structure
@@ -102,7 +104,7 @@ Contributors must sign our [CLA](CLA.md) before we can accept pull requests.
   - [@elaraai/e3](https://www.npmjs.com/package/@elaraai/e3): SDK for authoring e3 packages with typed tasks and pipelines
   - [@elaraai/e3-core](https://www.npmjs.com/package/@elaraai/e3-core): Git-like object store, task queue, result caching
   - [@elaraai/e3-types](https://www.npmjs.com/package/@elaraai/e3-types): Shared type definitions for e3 packages
-  - [@elaraai/e3-cli](https://www.npmjs.com/package/@elaraai/e3-cli): `e3 init`, `e3 run`, `e3 logs` commands for managing and monitoring tasks
+  - [@elaraai/e3-cli](https://www.npmjs.com/package/@elaraai/e3-cli): `e3 repo`, `e3 workspace`, `e3 start`, `e3 logs` commands for managing repositories, workspaces, and tasks
   - [@elaraai/e3-api-client](https://www.npmjs.com/package/@elaraai/e3-api-client): HTTP client for remote e3 servers
   - [@elaraai/e3-api-server](https://www.npmjs.com/package/@elaraai/e3-api-server): REST API server for e3 repositories
 

@@ -60,7 +60,7 @@ describe('signal handling', () => {
       await e3.export(pkg, packageZipPath);
       assert.ok(existsSync(packageZipPath), 'Package zip should exist');
 
-      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['repo', 'create', repoDir], testDir);
       await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
       await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
       await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'slow-test@1.0.0'], testDir);
@@ -121,7 +121,7 @@ describe('signal handling', () => {
 
       await e3.export(pkg, packageZipPath);
 
-      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['repo', 'create', repoDir], testDir);
       await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
       await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
       await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'slow-test-2@1.0.0'], testDir);
@@ -162,7 +162,7 @@ describe('signal handling', () => {
 
       await e3.export(pkg, packageZipPath);
 
-      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['repo', 'create', repoDir], testDir);
       await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
       await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
       await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'lock-test@1.0.0'], testDir);
@@ -205,7 +205,7 @@ describe('signal handling', () => {
 
       await e3.export(pkg, packageZipPath);
 
-      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['repo', 'create', repoDir], testDir);
       await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
       await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
       await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'lock-test-2@1.0.0'], testDir);
@@ -248,7 +248,7 @@ describe('signal handling', () => {
 
       await e3.export(pkg, packageZipPath);
 
-      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['repo', 'create', repoDir], testDir);
       await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
       await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
       await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'lock-test-3@1.0.0'], testDir);

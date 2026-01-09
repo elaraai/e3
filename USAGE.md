@@ -51,8 +51,8 @@ export default pkg;
 ### 2. Deploy and run
 
 ```bash
-# Initialize a repository
-e3 init .
+# Create a repository
+e3 repo create .
 
 # Import the package
 e3 package import . /tmp/hello.zip
@@ -224,9 +224,10 @@ await e3.export(pkg, '/tmp/myapp.zip');
 ### Repository Commands
 
 ```bash
-e3 init <repo>                    # Initialize a new repository
-e3 status <repo> [workspace]      # Show status (repo or workspace details)
-e3 gc <repo> [--dry-run]          # Remove unreferenced objects
+e3 repo create <repo>             # Create repository (local path or remote URL)
+e3 repo remove <repo>             # Remove repository
+e3 repo status <repo>             # Show repository status (packages, workspaces)
+e3 repo gc <repo> [--dry-run]     # Remove unreferenced objects
 ```
 
 ### Package Commands
@@ -246,6 +247,7 @@ e3 workspace deploy <repo> <ws> <pkg[@ver]>    # Deploy package to workspace
 e3 workspace export <repo> <ws> <zipPath>      # Export workspace as package
 e3 workspace list <repo>                       # List workspaces
 e3 workspace remove <repo> <ws>                # Remove workspace
+e3 workspace status <repo> <ws>                # Show workspace status (tasks, datasets)
 ```
 
 ### Data Commands
@@ -295,7 +297,12 @@ All commands that take a `<repo>` argument also accept HTTP URLs. Start a server
 # Start a server (serves all repos under ./repos/)
 e3-api-server --repos ./repos --port 3000
 
-# Use remote URL instead of local path
+# All commands use the same URL format: http://server/repos/name
+e3 repo create http://localhost:3000/repos/my-repo
+e3 repo status http://localhost:3000/repos/my-repo
+e3 repo remove http://localhost:3000/repos/my-repo
+
+# Works the same for workspace and package commands
 e3 workspace list http://localhost:3000/repos/my-repo
 e3 workspace create http://localhost:3000/repos/my-repo dev
 e3 package import http://localhost:3000/repos/my-repo ./pkg.zip
@@ -329,7 +336,7 @@ my-e3-project/
 ├── pyproject.toml      # For Python runner (east-py)
 ├── src/
 │   └── index.ts        # Package definition
-└── .e3/                # Repository (created by e3 init)
+└── .e3/                # Repository (created by e3 repo create)
 ```
 
 **package.json:**
@@ -449,7 +456,7 @@ e3 workspace deploy . dev myapp@1.0.0
 e3 start . dev
 
 # Check results
-e3 status . dev
+e3 workspace status . dev
 e3 get . dev.tasks.mytask.output
 ```
 
@@ -504,6 +511,6 @@ e3 convert data.json --to east
 
 1. **Use watch mode** for fast iteration during development
 2. **Let dependencies flow** - only pass leaf tasks to `e3.package()`, dependencies are collected automatically
-3. **Check status** with `e3 status . workspace` to see task states
+3. **Check status** with `e3 workspace status . <ws>` to see task states
 4. **View logs** with `e3 logs . workspace.taskname` for debugging
 5. **Use inputs** for values that change between runs, tasks for computations

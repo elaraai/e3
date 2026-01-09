@@ -35,7 +35,7 @@ export type {
 } from './types.js';
 
 // Repository
-export { repoStatus, repoGc } from './repository.js';
+export { repoStatus, repoGc, repoCreate, repoRemove } from './repository.js';
 
 // Packages
 export {

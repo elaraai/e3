@@ -45,7 +45,7 @@ export async function testInputMutation(): Promise<ScenarioResult> {
 
     // Setup
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);

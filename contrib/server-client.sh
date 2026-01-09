@@ -87,14 +87,9 @@ step "Creating test environment..."
 TEMP_DIR=$(mktemp -d)
 REPOS_DIR="$TEMP_DIR/repos"
 REPO_NAME="demo-repo"
-REPO_DIR="$REPOS_DIR/$REPO_NAME"
 
-mkdir -p "$REPO_DIR"
+mkdir -p "$REPOS_DIR"
 echo "Created: $REPOS_DIR"
-
-# Initialize repository
-step "Initializing repository..."
-run_cmd $E3_CLI init "$REPO_DIR"
 
 # Start server
 step "Starting e3-api-server..."
@@ -120,9 +115,18 @@ for i in {1..30}; do
     sleep 0.1
 done
 
-# The remote URL for CLI commands
-REMOTE_URL="http://localhost:$PORT/repos/$REPO_NAME"
-echo -e "\nRemote URL: ${YELLOW}$REMOTE_URL${NC}"
+# Server base URL and repo URL
+SERVER_URL="http://localhost:$PORT"
+REMOTE_URL="$SERVER_URL/repos/$REPO_NAME"
+echo -e "\nServer URL: ${YELLOW}$SERVER_URL${NC}"
+
+header "Testing Repository Commands"
+
+step "Create repository via remote API..."
+run_cmd $E3_CLI repo create "$REMOTE_URL"
+
+step "Check repository status..."
+run_cmd $E3_CLI repo status "$REMOTE_URL"
 
 header "Testing Workspace Commands"
 
@@ -189,18 +193,22 @@ echo -e "
 ${GREEN}Success!${NC} The proof-of-concept demonstrates:
 
   1. ${YELLOW}e3-api-server${NC} running on port $PORT
-     - Serving repository at: $REPOS_DIR
+     - Serving repositories at: $REPOS_DIR
      - API prefix: /api/repos/:repo/...
 
   2. ${YELLOW}e3 CLI${NC} using remote URLs
-     - User-facing URL: $REMOTE_URL
+     - Server URL: $SERVER_URL
+     - Repository URL: $REMOTE_URL
      - Works exactly like local paths
 
   3. ${YELLOW}Operations tested:${NC}
+     - repo create/status (via remote API)
      - workspace list/create/remove/deploy
      - package list/import
 
 The same CLI commands work with both local paths and remote URLs:
+  ${YELLOW}e3 repo create .${NC}                       # local
+  ${YELLOW}e3 repo create $REMOTE_URL${NC}  # remote
   ${YELLOW}e3 workspace list .${NC}                    # local
   ${YELLOW}e3 workspace list $REMOTE_URL${NC}  # remote
 "

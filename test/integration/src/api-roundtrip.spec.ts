@@ -34,6 +34,8 @@ import { createServer, type Server } from '@elaraai/e3-api-server';
 import {
   repoStatus,
   repoGc,
+  repoCreate,
+  repoRemove,
   packageList,
   packageGet,
   packageImport,
@@ -119,6 +121,39 @@ describe('API round-trip', () => {
       assert.strictEqual(result.deletedPartials, 0n);
       assert.strictEqual(result.retainedObjects, 0n);
       assert.strictEqual(result.bytesFreed, 0n);
+    });
+
+    it('repoCreate creates a new repository', async () => {
+      const newRepoName = 'new-test-repo';
+
+      // Create a new repo via API
+      const result = await repoCreate(baseUrl, newRepoName);
+      assert.strictEqual(result, newRepoName);
+
+      // Verify it exists by getting status
+      const status = await repoStatus(baseUrl, newRepoName);
+      assert.ok(status.path.includes('.e3'), 'new repo path should contain .e3');
+
+      // Clean up
+      await repoRemove(baseUrl, newRepoName);
+    });
+
+    it('repoRemove removes an existing repository', async () => {
+      const tempRepoName = 'repo-to-delete';
+
+      // Create a repo to delete
+      await repoCreate(baseUrl, tempRepoName);
+
+      // Verify it exists
+      const status = await repoStatus(baseUrl, tempRepoName);
+      assert.ok(status.path.includes('.e3'));
+
+      // Remove it - should complete without error
+      await repoRemove(baseUrl, tempRepoName);
+
+      // Verify removal worked by trying to create it again (should succeed if it was removed)
+      await repoCreate(baseUrl, tempRepoName);
+      await repoRemove(baseUrl, tempRepoName); // Clean up
     });
   });
 
