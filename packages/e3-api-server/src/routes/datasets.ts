@@ -4,114 +4,68 @@
  */
 
 import { Hono } from 'hono';
-import { NullType, ArrayType, StringType, decodeBeast2 } from '@elaraai/east';
 import { urlPathToTreePath } from '@elaraai/e3-types';
+import type { StorageBackend } from '@elaraai/e3-core';
 import {
-  workspaceListTree,
-  workspaceGetDatasetHash,
-  workspaceSetDataset,
-  objectRead,
-  LocalStorage,
-} from '@elaraai/e3-core';
-import { sendSuccess, sendError } from '../beast2.js';
-import { errorToVariant } from '../errors.js';
-import { extractWildcardPath } from '../utils.js';
+  listDatasets,
+  getDataset,
+  setDataset,
+} from '../handlers/datasets.js';
 
-export function createDatasetRoutes(repoPath: string) {
+export function createDatasetRoutes(
+  storage: StorageBackend,
+  getRepoPath: (repo: string) => string
+) {
   const app = new Hono();
 
-  // GET /list - List field names at root (e3 list <repo> <ws>)
-  app.get('/list', async (c) => {
-    try {
-      const workspace = c.req.param('ws');
-      if (!workspace) {
-        return sendError(c, ArrayType(StringType), errorToVariant(new Error('Missing workspace parameter')));
-      }
-      const storage = new LocalStorage();
-      const fields = await workspaceListTree(storage, repoPath, workspace, []);
-      return sendSuccess(c, ArrayType(StringType), fields);
-    } catch (err) {
-      return sendError(c, ArrayType(StringType), errorToVariant(err));
-    }
+  // GET /api/repos/:repo/workspaces/:ws/datasets - List root fields
+  app.get('/', async (c) => {
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const ws = c.req.param('ws')!;
+    return listDatasets(storage, repoPath, ws, []);
   });
 
-  // GET /list/* - List field names at path (e3 list <repo> <ws.path>)
-  app.get('/list/*', async (c) => {
-    try {
-      const workspace = c.req.param('ws');
-      if (!workspace) {
-        return sendError(c, ArrayType(StringType), errorToVariant(new Error('Missing workspace parameter')));
-      }
-      const storage = new LocalStorage();
-      const pathStr = extractWildcardPath(c.req.path, /^\/api\/workspaces\/[^/]+\/list\//);
-      const treePath = urlPathToTreePath(pathStr);
-      const fields = await workspaceListTree(storage, repoPath, workspace, treePath);
-      return sendSuccess(c, ArrayType(StringType), fields);
-    } catch (err) {
-      return sendError(c, ArrayType(StringType), errorToVariant(err));
+  // GET /api/repos/:repo/workspaces/:ws/datasets/* - Get dataset value (or list if ?list=true)
+  app.get('/*', async (c) => {
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const ws = c.req.param('ws')!;
+
+    // Extract the wildcard path
+    const fullPath = c.req.path;
+    // Path format: /api/repos/:repo/workspaces/:ws/datasets/*
+    // Find the position after /datasets/
+    const datasetsPrefix = `/api/repos/${repo}/workspaces/${ws}/datasets/`;
+    const pathStr = fullPath.startsWith(datasetsPrefix) ? fullPath.slice(datasetsPrefix.length) : '';
+    const treePath = urlPathToTreePath(pathStr);
+
+    // Check if this is a list request
+    const listParam = c.req.query('list');
+    if (listParam === 'true') {
+      return listDatasets(storage, repoPath, ws, treePath);
     }
+
+    return getDataset(storage, repoPath, ws, treePath);
   });
 
-  // GET /get/* - Get dataset value as raw BEAST2 (e3 get <repo> <ws.path>)
-  app.get('/get/*', async (c) => {
-    try {
-      const workspace = c.req.param('ws');
-      if (!workspace) {
-        return sendError(c, NullType, errorToVariant(new Error('Missing workspace parameter')));
-      }
-      const storage = new LocalStorage();
-      const pathStr = extractWildcardPath(c.req.path, /^\/api\/workspaces\/[^/]+\/get\//);
-      const treePath = urlPathToTreePath(pathStr);
+  // PUT /api/repos/:repo/workspaces/:ws/datasets/* - Set dataset value
+  app.put('/*', async (c) => {
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const ws = c.req.param('ws')!;
 
-      if (treePath.length === 0) {
-        return sendError(c, NullType, errorToVariant(new Error('Path required for get')));
-      }
+    // Extract the wildcard path
+    const fullPath = c.req.path;
+    const datasetsPrefix = `/api/repos/${repo}/workspaces/${ws}/datasets/`;
+    const pathStr = fullPath.startsWith(datasetsPrefix) ? fullPath.slice(datasetsPrefix.length) : '';
+    const treePath = urlPathToTreePath(pathStr);
 
-      const { refType, hash } = await workspaceGetDatasetHash(storage, repoPath, workspace, treePath);
+    // Body is raw BEAST2
+    const buffer = await c.req.arrayBuffer();
+    const body = new Uint8Array(buffer);
 
-      if (refType === 'unassigned') {
-        return sendError(c, NullType, errorToVariant(new Error('Dataset is unassigned (pending task output)')));
-      }
-
-      if (refType === 'null' || !hash) {
-        return sendError(c, NullType, errorToVariant(new Error('Dataset is null')));
-      }
-
-      // Return raw BEAST2 bytes directly from object store
-      const data = await objectRead(repoPath, hash);
-      return new Response(data, {
-        status: 200,
-        headers: { 'Content-Type': 'application/beast2' },
-      });
-    } catch (err) {
-      return sendError(c, NullType, errorToVariant(err));
-    }
-  });
-
-  // PUT /set/* - Set dataset value from raw BEAST2 (e3 set <repo> <ws.path>)
-  app.put('/set/*', async (c) => {
-    try {
-      const workspace = c.req.param('ws');
-      if (!workspace) {
-        return sendError(c, NullType, errorToVariant(new Error('Missing workspace parameter')));
-      }
-      const storage = new LocalStorage();
-      const pathStr = extractWildcardPath(c.req.path, /^\/api\/workspaces\/[^/]+\/set\//);
-      const treePath = urlPathToTreePath(pathStr);
-
-      if (treePath.length === 0) {
-        return sendError(c, NullType, errorToVariant(new Error('Path required for set')));
-      }
-
-      // Body is raw BEAST2 - decode to get type and value
-      const buffer = await c.req.arrayBuffer();
-      const { type, value } = decodeBeast2(new Uint8Array(buffer));
-
-      await workspaceSetDataset(storage, repoPath, workspace, treePath, value, type);
-      return sendSuccess(c, NullType, null);
-    } catch (err) {
-      return sendError(c, NullType, errorToVariant(err));
-    }
+    return setDataset(storage, repoPath, ws, treePath, body);
   });
 
   return app;

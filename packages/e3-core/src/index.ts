@@ -184,7 +184,6 @@ export {
   WorkspaceNotDeployedError,
   WorkspaceExistsError,
   WorkspaceLockError,
-  type LockHolder,
   type LockHolderInfo,
   // Package
   PackageNotFoundError,

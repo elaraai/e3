@@ -11,13 +11,14 @@ import { get, unwrap } from './http.js';
  * List field names at root of workspace dataset tree.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
  * @returns Array of field names at root
  */
-export async function datasetList(url: string, workspace: string): Promise<string[]> {
+export async function datasetList(url: string, repo: string, workspace: string): Promise<string[]> {
   const response = await get(
     url,
-    `/api/workspaces/${encodeURIComponent(workspace)}/list`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`,
     ArrayType(StringType)
   );
   return unwrap(response);
@@ -27,19 +28,21 @@ export async function datasetList(url: string, workspace: string): Promise<strin
  * List field names at a path in workspace dataset tree.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
  * @param path - Path to the dataset (e.g., ['inputs', 'config'])
  * @returns Array of field names at path
  */
 export async function datasetListAt(
   url: string,
+  repo: string,
   workspace: string,
   path: TreePath
 ): Promise<string[]> {
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
   const response = await get(
     url,
-    `/api/workspaces/${encodeURIComponent(workspace)}/list/${pathStr}`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}?list=true`,
     ArrayType(StringType)
   );
   return unwrap(response);
@@ -52,18 +55,20 @@ export async function datasetListAt(
  * Use decodeBeast2 or decodeBeast2For to decode with the appropriate type.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
  * @param path - Path to the dataset (e.g., ['inputs', 'config'])
  * @returns Raw BEAST2 bytes
  */
 export async function datasetGet(
   url: string,
+  repo: string,
   workspace: string,
   path: TreePath
 ): Promise<Uint8Array> {
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
   const response = await fetch(
-    `${url}/api/workspaces/${encodeURIComponent(workspace)}/get/${pathStr}`,
+    `${url}/api/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}`,
     {
       method: 'GET',
       headers: {
@@ -84,19 +89,21 @@ export async function datasetGet(
  * Set a dataset value from raw BEAST2 bytes.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
  * @param path - Path to the dataset (e.g., ['inputs', 'config'])
  * @param data - Raw BEAST2 encoded value
  */
 export async function datasetSet(
   url: string,
+  repo: string,
   workspace: string,
   path: TreePath,
   data: Uint8Array
 ): Promise<void> {
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
   const response = await fetch(
-    `${url}/api/workspaces/${encodeURIComponent(workspace)}/set/${pathStr}`,
+    `${url}/api/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}`,
     {
       method: 'PUT',
       headers: {

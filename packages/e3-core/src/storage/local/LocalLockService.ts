@@ -3,7 +3,7 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import type { LockState, LockOperation, LockHolder } from '@elaraai/e3-types';
+import type { LockState, LockOperation } from '@elaraai/e3-types';
 import type { LockHandle, LockService } from '../interfaces.js';
 import {
   acquireWorkspaceLock,
@@ -47,7 +47,7 @@ export class LocalLockService implements LockService {
     return getWorkspaceLockState(repo, resource);
   }
 
-  isHolderAlive(holder: LockHolder): Promise<boolean> {
+  isHolderAlive(holder: string): Promise<boolean> {
     return isLockHolderAlive(holder);
   }
 }

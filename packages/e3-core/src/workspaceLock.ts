@@ -14,16 +14,45 @@
  * - Uses flock(LOCK_EX | LOCK_NB) via the `flock` command for kernel-managed locking
  * - Lock is automatically released when the process dies (kernel handles this)
  * - Lock state stored in beast2 format using LockStateType from e3-types
+ * - Holder stored as East text string (e.g., `.process (pid=1234, ...)`)
  * - Stale lock detection via bootId comparison (handles system restarts)
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
-import { encodeBeast2For, decodeBeast2For, variant, none } from '@elaraai/east';
-import { LockStateType, type LockState, type LockOperation, type LockHolder } from '@elaraai/e3-types';
+import { encodeBeast2For, decodeBeast2For, printFor, parseInferred, variant, none, VariantType } from '@elaraai/east';
+import { LockStateType, ProcessHolderType, type LockState, type LockOperation } from '@elaraai/e3-types';
 import { WorkspaceLockError, type LockHolderInfo } from './errors.js';
 import { getBootId, getPidStartTime, isProcessAlive } from './executions.js';
+
+// =============================================================================
+// Holder Encoding
+// =============================================================================
+
+/**
+ * Variant type for encoding holder as East text.
+ * The holder string stores `.process (...)` or other backend-specific variants.
+ */
+const HolderVariantType = VariantType({
+  process: ProcessHolderType,
+});
+
+/** Print a process holder to East text format */
+const printProcessHolder = printFor(HolderVariantType);
+
+/**
+ * Parse an East text holder string.
+ * Returns the parsed variant or null if parsing fails.
+ */
+function parseHolder(holderStr: string): { type: string; value: any } | null {
+  try {
+    const [_type, value] = parseInferred(holderStr);
+    return value as { type: string; value: any };
+  } catch {
+    return null;
+  }
+}
 
 // =============================================================================
 // Types
@@ -103,12 +132,13 @@ export function lockStateToHolderInfo(state: LockState): LockHolderInfo {
     operation: state.operation.type,
   };
 
-  // Extract process-specific fields if holder is a process
-  if (state.holder.type === 'process') {
-    info.pid = Number(state.holder.value.pid);
-    info.bootId = state.holder.value.bootId;
-    info.startTime = Number(state.holder.value.startTime);
-    info.command = state.holder.value.command;
+  // Parse the holder string to extract process-specific fields
+  const holder = parseHolder(state.holder);
+  if (holder?.type === 'process') {
+    info.pid = Number(holder.value.pid);
+    info.bootId = holder.value.bootId;
+    info.startTime = Number(holder.value.startTime);
+    info.command = holder.value.command;
   }
 
   return info;
@@ -116,8 +146,12 @@ export function lockStateToHolderInfo(state: LockState): LockHolderInfo {
 
 /**
  * Check if a lock holder is still alive.
+ * @param holderStr - East text-encoded holder string
  */
-export async function isLockHolderAlive(holder: LockHolder): Promise<boolean> {
+export async function isLockHolderAlive(holderStr: string): Promise<boolean> {
+  const holder = parseHolder(holderStr);
+  if (!holder) return true; // Can't parse - assume alive (safer)
+
   if (holder.type === 'process') {
     return isProcessAlive(
       Number(holder.value.pid),
@@ -125,6 +159,7 @@ export async function isLockHolderAlive(holder: LockHolder): Promise<boolean> {
       holder.value.bootId
     );
   }
+
   // Unknown holder type - assume alive (safer default)
   return true;
 }
@@ -174,14 +209,18 @@ export async function acquireWorkspaceLock(
   const command = process.argv.join(' ');
   const acquiredAt = new Date();
 
+  // Encode holder as East text: .process (pid=..., bootId="...", ...)
+  const holderVariant = variant('process', {
+    pid: BigInt(pid),
+    bootId,
+    startTime: BigInt(startTime),
+    command,
+  });
+  const holder = printProcessHolder(holderVariant);
+
   const lockState: LockState = {
     operation,
-    holder: variant('process', {
-      pid: BigInt(pid),
-      bootId,
-      startTime: BigInt(startTime),
-      command,
-    }),
+    holder,
     acquiredAt,
     expiresAt: none,
   };
@@ -193,8 +232,8 @@ export async function acquireWorkspaceLock(
   if (!flockProcess) {
     // Failed to acquire - read lock state to report who has it
     const existingState = await readLockState(lockPath);
-    const holder = existingState ? lockStateToHolderInfo(existingState) : undefined;
-    throw new WorkspaceLockError(workspace, holder);
+    const holderInfo = existingState ? lockStateToHolderInfo(existingState) : undefined;
+    throw new WorkspaceLockError(workspace, holderInfo);
   }
 
   // Lock acquired! Create handle

@@ -86,8 +86,8 @@ export {
 export {
   LockOperationType,
   type LockOperation,
-  LockHolderType,
-  type LockHolder,
+  ProcessHolderType,
+  type ProcessHolder,
   LockStateType,
   type LockState,
 } from './lock.js';

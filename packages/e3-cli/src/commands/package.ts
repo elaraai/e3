@@ -7,6 +7,7 @@
  * e3 package commands - Package management
  */
 
+import { readFileSync, writeFileSync } from 'node:fs';
 import {
   packageImport,
   packageExport,
@@ -14,7 +15,13 @@ import {
   packageRemove,
   LocalStorage,
 } from '@elaraai/e3-core';
-import { resolveRepo, parsePackageSpec, formatError, exitError } from '../utils.js';
+import {
+  packageImport as packageImportRemote,
+  packageExport as packageExportRemote,
+  packageList as packageListRemote,
+  packageRemove as packageRemoveRemote,
+} from '@elaraai/e3-api-client';
+import { parseRepoLocation, parsePackageSpec, formatError, exitError } from '../utils.js';
 
 export const packageCommand = {
   /**
@@ -22,13 +29,24 @@ export const packageCommand = {
    */
   async import(repoArg: string, zipPath: string): Promise<void> {
     try {
-      const repoPath = resolveRepo(repoArg);
-      const storage = new LocalStorage();
-      const result = await packageImport(storage, repoPath, zipPath);
+      const location = parseRepoLocation(repoArg);
 
-      console.log(`Imported ${result.name}@${result.version}`);
-      console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
-      console.log(`  Objects: ${result.objectCount}`);
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        const result = await packageImport(storage, location.path, zipPath);
+
+        console.log(`Imported ${result.name}@${result.version}`);
+        console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
+        console.log(`  Objects: ${result.objectCount}`);
+      } else {
+        // Remote import - read local zip and send to server
+        const zipBytes = readFileSync(zipPath);
+        const result = await packageImportRemote(location.baseUrl, location.repo, new Uint8Array(zipBytes));
+
+        console.log(`Imported ${result.name}@${result.version}`);
+        console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
+        console.log(`  Objects: ${result.objectCount}`);
+      }
     } catch (err) {
       exitError(formatError(err));
     }
@@ -39,15 +57,24 @@ export const packageCommand = {
    */
   async export(repoArg: string, pkgSpec: string, zipPath: string): Promise<void> {
     try {
-      const repoPath = resolveRepo(repoArg);
-      const storage = new LocalStorage();
+      const location = parseRepoLocation(repoArg);
       const { name, version } = parsePackageSpec(pkgSpec);
 
-      const result = await packageExport(storage, repoPath, name, version, zipPath);
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        const result = await packageExport(storage, location.path, name, version, zipPath);
 
-      console.log(`Exported ${name}@${version} to ${zipPath}`);
-      console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
-      console.log(`  Objects: ${result.objectCount}`);
+        console.log(`Exported ${name}@${version} to ${zipPath}`);
+        console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
+        console.log(`  Objects: ${result.objectCount}`);
+      } else {
+        // Remote export - fetch zip bytes and write locally
+        const zipBytes = await packageExportRemote(location.baseUrl, location.repo, name, version);
+        writeFileSync(zipPath, zipBytes);
+
+        console.log(`Exported ${name}@${version} to ${zipPath}`);
+        console.log(`  Size: ${zipBytes.length} bytes`);
+      }
     } catch (err) {
       exitError(formatError(err));
     }
@@ -58,9 +85,16 @@ export const packageCommand = {
    */
   async list(repoArg: string): Promise<void> {
     try {
-      const repoPath = resolveRepo(repoArg);
-      const storage = new LocalStorage();
-      const packages = await packageList(storage, repoPath);
+      const location = parseRepoLocation(repoArg);
+
+      let packages: Array<{ name: string; version: string }>;
+
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        packages = await packageList(storage, location.path);
+      } else {
+        packages = await packageListRemote(location.baseUrl, location.repo);
+      }
 
       if (packages.length === 0) {
         console.log('No packages installed');
@@ -81,14 +115,18 @@ export const packageCommand = {
    */
   async remove(repoArg: string, pkgSpec: string): Promise<void> {
     try {
-      const repoPath = resolveRepo(repoArg);
-      const storage = new LocalStorage();
+      const location = parseRepoLocation(repoArg);
       const { name, version } = parsePackageSpec(pkgSpec);
 
-      await packageRemove(storage, repoPath, name, version);
-
-      console.log(`Removed ${name}@${version}`);
-      console.log('Run `e3 gc` to reclaim disk space');
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        await packageRemove(storage, location.path, name, version);
+        console.log(`Removed ${name}@${version}`);
+        console.log('Run `e3 gc` to reclaim disk space');
+      } else {
+        await packageRemoveRemote(location.baseUrl, location.repo, name, version);
+        console.log(`Removed ${name}@${version}`);
+      }
     } catch (err) {
       exitError(formatError(err));
     }

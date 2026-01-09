@@ -3,137 +3,77 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { Hono } from 'hono';
-import { ArrayType, BlobType, NullType } from '@elaraai/east';
+import { BlobType } from '@elaraai/east';
+import type { StorageBackend } from '@elaraai/e3-core';
 import {
-  packageList,
-  packageImport,
-  packageExport,
-  packageRemove,
-  packageRead,
-  LocalStorage,
-} from '@elaraai/e3-core';
-import { PackageObjectType } from '@elaraai/e3-types';
-import { sendSuccess, sendError } from '../beast2.js';
-import { errorToVariant } from '../errors.js';
-import { PackageListItemType, PackageImportResultType } from '../types.js';
+  listPackages,
+  getPackage,
+  importPackage,
+  exportPackage,
+  deletePackage,
+} from '../handlers/packages.js';
+import { decodeBody } from '../beast2.js';
 
-export function createPackageRoutes(repoPath: string) {
+export function createPackageRoutes(
+  storage: StorageBackend,
+  getRepoPath: (repo: string) => string
+) {
   const app = new Hono();
 
-  // GET /api/packages - List all packages
+  // GET /api/repos/:repo/packages - List all packages
   app.get('/', async (c) => {
-    try {
-      const storage = new LocalStorage();
-      const packages = await packageList(storage, repoPath);
-      const result = packages.map((pkg) => ({
-        name: pkg.name,
-        version: pkg.version,
-      }));
-      return sendSuccess(c, ArrayType(PackageListItemType), result);
-    } catch (err) {
-      return sendError(c, ArrayType(PackageListItemType), errorToVariant(err));
-    }
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    return listPackages(storage, repoPath);
   });
 
-  // GET /api/packages/:name/:version - Get package details
+  // GET /api/repos/:repo/packages/:name/:version - Get package details
   app.get('/:name/:version', async (c) => {
-    try {
-      const name = c.req.param('name');
-      const version = c.req.param('version');
-      if (!name || !version) {
-        return sendError(c, PackageObjectType, errorToVariant(new Error('Missing name or version parameter')));
-      }
-
-      const storage = new LocalStorage();
-      const pkg = await packageRead(storage, repoPath, name, version);
-      return sendSuccess(c, PackageObjectType, pkg);
-    } catch (err) {
-      return sendError(c, PackageObjectType, errorToVariant(err));
-    }
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const name = c.req.param('name')!;
+    const version = c.req.param('version')!;
+    return getPackage(storage, repoPath, name, version);
   });
 
-  // POST /api/packages - Import a package from zip
+  // POST /api/repos/:repo/packages - Import a package from zip
   app.post('/', async (c) => {
-    try {
-      // Read raw body as zip bytes
-      const contentType = c.req.header('content-type');
-      let archive: Uint8Array;
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
 
-      if (contentType === 'application/beast2') {
-        // BEAST2 encoded blob
-        const { decodeBody } = await import('../beast2.js');
-        archive = await decodeBody(c, BlobType);
-      } else {
-        // Raw zip bytes
-        const buffer = await c.req.arrayBuffer();
-        archive = new Uint8Array(buffer);
-      }
+    // Read raw body as zip bytes
+    const contentType = c.req.header('content-type');
+    let archive: Uint8Array;
 
-      // Write to temp file
-      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'e3-import-'));
-      const tempPath = path.join(tempDir, 'package.zip');
-      try {
-        await fs.writeFile(tempPath, archive);
-        const storage = new LocalStorage();
-        const result = await packageImport(storage, repoPath, tempPath);
-        return sendSuccess(c, PackageImportResultType, {
-          name: result.name,
-          version: result.version,
-          packageHash: result.packageHash,
-          objectCount: BigInt(result.objectCount),
-        });
-      } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
-      }
-    } catch (err) {
-      return sendError(c, PackageImportResultType, errorToVariant(err));
+    if (contentType === 'application/beast2') {
+      // BEAST2 encoded blob
+      archive = await decodeBody(c, BlobType);
+    } else {
+      // Raw zip bytes
+      const buffer = await c.req.arrayBuffer();
+      archive = new Uint8Array(buffer);
     }
+
+    return importPackage(storage, repoPath, archive);
   });
 
-  // GET /api/packages/:name/:version/export - Export package as zip
+  // GET /api/repos/:repo/packages/:name/:version/export - Export package as zip
   app.get('/:name/:version/export', async (c) => {
-    try {
-      const name = c.req.param('name');
-      const version = c.req.param('version');
-      if (!name || !version) {
-        return sendError(c, BlobType, errorToVariant(new Error('Missing name or version parameter')));
-      }
-
-      // Export to temp file
-      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'e3-export-'));
-      const tempPath = path.join(tempDir, 'package.zip');
-      try {
-        const storage = new LocalStorage();
-        await packageExport(storage, repoPath, name, version, tempPath);
-        const archive = await fs.readFile(tempPath);
-        return sendSuccess(c, BlobType, new Uint8Array(archive));
-      } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
-      }
-    } catch (err) {
-      return sendError(c, BlobType, errorToVariant(err));
-    }
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const name = c.req.param('name')!;
+    const version = c.req.param('version')!;
+    return exportPackage(storage, repoPath, name, version);
   });
 
-  // DELETE /api/packages/:name/:version - Remove a package
+  // DELETE /api/repos/:repo/packages/:name/:version - Remove a package
   app.delete('/:name/:version', async (c) => {
-    try {
-      const name = c.req.param('name');
-      const version = c.req.param('version');
-      if (!name || !version) {
-        return sendError(c, NullType, errorToVariant(new Error('Missing name or version parameter')));
-      }
-
-      const storage = new LocalStorage();
-      await packageRemove(storage, repoPath, name, version);
-      return sendSuccess(c, NullType, null);
-    } catch (err) {
-      return sendError(c, NullType, errorToVariant(err));
-    }
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const name = c.req.param('name')!;
+    const version = c.req.param('version')!;
+    return deletePackage(storage, repoPath, name, version);
   });
 
   return app;

@@ -13,10 +13,11 @@ import { get, post, del, unwrap } from './http.js';
  * List all packages in the repository.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @returns Array of package info (name, version)
  */
-export async function packageList(url: string): Promise<PackageListItem[]> {
-  const response = await get(url, '/api/packages', ArrayType(PackageListItemType));
+export async function packageList(url: string, repo: string): Promise<PackageListItem[]> {
+  const response = await get(url, `/repos/${encodeURIComponent(repo)}/packages`, ArrayType(PackageListItemType));
   return unwrap(response);
 }
 
@@ -24,18 +25,20 @@ export async function packageList(url: string): Promise<PackageListItem[]> {
  * Get package object.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param name - Package name
  * @param version - Package version
  * @returns Package object
  */
 export async function packageGet(
   url: string,
+  repo: string,
   name: string,
   version: string
 ): Promise<PackageObject> {
   const response = await get(
     url,
-    `/api/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+    `/repos/${encodeURIComponent(repo)}/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
     PackageObjectType
   );
   return unwrap(response);
@@ -45,14 +48,16 @@ export async function packageGet(
  * Import a package from a zip archive.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param archive - Zip archive as bytes
  * @returns Imported package info
  */
 export async function packageImport(
   url: string,
+  repo: string,
   archive: Uint8Array
 ): Promise<PackageImportResult> {
-  const response = await post(url, '/api/packages', archive, BlobType, PackageImportResultType);
+  const response = await post(url, `/repos/${encodeURIComponent(repo)}/packages`, archive, BlobType, PackageImportResultType);
   return unwrap(response);
 }
 
@@ -60,18 +65,20 @@ export async function packageImport(
  * Export a package as a zip archive.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param name - Package name
  * @param version - Package version
  * @returns Zip archive as bytes
  */
 export async function packageExport(
   url: string,
+  repo: string,
   name: string,
   version: string
 ): Promise<Uint8Array> {
   const response = await get(
     url,
-    `/api/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}/export`,
+    `/repos/${encodeURIComponent(repo)}/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}/export`,
     BlobType
   );
   return unwrap(response);
@@ -81,17 +88,19 @@ export async function packageExport(
  * Remove a package from the repository.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param name - Package name
  * @param version - Package version
  */
 export async function packageRemove(
   url: string,
+  repo: string,
   name: string,
   version: string
 ): Promise<void> {
   const response = await del(
     url,
-    `/api/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+    `/repos/${encodeURIComponent(repo)}/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
     NullType
   );
   unwrap(response);
