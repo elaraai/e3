@@ -94,6 +94,24 @@ export async function del<T extends EastType>(
 }
 
 /**
+ * Make a PUT request without body and decode BEAST2 response.
+ */
+export async function putEmpty<T extends EastType>(
+  url: string,
+  path: string,
+  successType: T
+): Promise<Response<ValueTypeOf<T>>> {
+  const response = await fetch(`${url}/api${path}`, {
+    method: 'PUT',
+    headers: {
+      'Accept': 'application/beast2',
+    },
+  });
+
+  return decodeResponse(response, successType);
+}
+
+/**
  * Decode a BEAST2 response with the Response wrapper type.
  */
 async function decodeResponse<T extends EastType>(

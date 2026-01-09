@@ -4,13 +4,16 @@
  */
 
 import * as path from 'node:path';
+import { rmSync } from 'node:fs';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve, type ServerType } from '@hono/node-server';
-import { LocalStorage } from '@elaraai/e3-core';
+import { LocalStorage, repoInit } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
 import { createAuthMiddleware, type AuthConfig } from './middleware/auth.js';
 import { listRepos } from './handlers/repos.js';
+import { sendSuccess, sendError, sendSuccessWithStatus } from './beast2.js';
+import { StringType, NullType, variant } from '@elaraai/east';
 import { createPackageRoutes } from './routes/packages.js';
 import { createWorkspaceRoutes } from './routes/workspaces.js';
 import { createDatasetRoutes } from './routes/datasets.js';
@@ -88,6 +91,36 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   // GET /api/repos - List available repositories
   app.get('/api/repos', async () => {
     return listRepos(reposDir);
+  });
+
+  // PUT /api/repos/:repo - Create a new repository
+  app.put('/api/repos/:repo', async (c) => {
+    const repo = c.req.param('repo');
+    const repoPath = path.join(reposDir, repo);
+    const result = repoInit(repoPath);
+
+    if (!result.success) {
+      if (result.alreadyExists) {
+        return sendError(StringType, variant('internal', { message: `Repository '${repo}' already exists` }));
+      }
+      return sendError(StringType, variant('internal', { message: result.error?.message ?? 'Unknown error' }));
+    }
+
+    return sendSuccessWithStatus(StringType, repo, 201);
+  });
+
+  // DELETE /api/repos/:repo - Remove a repository
+  app.delete('/api/repos/:repo', async (c) => {
+    const repo = c.req.param('repo');
+    const repoPath = path.join(reposDir, repo);
+
+    try {
+      rmSync(repoPath, { recursive: true, force: true });
+      return sendSuccess(NullType, null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return sendError(NullType, variant('internal', { message }));
+    }
   });
 
   // Mount repository-specific routes

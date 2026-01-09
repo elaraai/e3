@@ -33,8 +33,8 @@ describe('task operations - basic repository functionality', () => {
 
   it('initializes repository and lists tasks (empty)', async () => {
     // Initialize repository
-    const initResult = await runE3Command(['init', '.'], testDir);
-    assert.strictEqual(initResult.exitCode, 0, `init failed: ${initResult.stderr}`);
+    const initResult = await runE3Command(['repo', 'create', '.'], testDir);
+    assert.strictEqual(initResult.exitCode, 0, `repo create failed: ${initResult.stderr}`);
 
     // List workspaces (should be empty initially)
     const listResult = await runE3Command(['list', '.'], testDir);
@@ -46,12 +46,10 @@ describe('task operations - basic repository functionality', () => {
 
   it('shows helpful error for non-existent workspace status', async () => {
     // Initialize repository
-    await runE3Command(['init', '.'], testDir);
+    await runE3Command(['repo', 'create', '.'], testDir);
 
-    // Try to get status of non-existent workspace
-    // Note: 'e3 status <repo>' shows repo status, not workspace status
-    // For now, just test that status works on an empty repo
-    const statusResult = await runE3Command(['status', '.'], testDir);
+    // Test that repo status works on an empty repo
+    const statusResult = await runE3Command(['repo', 'status', '.'], testDir);
 
     // Should succeed (repo exists, just empty)
     assert.strictEqual(statusResult.exitCode, 0);
@@ -59,7 +57,7 @@ describe('task operations - basic repository functionality', () => {
 
   it('shows helpful error for non-existent path in get command', async () => {
     // Initialize repository
-    await runE3Command(['init', '.'], testDir);
+    await runE3Command(['repo', 'create', '.'], testDir);
 
     // Try to get non-existent path - requires a workspace.path format
     const getResult = await runE3Command(['get', '.', 'nonexistent.path'], testDir);
@@ -77,7 +75,7 @@ describe('task operations - basic repository functionality', () => {
 
   it('shows helpful error when get is used with invalid path', async () => {
     // Initialize repository
-    await runE3Command(['init', '.'], testDir);
+    await runE3Command(['repo', 'create', '.'], testDir);
 
     // Try to get with invalid workspace.path format (workspace doesn't exist)
     const getResult = await runE3Command(['get', '.', 'invalid-ws.path'], testDir);
@@ -95,7 +93,7 @@ describe('task operations - basic repository functionality', () => {
 
   it('repository structure persists after initialization', async () => {
     // Initialize repository
-    await runE3Command(['init', '.'], testDir);
+    await runE3Command(['repo', 'create', '.'], testDir);
 
     // Verify all expected directories exist
     // Current structure: objects, packages, workspaces, executions
@@ -113,12 +111,26 @@ describe('task operations - basic repository functionality', () => {
 
   it('help commands work', async () => {
     // Test that help commands exit successfully
-    // Note: 'run' and 'log' were removed, replaced with 'start', 'gc', 'convert'
-    const commands = ['init', 'start', 'status', 'get', 'list', 'gc', 'convert'];
+    // Top-level commands
+    const topCommands = ['start', 'get', 'list', 'convert'];
+    // Subcommands under repo, package, workspace
+    const subCommands = [
+      ['repo', 'create'],
+      ['repo', 'status'],
+      ['repo', 'gc'],
+      ['package', 'list'],
+      ['workspace', 'list'],
+    ];
 
-    for (const cmd of commands) {
+    for (const cmd of topCommands) {
       const helpResult = await runE3Command([cmd, '--help'], testDir);
       assert.strictEqual(helpResult.exitCode, 0, `${cmd} --help should succeed`);
+      assert.match(helpResult.stdout, new RegExp(cmd, 'i'), `Help should mention ${cmd}`);
+    }
+
+    for (const [group, cmd] of subCommands) {
+      const helpResult = await runE3Command([group, cmd, '--help'], testDir);
+      assert.strictEqual(helpResult.exitCode, 0, `${group} ${cmd} --help should succeed`);
       assert.match(helpResult.stdout, new RegExp(cmd, 'i'), `Help should mention ${cmd}`);
     }
   });

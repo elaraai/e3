@@ -64,7 +64,7 @@ export async function testConcurrentWritesDuringExecution(): Promise<ScenarioRes
 
     // Setup
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -172,7 +172,7 @@ export async function testMultipleSimultaneousStarts(): Promise<ScenarioResult> 
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -271,7 +271,7 @@ export async function testRapidSetStartCycles(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -400,7 +400,7 @@ export async function testInterleavedMultiWorkspace(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
 
     // Create 3 workspaces

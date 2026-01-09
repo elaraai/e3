@@ -69,7 +69,7 @@ export interface CliResult {
 /**
  * Run an e3 CLI command
  *
- * @param args - Command arguments (e.g., ['init'])
+ * @param args - Command arguments (e.g., ['repo', 'create', '.'])
  * @param cwd - Working directory for the command
  * @param input - Optional stdin input
  * @returns Promise with exit code, stdout, and stderr
