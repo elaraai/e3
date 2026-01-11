@@ -46,7 +46,7 @@
     "yazl": "^2.5.1"
   },
   "peerDependencies": {
-    "@elaraai/east": "^0.0.1-beta.25"
+    "@elaraai/east": "^0.0.1-beta.26"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
