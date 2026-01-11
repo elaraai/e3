@@ -49,7 +49,7 @@ export function randomE3Type(config: TypeGenConfig = {}): EastType {
 
   // 40% chance of using East's full randomType
   // Pass depth to control complexity
-  return eastRandomType(config.maxDepth ?? 2);
+  return eastRandomType(config.maxDepth ?? 2, { includeRecursive: false, includeFunctions: false });
 }
 
 /**

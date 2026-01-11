@@ -37,7 +37,7 @@ export async function testLargeArrays(): Promise<ScenarioResult> {
     mkdirSync(testDir, { recursive: true });
 
     // Generate a random element type (depth 1 to keep elements simple)
-    const elementType = eastRandomType(1);
+    const elementType = eastRandomType(1, { includeRecursive: false, includeFunctions: false });
     const arrayType = ArrayType(elementType);
 
     // Create a large array with random values
@@ -190,7 +190,7 @@ export async function testNestedStructures(): Promise<ScenarioResult> {
     mkdirSync(testDir, { recursive: true });
 
     // Generate a random element type (depth 1)
-    const elementType = eastRandomType(1);
+    const elementType = eastRandomType(1, { includeRecursive: false, includeFunctions: false });
     const rowType = ArrayType(elementType);
     const matrixType = ArrayType(rowType);
 

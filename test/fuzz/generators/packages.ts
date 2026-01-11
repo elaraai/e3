@@ -62,7 +62,7 @@ export function randomPackage(config: PackageConfig = {}): GeneratedPackage {
   for (let i = 0; i < numInputs; i++) {
     const name = `input_${i}`;
     // Use East's full random type generator - depth 2 to keep it manageable
-    const type = eastRandomType(2);
+    const type = eastRandomType(2, { includeRecursive: false, includeFunctions: false });
     const defaultValue = randomValue(type);
     const dataset = e3.input(name, type, defaultValue as ValueTypeOf<typeof type>);
     inputs.push({ name, type, defaultValue, dataset });
