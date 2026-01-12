@@ -79,7 +79,7 @@ export function createDeviceRoutes(config: DeviceFlowConfig): Hono {
   const app = new Hono();
 
   // POST /oauth2/device_authorization - Start device flow
-  app.post('/oauth2/device_authorization', async (c) => {
+  app.post('/oauth2/device_authorization', (c) => {
     const deviceCode = generateDeviceCode();
     const userCode = generateUserCode();
     const expiresIn = 300; // 5 minutes
@@ -101,7 +101,7 @@ export function createDeviceRoutes(config: DeviceFlowConfig): Hono {
   });
 
   // GET /device - HTML approval page
-  app.get('/device', async (c) => {
+  app.get('/device', (c) => {
     const userCode = c.req.query('user_code') || '';
     const autoApproveScript = config.autoApprove
       ? `<script>setTimeout(() => document.forms[0].submit(), 500);</script>`
@@ -140,7 +140,7 @@ export function createDeviceRoutes(config: DeviceFlowConfig): Hono {
     const userCode = String(body['user_code'] || '');
 
     // Find the pending auth with this user code
-    for (const [deviceCode, auth] of pendingAuths) {
+    for (const [_deviceCode, auth] of pendingAuths) {
       if (auth.userCode === userCode && auth.expiresAt > Date.now()) {
         auth.approved = true;
         return c.html(`<!DOCTYPE html>
@@ -268,7 +268,7 @@ export function createDeviceRoutes(config: DeviceFlowConfig): Hono {
           token_type: 'Bearer',
           expires_in: config.accessTokenExpiry,
         });
-      } catch (err) {
+      } catch {
         return c.json({ error: 'invalid_grant', error_description: 'Invalid refresh token' }, 400);
       }
     }

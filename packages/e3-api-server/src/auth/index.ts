@@ -11,7 +11,7 @@
  */
 
 import { Hono } from 'hono';
-import { generateKeyPair, verifyJwt, type KeyPair, type JwtPayload } from './keys.js';
+import { generateKeyPair, type KeyPair } from './keys.js';
 import { createDeviceRoutes, type DeviceFlowConfig } from './device.js';
 import { createDiscoveryRoutes } from './discovery.js';
 
