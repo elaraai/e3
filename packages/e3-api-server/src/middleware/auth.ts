@@ -112,12 +112,12 @@ export async function createAuthMiddleware(config: AuthConfig): Promise<Middlewa
   if (config._internalKeys) {
     // Use provided KeyPair directly (built-in OIDC provider)
     const keys = config._internalKeys;
-    getPublicKey = async () => keys.publicKey;
+    getPublicKey = () => Promise.resolve(keys.publicKey);
   } else if (config.publicKeyPath) {
     // Load public key from file at startup
     const publicKeyPem = await fs.readFile(config.publicKeyPath, 'utf8');
     const publicKey = crypto.createPublicKey(publicKeyPem);
-    getPublicKey = async () => publicKey;
+    getPublicKey = () => Promise.resolve(publicKey);
   } else if (config.jwksUrl) {
     // Fetch keys from JWKS endpoint
     let cache: JwksCache | null = null;

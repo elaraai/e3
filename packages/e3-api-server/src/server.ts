@@ -117,7 +117,7 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   });
 
   // PUT /api/repos/:repo - Create a new repository
-  app.put('/api/repos/:repo', async (c) => {
+  app.put('/api/repos/:repo', (c) => {
     const repo = c.req.param('repo');
     const repoPath = path.join(reposDir, repo);
     const result = repoInit(repoPath);
@@ -133,7 +133,7 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   });
 
   // DELETE /api/repos/:repo - Remove a repository
-  app.delete('/api/repos/:repo', async (c) => {
+  app.delete('/api/repos/:repo', (c) => {
     const repo = c.req.param('repo');
     const repoPath = path.join(reposDir, repo);
 
