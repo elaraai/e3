@@ -114,7 +114,7 @@ describe('CLI remote operations', () => {
       assert.match(result.stdout, /Created repository: new-remote-repo/);
     });
 
-    it('removes repository via remote URL', async () => {
+    it('removes repository via remote URL (async)', async () => {
       const repoToDeleteUrl = `http://localhost:${server.port}/repos/repo-to-delete`;
 
       // Create repo first
@@ -124,6 +124,7 @@ describe('CLI remote operations', () => {
       const result = await runE3Command(['repo', 'remove', repoToDeleteUrl], tempDir, { env: authEnv() });
 
       assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /Removing repository/);
       assert.match(result.stdout, /Removed repository: repo-to-delete/);
     });
 
@@ -135,6 +136,25 @@ describe('CLI remote operations', () => {
       assert.match(result.stdout, /Objects:/);
       assert.match(result.stdout, /Packages:/);
       assert.match(result.stdout, /Workspaces:/);
+    });
+
+    it('runs garbage collection via remote URL (async)', async () => {
+      // GC on an empty repo should work (just report 0 objects)
+      const result = await runE3Command(['repo', 'gc', remoteUrl], tempDir, { env: authEnv() });
+
+      assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /Running garbage collection/);
+      assert.match(result.stdout, /Garbage collection complete/);
+      assert.match(result.stdout, /Objects retained:/);
+      assert.match(result.stdout, /Objects deleted:/);
+    });
+
+    it('runs garbage collection dry-run via remote URL', async () => {
+      const result = await runE3Command(['repo', 'gc', remoteUrl, '--dry-run'], tempDir, { env: authEnv() });
+
+      assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /Dry run/);
+      assert.match(result.stdout, /Garbage collection complete/);
     });
   });
 
@@ -263,6 +283,118 @@ describe('CLI remote operations', () => {
       const listResult = await runE3Command(['workspace', 'list', remoteUrl], tempDir, { env: authEnv() });
       assert.strictEqual(listResult.exitCode, 0, `List failed: ${listResult.stderr}`);
       assert.match(listResult.stdout, /compute-ws.*compute-pkg@1.0.0/);
+    });
+  });
+
+  describe('tree command', () => {
+    it('shows tree structure via remote URL', async () => {
+      // Create a test package with nested structure
+      const inputA = e3.input('a', IntegerType, 1n);
+      const inputB = e3.input('b', IntegerType, 2n);
+      const task = e3.task(
+        'add',
+        [inputA, inputB],
+        East.function([IntegerType, IntegerType], IntegerType, ($, a, b) => a.add(b))
+      );
+      const pkg = e3.package('tree-pkg', '1.0.0', task);
+
+      const zipPath = join(tempDir, 'tree-pkg.zip');
+      await e3.export(pkg, zipPath);
+
+      // Import and deploy
+      await runE3Command(['package', 'import', remoteUrl, zipPath], tempDir, { env: authEnv() });
+      await runE3Command(['workspace', 'create', remoteUrl, 'tree-ws'], tempDir, { env: authEnv() });
+      await runE3Command(['workspace', 'deploy', remoteUrl, 'tree-ws', 'tree-pkg@1.0.0'], tempDir, { env: authEnv() });
+
+      // Test tree command
+      const result = await runE3Command(['tree', remoteUrl, 'tree-ws'], tempDir, { env: authEnv() });
+
+      assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /tree-ws/);
+      assert.match(result.stdout, /inputs/);
+    });
+
+    it('shows tree with types via remote URL', async () => {
+      // Create a test package
+      const input = e3.input('value', IntegerType, 42n);
+      const task = e3.task(
+        'double',
+        [input],
+        East.function([IntegerType], IntegerType, ($, x) => x.multiply(2n))
+      );
+      const pkg = e3.package('typed-pkg', '1.0.0', task);
+
+      const zipPath = join(tempDir, 'typed-pkg.zip');
+      await e3.export(pkg, zipPath);
+
+      // Import and deploy
+      await runE3Command(['package', 'import', remoteUrl, zipPath], tempDir, { env: authEnv() });
+      await runE3Command(['workspace', 'create', remoteUrl, 'typed-ws'], tempDir, { env: authEnv() });
+      await runE3Command(['workspace', 'deploy', remoteUrl, 'typed-ws', 'typed-pkg@1.0.0'], tempDir, { env: authEnv() });
+
+      // Test tree command with --types
+      const result = await runE3Command(['tree', remoteUrl, 'typed-ws', '--types'], tempDir, { env: authEnv() });
+
+      assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /typed-ws/);
+      assert.match(result.stdout, /Integer/i);
+    });
+  });
+
+  describe('logs command', () => {
+    it('lists tasks in workspace via remote URL', async () => {
+      // Create a test package
+      const input = e3.input('n', IntegerType, 5n);
+      const task = e3.task(
+        'increment',
+        [input],
+        East.function([IntegerType], IntegerType, ($, x) => x.add(1n))
+      );
+      const pkg = e3.package('logs-pkg', '1.0.0', task);
+
+      const zipPath = join(tempDir, 'logs-pkg.zip');
+      await e3.export(pkg, zipPath);
+
+      // Import and deploy
+      await runE3Command(['package', 'import', remoteUrl, zipPath], tempDir, { env: authEnv() });
+      await runE3Command(['workspace', 'create', remoteUrl, 'logs-ws'], tempDir, { env: authEnv() });
+      await runE3Command(['workspace', 'deploy', remoteUrl, 'logs-ws', 'logs-pkg@1.0.0'], tempDir, { env: authEnv() });
+
+      // List tasks (no task specified)
+      const result = await runE3Command(['logs', remoteUrl, 'logs-ws'], tempDir, { env: authEnv() });
+
+      assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /Tasks in workspace: logs-ws/);
+      assert.match(result.stdout, /increment/);
+    });
+
+    it('shows logs for executed task via remote URL', async () => {
+      // Create a test package that produces output
+      const input = e3.input('n', IntegerType, 5n);
+      const task = e3.task(
+        'compute',
+        [input],
+        East.function([IntegerType], IntegerType, ($, x) => x.multiply(2n))
+      );
+      const pkg = e3.package('exec-pkg', '1.0.0', task);
+
+      const zipPath = join(tempDir, 'exec-pkg.zip');
+      await e3.export(pkg, zipPath);
+
+      // Import, deploy, and execute
+      await runE3Command(['package', 'import', remoteUrl, zipPath], tempDir, { env: authEnv() });
+      await runE3Command(['workspace', 'create', remoteUrl, 'exec-ws'], tempDir, { env: authEnv() });
+      await runE3Command(['workspace', 'deploy', remoteUrl, 'exec-ws', 'exec-pkg@1.0.0'], tempDir, { env: authEnv() });
+
+      // Execute the dataflow to create logs
+      const startResult = await runE3Command(['start', remoteUrl, 'exec-ws'], tempDir, { env: authEnv() });
+      assert.strictEqual(startResult.exitCode, 0, `Start failed: ${startResult.stderr}`);
+
+      // View logs for the task
+      const result = await runE3Command(['logs', remoteUrl, 'exec-ws.compute'], tempDir, { env: authEnv() });
+
+      assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+      assert.match(result.stdout, /Task: exec-ws\.compute/);
     });
   });
 });

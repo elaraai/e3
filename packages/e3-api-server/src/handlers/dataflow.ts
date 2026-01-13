@@ -12,6 +12,7 @@ import {
   executionFindCurrent,
   executionReadLog,
   WorkspaceLockError,
+  DataflowAbortedError,
   type WorkspaceStatusResult as CoreWorkspaceStatusResult,
   type DatasetStatusInfo as CoreDatasetStatusInfo,
   type TaskStatusInfo as CoreTaskStatusInfo,
@@ -26,12 +27,21 @@ import {
   DataflowGraphType,
   LogChunkType,
   DataflowResultType,
+  DataflowExecutionStateType,
   type WorkspaceStatusResult,
   type DatasetStatusInfo,
   type TaskStatusInfo,
   type DataflowResult,
   type TaskExecutionResult,
+  type DataflowEvent,
 } from '../types.js';
+import {
+  createExecutionState,
+  addExecutionEvent,
+  completeExecution,
+  abortExecution,
+  getExecutionState,
+} from '../execution-state.js';
 
 /**
  * Convert core DatasetStatusInfo to API type.
@@ -191,9 +201,53 @@ function convertWorkspaceStatus(result: CoreWorkspaceStatusResult): WorkspaceSta
 }
 
 /**
+ * Convert a core TaskExecutionResult to a DataflowEvent.
+ */
+function taskResultToEvent(result: CoreTaskExecutionResult): DataflowEvent {
+  const timestamp = new Date().toISOString();
+
+  if (result.cached) {
+    // Cached - no execution happened, just cache retrieval
+    return variant('cached', {
+      task: result.name,
+      timestamp,
+    });
+  }
+
+  switch (result.state) {
+    case 'success':
+      return variant('complete', {
+        task: result.name,
+        timestamp,
+        duration: result.duration,
+      });
+    case 'failed':
+      return variant('failed', {
+        task: result.name,
+        timestamp,
+        duration: result.duration,
+        exitCode: BigInt(result.exitCode ?? -1),
+      });
+    case 'error':
+      return variant('error', {
+        task: result.name,
+        timestamp,
+        message: result.error ?? 'Unknown error',
+      });
+    case 'skipped':
+      return variant('input_unavailable', {
+        task: result.name,
+        timestamp,
+        reason: 'Upstream task failed or inputs not available',
+      });
+  }
+}
+
+/**
  * Start dataflow execution (non-blocking).
  *
  * Returns 202 Accepted immediately and runs execution in background.
+ * Creates execution state that can be polled via getDataflowExecution().
  */
 export async function startDataflow(
   storage: StorageBackend,
@@ -208,15 +262,70 @@ export async function startDataflow(
       throw new WorkspaceLockError(workspace);
     }
 
+    // Create execution state for polling
+    createExecutionState(repoPath, workspace);
+
+    // Track execution summary
+    let executed = 0;
+    let cached = 0;
+    let failed = 0;
+    let skipped = 0;
+    const startTime = Date.now();
+
     // Start execution without awaiting - it runs in background
     dataflowStart(storage, repoPath, workspace, {
       concurrency: options.concurrency,
       force: options.force,
       filter: options.filter,
       lock,
+      onTaskStart: (name) => {
+        // Record start event
+        addExecutionEvent(repoPath, workspace, variant('start', {
+          task: name,
+          timestamp: new Date().toISOString(),
+        }));
+      },
+      onTaskComplete: (result) => {
+        // Track summary counts
+        if (result.cached) {
+          cached++;
+        } else if (result.state === 'success') {
+          executed++;
+        } else if (result.state === 'failed' || result.state === 'error') {
+          failed++;
+        } else if (result.state === 'skipped') {
+          skipped++;
+        }
+
+        // Record completion event
+        addExecutionEvent(repoPath, workspace, taskResultToEvent(result));
+      },
+    }).then((result) => {
+      // Execution completed
+      const duration = Date.now() - startTime;
+      completeExecution(repoPath, workspace, {
+        executed,
+        cached,
+        failed,
+        skipped,
+        duration,
+      }, result.success);
     }).catch((err) => {
-      // Log error but don't throw - execution is in background
-      console.error(`Dataflow execution error for workspace ${workspace}:`, err);
+      // Handle abort or error
+      if (err instanceof DataflowAbortedError) {
+        abortExecution(repoPath, workspace);
+      } else {
+        // Mark as failed on unexpected error
+        const duration = Date.now() - startTime;
+        completeExecution(repoPath, workspace, {
+          executed,
+          cached,
+          failed,
+          skipped,
+          duration,
+        }, false);
+        console.error(`Dataflow execution error for workspace ${workspace}:`, err);
+      }
     });
 
     // Return immediately with 202 Accepted
@@ -317,4 +426,26 @@ export async function getTaskLogs(
   } catch (err) {
     return sendError(LogChunkType, errorToVariant(err));
   }
+}
+
+/**
+ * Get dataflow execution state (for polling).
+ *
+ * Returns the current execution state including events for progress tracking.
+ * Supports offset/limit for paginating events.
+ */
+export async function getDataflowExecution(
+  repoPath: string,
+  workspace: string,
+  options: { offset?: number; limit?: number } = {}
+): Promise<Response> {
+  const state = getExecutionState(repoPath, workspace, options);
+
+  if (!state) {
+    return sendError(DataflowExecutionStateType, variant('internal', {
+      message: 'No execution found for this workspace',
+    }));
+  }
+
+  return sendSuccess(DataflowExecutionStateType, state);
 }

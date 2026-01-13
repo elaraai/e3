@@ -4,12 +4,13 @@
  */
 
 import { NullType, none, some } from '@elaraai/east';
-import type { LogChunk, DataflowGraph, DataflowResult } from './types.js';
+import type { LogChunk, DataflowGraph, DataflowResult, DataflowExecutionState } from './types.js';
 import {
   LogChunkType,
   DataflowRequestType,
   DataflowGraphType,
   DataflowResultType,
+  DataflowExecutionStateType,
 } from './types.js';
 import { get, post, unwrap, type RequestOptions } from './http.js';
 
@@ -157,5 +158,46 @@ export async function taskLogs(
   const path = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/logs/${encodeURIComponent(task)}${query ? `?${query}` : ''}`;
 
   const response = await get(url, path, LogChunkType, options);
+  return unwrap(response);
+}
+
+/**
+ * Options for getting execution state.
+ */
+export interface ExecutionStateOptions {
+  /** Skip first N events (default: 0) */
+  offset?: number;
+  /** Maximum events to return (default: all) */
+  limit?: number;
+}
+
+/**
+ * Get dataflow execution state (for polling).
+ *
+ * Returns the current execution state including events for progress tracking.
+ * Use offset/limit for pagination of events.
+ *
+ * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
+ * @param workspace - Workspace name
+ * @param stateOptions - Pagination options for events
+ * @param options - Request options including auth token
+ * @returns Execution state with events and summary
+ */
+export async function dataflowExecution(
+  url: string,
+  repo: string,
+  workspace: string,
+  stateOptions: ExecutionStateOptions = {},
+  options: RequestOptions
+): Promise<DataflowExecutionState> {
+  const params = new URLSearchParams();
+  if (stateOptions.offset != null) params.set('offset', String(stateOptions.offset));
+  if (stateOptions.limit != null) params.set('limit', String(stateOptions.limit));
+
+  const query = params.toString();
+  const path = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/execution${query ? `?${query}` : ''}`;
+
+  const response = await get(url, path, DataflowExecutionStateType, options);
   return unwrap(response);
 }

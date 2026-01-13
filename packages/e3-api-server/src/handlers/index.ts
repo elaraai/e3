@@ -5,7 +5,7 @@
 
 export { listRepos } from './repos.js';
 
-export { getStatus, runGc } from './repository.js';
+export { getStatus, startGc, getGcStatus, startRepoDelete, getRepoDeleteStatus } from './repository.js';
 
 export {
   listPackages,

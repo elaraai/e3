@@ -3,17 +3,20 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import { NullType, ArrayType, StringType, decodeBeast2 } from '@elaraai/east';
+import { NullType, ArrayType, StringType, decodeBeast2, none, some, toEastTypeValue, isVariant, type EastTypeValue } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
 import {
   workspaceListTree,
   workspaceGetDatasetHash,
   workspaceSetDataset,
+  workspaceGetTree,
   objectRead,
+  type TreeNode,
 } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
+import { DatasetListItemType, type DatasetListItem } from '../types.js';
 
 /**
  * List dataset fields at the given path.
@@ -89,5 +92,67 @@ export async function setDataset(
     return sendSuccess(NullType, null);
   } catch (err) {
     return sendError(NullType, errorToVariant(err));
+  }
+}
+
+/**
+ * Flatten a tree of nodes into a list of dataset items.
+ */
+function flattenTree(
+  nodes: TreeNode[],
+  pathPrefix: string,
+  result: DatasetListItem[]
+): void {
+  for (const node of nodes) {
+    const path = pathPrefix ? `${pathPrefix}.${node.name}` : `.${node.name}`;
+
+    if (node.kind === 'dataset') {
+      // Leaf node - add to result
+      const datasetType = node.datasetType;
+      if (datasetType) {
+        // Convert EastType to EastTypeValue if needed
+        const typeValue: EastTypeValue = isVariant(datasetType)
+          ? datasetType as EastTypeValue
+          : toEastTypeValue(datasetType);
+
+        result.push({
+          path,
+          type: typeValue,
+          hash: none, // TODO: get hash from tree walk
+          size: none, // TODO: get size if needed
+        });
+      }
+    } else if (node.kind === 'tree') {
+      // Branch node - recurse
+      flattenTree(node.children, path, result);
+    }
+  }
+}
+
+/**
+ * List datasets recursively (flat list with paths).
+ */
+export async function listDatasetsRecursive(
+  storage: StorageBackend,
+  repoPath: string,
+  workspace: string,
+  treePath: TreePath
+): Promise<Response> {
+  try {
+    // Get tree with types included
+    const nodes = await workspaceGetTree(storage, repoPath, workspace, treePath, {
+      includeTypes: true,
+    });
+
+    // Build path prefix from treePath
+    const pathPrefix = treePath.map(seg => seg.value).join('.');
+
+    // Flatten to list
+    const result: DatasetListItem[] = [];
+    flattenTree(nodes, pathPrefix ? `.${pathPrefix}` : '', result);
+
+    return sendSuccess(ArrayType(DatasetListItemType), result);
+  } catch (err) {
+    return sendError(ArrayType(DatasetListItemType), errorToVariant(err));
   }
 }

@@ -6,6 +6,7 @@
 import { ArrayType, StringType } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
 import { get, unwrap, type RequestOptions } from './http.js';
+import { DatasetListItemType, type DatasetListItem } from './types.js';
 
 /**
  * List field names at root of workspace dataset tree.
@@ -135,4 +136,32 @@ export async function datasetSet(
   if (!response.ok) {
     throw new Error(`Failed to set dataset: ${response.status} ${response.statusText}`);
   }
+}
+
+/**
+ * List all datasets recursively under a path (flat list).
+ *
+ * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
+ * @param workspace - Workspace name
+ * @param path - Starting path (empty for root)
+ * @param options - Request options including auth token
+ * @returns Array of dataset items with path, type, hash, and size
+ */
+export async function datasetListRecursive(
+  url: string,
+  repo: string,
+  workspace: string,
+  path: TreePath,
+  options: RequestOptions
+): Promise<DatasetListItem[]> {
+  let endpoint = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`;
+  if (path.length > 0) {
+    const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
+    endpoint = `${endpoint}/${pathStr}`;
+  }
+  endpoint = `${endpoint}?recursive=true`;
+
+  const response = await get(url, endpoint, ArrayType(DatasetListItemType), options);
+  return unwrap(response);
 }

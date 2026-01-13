@@ -12,6 +12,7 @@ import {
   objectRead,
   objectExists,
 } from '../../objects.js';
+import { isNotFoundError } from '../../errors.js';
 
 /**
  * Local filesystem implementation of ObjectStore.
@@ -68,8 +69,11 @@ export class LocalObjectStore implements ObjectStore {
           }
         }
       }
-    } catch {
-      // Objects directory doesn't exist
+    } catch (err) {
+      // Only suppress ENOENT - directory may not exist yet
+      if (!isNotFoundError(err)) {
+        throw err;
+      }
     }
 
     return hashes;

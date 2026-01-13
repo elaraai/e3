@@ -4,15 +4,15 @@
  */
 
 import * as path from 'node:path';
-import { rmSync } from 'node:fs';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve, type ServerType } from '@hono/node-server';
-import { LocalStorage, repoInit } from '@elaraai/e3-core';
+import { LocalStorage, repoInit, RepositoryNotFoundError } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
 import { createAuthMiddleware, type AuthConfig } from './middleware/auth.js';
 import { createOidcProvider, type OidcProvider, type OidcConfig } from './auth/index.js';
 import { listRepos } from './handlers/repos.js';
+import { startRepoDelete, getRepoDeleteStatus } from './handlers/repository.js';
 import { sendSuccess, sendError, sendSuccessWithStatus } from './beast2.js';
 import { StringType, NullType, variant } from '@elaraai/east';
 import { createPackageRoutes } from './routes/packages.js';
@@ -171,6 +171,46 @@ export async function createServer(config: ServerConfig): Promise<Server> {
     });
   }
 
+  // Validate repository exists before processing requests (multi-repo mode only)
+  // In single-repo mode, this is handled by the middleware above
+  // Skip validation for PUT/DELETE on /api/repos/:repo (repo create/remove)
+  // Skip validation for /api/repos/:repo/delete/* (repo deletion status - repo may already be deleted)
+  if (!isSingleRepoMode) {
+    app.use('/api/repos/:repo/*', async (c, next) => {
+      // Skip validation for repo create/remove operations at the repo level
+      // These operate on repos that may not exist yet (PUT) or are being deleted (DELETE)
+      const method = c.req.method;
+      const path = c.req.path;
+      // Check if this is the base repo path (no subpath after repo name)
+      const repoPathMatch = path.match(/^\/api\/repos\/[^/]+$/);
+      if (repoPathMatch && (method === 'PUT' || method === 'DELETE')) {
+        await next();
+        return;
+      }
+
+      // Skip validation for delete status endpoint (repo may already be deleted)
+      const deleteStatusMatch = path.match(/^\/api\/repos\/[^/]+\/delete\/[^/]+$/);
+      if (deleteStatusMatch) {
+        await next();
+        return;
+      }
+
+      const repo = c.req.param('repo')!;
+      const repoPath = getRepoPath(repo);
+
+      try {
+        await storage.validateRepository(repoPath);
+      } catch (err) {
+        if (err instanceof RepositoryNotFoundError) {
+          return sendError(NullType, variant('repository_not_found', { repo }));
+        }
+        throw err;
+      }
+
+      await next();
+    });
+  }
+
   // GET /api/repos - List available repositories
   app.get('/api/repos', async (c) => {
     if (isSingleRepoMode) {
@@ -197,18 +237,17 @@ export async function createServer(config: ServerConfig): Promise<Server> {
       return sendSuccessWithStatus(StringType, repo, 201);
     });
 
-    // DELETE /api/repos/:repo - Remove a repository (multi-repo mode only)
+    // DELETE /api/repos/:repo - Remove a repository (async, multi-repo mode only)
     app.delete('/api/repos/:repo', (c) => {
       const repo = c.req.param('repo');
       const repoPath = path.join(reposDir!, repo);
+      return startRepoDelete(repoPath);
+    });
 
-      try {
-        rmSync(repoPath, { recursive: true, force: true });
-        return sendSuccess(NullType, null);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        return sendError(NullType, variant('internal', { message }));
-      }
+    // GET /api/repos/:repo/delete/:executionId - Get repo delete status
+    app.get('/api/repos/:repo/delete/:executionId', (c) => {
+      const executionId = c.req.param('executionId')!;
+      return getRepoDeleteStatus(executionId);
     });
   }
 

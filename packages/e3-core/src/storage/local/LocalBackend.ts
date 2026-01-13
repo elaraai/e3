@@ -3,11 +3,14 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import type { StorageBackend, ObjectStore, RefStore, LockService, LogStore } from '../interfaces.js';
 import { LocalObjectStore } from './LocalObjectStore.js';
 import { LocalRefStore } from './LocalRefStore.js';
 import { LocalLockService } from './LocalLockService.js';
 import { LocalLogStore } from './LocalLogStore.js';
+import { RepositoryNotFoundError } from '../../errors.js';
 
 /**
  * Local filesystem implementation of StorageBackend.
@@ -54,6 +57,22 @@ export class LocalStorage implements StorageBackend {
     this.refs = new LocalRefStore();
     this.locks = new LocalLockService();
     this.logs = new LocalLogStore();
+  }
+
+  /**
+   * Validate that a repository exists and is properly structured.
+   * @param repo - Path to the .e3 directory
+   * @throws {RepositoryNotFoundError} If repository doesn't exist or is invalid
+   */
+  async validateRepository(repo: string): Promise<void> {
+    const requiredDirs = ['objects', 'packages', 'workspaces', 'executions'];
+    for (const dir of requiredDirs) {
+      try {
+        await fs.access(path.join(repo, dir));
+      } catch {
+        throw new RepositoryNotFoundError(repo);
+      }
+    }
   }
 }
 

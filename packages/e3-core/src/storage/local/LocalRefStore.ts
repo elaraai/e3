@@ -37,8 +37,11 @@ export class LocalRefStore implements RefStore {
           }
         }
       }
-    } catch {
-      // packages directory doesn't exist or is empty
+    } catch (err) {
+      // Only suppress ENOENT - directory may not exist yet
+      if (!isNotFoundError(err)) {
+        throw err;
+      }
     }
 
     return packages;
@@ -99,8 +102,11 @@ export class LocalRefStore implements RefStore {
           names.push(entry.slice(0, -7)); // Remove .beast2 extension
         }
       }
-    } catch {
-      // workspaces directory doesn't exist
+    } catch (err) {
+      // Only suppress ENOENT - directory may not exist yet
+      if (!isNotFoundError(err)) {
+        throw err;
+      }
     }
 
     return names;
@@ -228,8 +234,11 @@ export class LocalRefStore implements RefStore {
           }
         }
       }
-    } catch {
-      // Executions directory doesn't exist
+    } catch (err) {
+      // Only suppress ENOENT - directory may not exist yet
+      if (!isNotFoundError(err)) {
+        throw err;
+      }
     }
 
     return result;
@@ -241,7 +250,11 @@ export class LocalRefStore implements RefStore {
     try {
       const entries = await fs.readdir(taskDir);
       return entries.filter((e) => /^[a-f0-9]{64}$/.test(e));
-    } catch {
+    } catch (err) {
+      // Only suppress ENOENT - task may not have any executions yet
+      if (!isNotFoundError(err)) {
+        throw err;
+      }
       return [];
     }
   }

@@ -19,9 +19,11 @@ import {
 } from '@elaraai/e3-core';
 import {
   repoStatus as repoStatusRemote,
-  repoGc as repoGcRemote,
+  repoGcStart as repoGcStartRemote,
+  repoGcStatus as repoGcStatusRemote,
   repoCreate as repoCreateRemote,
-  repoRemove as repoRemoveRemote,
+  repoRemoveStart as repoRemoveStartRemote,
+  repoRemoveStatus as repoRemoveStatusRemote,
 } from '@elaraai/e3-api-client';
 import { some, none } from '@elaraai/east';
 import { parseRepoLocation, formatError, exitError } from '../utils.js';
@@ -95,8 +97,38 @@ export const repoCommand = {
         rmSync(location.path, { recursive: true, force: true });
         console.log(`Removed repository at ${location.path}`);
       } else {
-        await repoRemoveRemote(location.baseUrl, location.repo, { token: location.token });
-        console.log(`Removed repository: ${location.repo}`);
+        // Start async deletion
+        const { executionId } = await repoRemoveStartRemote(
+          location.baseUrl,
+          location.repo,
+          { token: location.token }
+        );
+
+        console.log('Removing repository...');
+
+        // Poll for completion
+        const pollInterval = 500;
+        while (true) {
+          const status = await repoRemoveStatusRemote(
+            location.baseUrl,
+            location.repo,
+            executionId,
+            { token: location.token }
+          );
+
+          if (status.status.type === 'succeeded') {
+            console.log(`Removed repository: ${location.repo}`);
+            break;
+          }
+
+          if (status.status.type === 'failed') {
+            const errorMsg = status.error.type === 'some' ? status.error.value : 'Unknown error';
+            exitError(`Repo deletion failed: ${errorMsg}`);
+          }
+
+          // Still running, wait and poll again
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
       }
     } catch (err) {
       exitError(formatError(err));
@@ -190,20 +222,51 @@ export const repoCommand = {
           console.log(`  Space reclaimed:  ${mb} MB`);
         }
       } else {
-        const result = await repoGcRemote(location.baseUrl, location.repo, {
+        // Start async GC
+        const { executionId } = await repoGcStartRemote(location.baseUrl, location.repo, {
           dryRun: options.dryRun ?? false,
           minAge: minAge ? some(BigInt(minAge)) : none,
         }, { token: location.token });
 
-        console.log('Garbage collection complete:');
-        console.log(`  Objects retained: ${result.retainedObjects}`);
-        console.log(`  Objects deleted:  ${result.deletedObjects}`);
-        console.log(`  Partials deleted: ${result.deletedPartials}`);
-        console.log(`  Skipped (young):  ${result.skippedYoung}`);
+        console.log('Running garbage collection...');
 
-        if (result.bytesFreed > 0n) {
-          const mb = (Number(result.bytesFreed) / 1024 / 1024).toFixed(2);
-          console.log(`  Space reclaimed:  ${mb} MB`);
+        // Poll for completion
+        const pollInterval = 500;
+        while (true) {
+          const status = await repoGcStatusRemote(
+            location.baseUrl,
+            location.repo,
+            executionId,
+            { token: location.token }
+          );
+
+          if (status.status.type === 'succeeded') {
+            if (status.stats.type !== 'some') {
+              exitError('GC succeeded but no stats returned');
+            }
+            const result = status.stats.value;
+
+            console.log('');
+            console.log('Garbage collection complete:');
+            console.log(`  Objects retained: ${result.retainedObjects}`);
+            console.log(`  Objects deleted:  ${result.deletedObjects}`);
+            console.log(`  Partials deleted: ${result.deletedPartials}`);
+            console.log(`  Skipped (young):  ${result.skippedYoung}`);
+
+            if (result.bytesFreed > 0n) {
+              const mb = (Number(result.bytesFreed) / 1024 / 1024).toFixed(2);
+              console.log(`  Space reclaimed:  ${mb} MB`);
+            }
+            break;
+          }
+
+          if (status.status.type === 'failed') {
+            const errorMsg = status.error.type === 'some' ? status.error.value : 'Unknown error';
+            exitError(`GC failed: ${errorMsg}`);
+          }
+
+          // Still running, wait and poll again
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
         }
       }
     } catch (err) {
