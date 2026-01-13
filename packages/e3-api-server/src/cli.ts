@@ -13,7 +13,8 @@ program
   .name('e3-api-server')
   .description('HTTP server for e3 repositories')
   .version('0.0.1-beta.0')
-  .requiredOption('--repos <dir>', 'Directory containing e3 repositories')
+  .option('--repos <dir>', 'Directory containing e3 repositories (multi-repo mode)')
+  .option('--repo <path>', 'Path to a single repository (single-repo mode, access via /repos/default)')
   .option('-p, --port <port>', 'HTTP port', '3000')
   .option('-H, --host <host>', 'Bind address', 'localhost')
   .option('--cors', 'Enable CORS')
@@ -24,7 +25,8 @@ program
   .option('--auth-issuer <iss>', 'Expected JWT issuer (external auth)')
   .option('--auth-audience <aud>', 'Expected JWT audience (external auth)')
   .action(async (options: {
-    repos: string;
+    repos?: string;
+    repo?: string;
     port: string;
     host: string;
     cors?: boolean;
@@ -35,6 +37,16 @@ program
     authIssuer?: string;
     authAudience?: string;
   }) => {
+    // Validate mutually exclusive options
+    if (options.repos && options.repo) {
+      console.error('Error: Cannot specify both --repos and --repo');
+      process.exit(1);
+    }
+    if (!options.repos && !options.repo) {
+      console.error('Error: Must specify either --repos or --repo');
+      process.exit(1);
+    }
+
     const port = parseInt(options.port, 10);
     const host = options.host;
 
@@ -58,6 +70,7 @@ program
 
     const server = await createServer({
       reposDir: options.repos,
+      singleRepoPath: options.repo,
       port,
       host,
       cors: options.cors,
@@ -67,6 +80,12 @@ program
 
     await server.start();
     console.log(`e3-api-server listening on http://${host}:${server.port}`);
+    if (options.repos) {
+      console.log(`Serving repositories from: ${options.repos}`);
+    } else {
+      console.log(`Serving single repository from: ${options.repo}`);
+      console.log(`Access via: http://${host}:${server.port}/repos/default`);
+    }
     if (oidc) {
       console.log(`OIDC provider enabled (token expiry: ${options.tokenExpiry})`);
       if (process.env.E3_AUTH_AUTO_APPROVE === '1') {

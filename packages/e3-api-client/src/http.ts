@@ -147,6 +147,32 @@ async function decodeResponse<T extends EastType>(
   if (response.status === 400) {
     throw new Error(`Bad request: ${await response.text()}`);
   }
+  if (response.status === 404) {
+    // Try to parse JSON error message
+    const text = await response.text();
+    let message = 'Not found';
+    try {
+      const json = JSON.parse(text) as { message?: string };
+      message = json.message ?? message;
+    } catch {
+      // Not JSON, use text as-is
+      if (text) message = `Not found: ${text}`;
+    }
+    throw new Error(message);
+  }
+  if (response.status === 405) {
+    // Try to parse JSON error message
+    const text = await response.text();
+    let message = 'Method not allowed';
+    try {
+      const json = JSON.parse(text) as { message?: string };
+      message = json.message ?? message;
+    } catch {
+      // Not JSON, use text as-is
+      if (text) message = `Method not allowed: ${text}`;
+    }
+    throw new Error(message);
+  }
   if (response.status === 415) {
     throw new Error(`Unsupported media type: expected application/beast2`);
   }
