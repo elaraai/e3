@@ -16,6 +16,11 @@ export type {
   RepositoryStatus,
   GcRequest,
   GcResult,
+  GcStartResult,
+  GcStatusResult,
+  RepoDeleteStartResult,
+  RepoDeleteStatusResult,
+  AsyncOperationStatus,
   PackageListItem,
   PackageImportResult,
   WorkspaceInfo,
@@ -32,6 +37,13 @@ export type {
   LogChunk,
   TaskExecutionResult,
   DataflowResult,
+  DataflowEvent,
+  ExecutionStatus,
+  DataflowExecutionSummary,
+  DataflowExecutionState,
+  ExecutionListItem,
+  ExecutionHistoryStatus,
+  DatasetListItem,
 } from './types.js';
 
 // HTTP utilities and auth
@@ -39,7 +51,16 @@ export { ApiError, AuthError } from './http.js';
 export type { RequestOptions, Response } from './http.js';
 
 // Repository
-export { repoStatus, repoGc, repoCreate, repoRemove } from './repository.js';
+export {
+  repoStatus,
+  repoGc,
+  repoGcStart,
+  repoGcStatus,
+  repoCreate,
+  repoRemove,
+  repoRemoveStart,
+  repoRemoveStatus,
+} from './repository.js';
 
 // Packages
 export {
@@ -65,21 +86,24 @@ export {
 export {
   datasetList,
   datasetListAt,
+  datasetListRecursive,
   datasetGet,
   datasetSet,
 } from './datasets.js';
 
 // Tasks
-export { taskList, taskGet } from './tasks.js';
+export { taskList, taskGet, taskExecutionList } from './tasks.js';
 
 // Executions
 export {
   dataflowStart,
   dataflowExecute,
+  dataflowExecution,
   dataflowGraph,
   taskLogs,
   type DataflowOptions,
   type LogOptions,
+  type ExecutionStateOptions,
 } from './executions.js';
 
 // Platform functions

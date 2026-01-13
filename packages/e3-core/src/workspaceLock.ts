@@ -311,13 +311,16 @@ async function tryAcquireFlock(
 
     // Give flock a moment to either acquire or fail
     // If it's still running after 100ms, we have the lock
-    setTimeout(() => {
+    setTimeout(async () => {
       if (!resolved && !child.killed && child.exitCode === null) {
         resolved = true;
 
         // Write lock state to lock file now that we have the lock
-        // Use void to explicitly ignore the promise (metadata is informational only)
-        void writeLockState(lockPath, lockState).catch(() => {});
+        try {
+          await writeLockState(lockPath, lockState);
+        } catch (err) {
+          console.warn(`Failed to write lock state: ${err instanceof Error ? err.message : String(err)}`);
+        }
 
         resolve(child);
       }

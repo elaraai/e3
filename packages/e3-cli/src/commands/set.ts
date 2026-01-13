@@ -11,23 +11,26 @@
  *   e3 set . ws.path.to.dataset ./data.east
  *   e3 set . ws.path.to.dataset ./data.json --type ".Integer"
  *   e3 set . ws.path.to.dataset ./data.csv --type ".Array .Struct [{name: \"name\", type: .String}, {name: \"value\", type: .Integer}]"
+ *   e3 set https://server/repos/myrepo ws.path.to.dataset ./data.east
  */
 
 import { readFile } from 'fs/promises';
 import { extname } from 'path';
 import { WorkspaceLockError, workspaceSetDataset, LocalStorage } from '@elaraai/e3-core';
+import { datasetSet as datasetSetRemote } from '@elaraai/e3-api-client';
 import {
   decodeBeast2,
   parseFor,
   fromJSONFor,
   decodeCsvFor,
+  encodeBeast2For,
   EastTypeType,
   type EastTypeValue,
   type StructTypeValue,
   parseInferred,
   toEastTypeValue,
 } from '@elaraai/east';
-import { resolveRepo, parseDatasetPath, formatError, exitError } from '../utils.js';
+import { parseRepoLocation, parseDatasetPath, formatError, exitError } from '../utils.js';
 
 /**
  * Parse a type specification in .east format.
@@ -57,8 +60,7 @@ export async function setCommand(
   options: { type?: string } = {}
 ): Promise<void> {
   try {
-    const repoPath = resolveRepo(repoArg);
-    const storage = new LocalStorage();
+    const location = await parseRepoLocation(repoArg);
     const { ws, path } = parseDatasetPath(pathSpec);
 
     if (path.length === 0) {
@@ -139,7 +141,22 @@ export async function setCommand(
         exitError(`Unknown file extension: ${ext}. Supported: .beast2, .east, .json, .csv`);
     }
 
-    await workspaceSetDataset(storage, repoPath, ws, path, value, type);
+    if (location.type === 'local') {
+      const storage = new LocalStorage();
+      await workspaceSetDataset(storage, location.path, ws, path, value, type);
+    } else {
+      // Remote: encode value to BEAST2 and send
+      const encoder = encodeBeast2For(type);
+      const beast2Data = encoder(value);
+      await datasetSetRemote(
+        location.baseUrl,
+        location.repo,
+        ws,
+        path,
+        beast2Data,
+        { token: location.token }
+      );
+    }
 
     console.log(`Set ${pathSpec} from ${filePath}`);
   } catch (err) {

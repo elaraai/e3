@@ -23,7 +23,12 @@ import {
   LocalStorage,
   type StorageBackend,
 } from '@elaraai/e3-core';
-import { resolveRepo, formatError, exitError } from '../utils.js';
+import {
+  taskList as taskListRemote,
+  taskExecutionList as taskExecutionListRemote,
+  taskLogs as taskLogsRemote,
+} from '@elaraai/e3-api-client';
+import { parseRepoLocation, formatError, exitError } from '../utils.js';
 
 /**
  * Format a hash for display (abbreviated).
@@ -168,6 +173,120 @@ async function showLogs(
 }
 
 /**
+ * List tasks in a workspace (remote).
+ */
+async function listWorkspaceTasksRemote(
+  baseUrl: string,
+  repo: string,
+  ws: string,
+  token: string
+): Promise<void> {
+  const tasks = await taskListRemote(baseUrl, repo, ws, { token });
+
+  if (tasks.length === 0) {
+    console.log(`No tasks in workspace: ${ws}`);
+    return;
+  }
+
+  console.log(`Tasks in workspace: ${ws}`);
+  console.log('');
+
+  for (const task of tasks) {
+    const executions = await taskExecutionListRemote(baseUrl, repo, ws, task.name, { token });
+
+    if (executions.length === 0) {
+      console.log(`  ${task.name}  (no executions)`);
+    } else {
+      // Get status of the most recent execution
+      const latest = executions[0]!;
+      const state = latest.status.type;
+      console.log(`  ${task.name}  [${state}] (${executions.length} execution(s))`);
+    }
+  }
+
+  console.log('');
+  console.log(`Use "e3 logs <repo> ${ws}.<taskName>" to view logs.`);
+}
+
+/**
+ * Show logs for a task (remote).
+ */
+async function showLogsRemote(
+  baseUrl: string,
+  repo: string,
+  ws: string,
+  taskName: string,
+  token: string,
+  follow: boolean
+): Promise<void> {
+  // Read stdout and stderr
+  const stdout = await taskLogsRemote(baseUrl, repo, ws, taskName, { stream: 'stdout' }, { token });
+  const stderr = await taskLogsRemote(baseUrl, repo, ws, taskName, { stream: 'stderr' }, { token });
+
+  if (Number(stdout.totalSize) === 0 && Number(stderr.totalSize) === 0) {
+    console.log('No log output.');
+    return;
+  }
+
+  if (Number(stdout.totalSize) > 0) {
+    console.log('=== STDOUT ===');
+    console.log(stdout.data);
+  }
+
+  if (Number(stderr.totalSize) > 0) {
+    if (Number(stdout.totalSize) > 0) {
+      console.log('');
+    }
+    console.log('=== STDERR ===');
+    console.log(stderr.data);
+  }
+
+  if (follow) {
+    // Follow mode: poll for new content
+    let stdoutOffset = Number(stdout.offset) + Number(stdout.size);
+    let stderrOffset = Number(stderr.offset) + Number(stderr.size);
+
+    console.log('');
+    console.log('[Following... press Ctrl+C to stop]');
+
+    const pollInterval = 500; // ms
+    const poll = async () => {
+      const newStdout = await taskLogsRemote(baseUrl, repo, ws, taskName, {
+        stream: 'stdout',
+        offset: stdoutOffset,
+      }, { token });
+      const newStderr = await taskLogsRemote(baseUrl, repo, ws, taskName, {
+        stream: 'stderr',
+        offset: stderrOffset,
+      }, { token });
+
+      if (Number(newStdout.size) > 0) {
+        process.stdout.write(newStdout.data);
+        stdoutOffset += Number(newStdout.size);
+      }
+
+      if (Number(newStderr.size) > 0) {
+        process.stderr.write(newStderr.data);
+        stderrOffset += Number(newStderr.size);
+      }
+    };
+
+    // Keep polling until interrupted
+    const intervalId = setInterval(() => void poll(), pollInterval);
+    process.on('SIGINT', () => {
+      clearInterval(intervalId);
+      console.log('\n[Stopped]');
+      process.exit(0);
+    });
+
+    // Keep the process alive
+    await new Promise(() => {
+      // Never resolves - will be interrupted by Ctrl+C
+    });
+  }
+}
+
+/**
  * View execution logs for workspace tasks.
  */
 export async function logsCommand(
@@ -176,8 +295,7 @@ export async function logsCommand(
   options: { follow?: boolean } = {}
 ): Promise<void> {
   try {
-    const repoPath = resolveRepo(repoArg);
-    const storage = new LocalStorage();
+    const location = await parseRepoLocation(repoArg);
 
     if (!pathSpec) {
       exitError('Usage: e3 logs <repo> <ws> or e3 logs <repo> <ws.taskName>');
@@ -186,24 +304,40 @@ export async function logsCommand(
     // Parse the path: ws or ws.taskName
     const { ws, taskName } = parseTaskPath(pathSpec);
 
-    if (!taskName) {
-      // No task specified - list tasks in workspace
-      await listWorkspaceTasks(storage, repoPath, ws);
-      return;
+    if (location.type === 'local') {
+      const storage = new LocalStorage();
+
+      if (!taskName) {
+        // No task specified - list tasks in workspace
+        await listWorkspaceTasks(storage, location.path, ws);
+        return;
+      }
+
+      // Find the execution for this task
+      const execution = await executionFindCurrent(storage, location.path, ws, taskName);
+
+      if (!execution) {
+        exitError(`No executions found for task: ${ws}.${taskName}`);
+      }
+
+      console.log(`Task: ${ws}.${taskName}`);
+      console.log(`Execution: ${abbrev(execution.taskHash)}/${abbrev(execution.inputsHash)}`);
+      console.log('');
+
+      await showLogs(storage, location.path, execution.taskHash, execution.inputsHash, options.follow ?? false);
+    } else {
+      // Remote
+      if (!taskName) {
+        // No task specified - list tasks in workspace
+        await listWorkspaceTasksRemote(location.baseUrl, location.repo, ws, location.token);
+        return;
+      }
+
+      console.log(`Task: ${ws}.${taskName}`);
+      console.log('');
+
+      await showLogsRemote(location.baseUrl, location.repo, ws, taskName, location.token, options.follow ?? false);
     }
-
-    // Find the execution for this task
-    const execution = await executionFindCurrent(storage, repoPath, ws, taskName);
-
-    if (!execution) {
-      exitError(`No executions found for task: ${ws}.${taskName}`);
-    }
-
-    console.log(`Task: ${ws}.${taskName}`);
-    console.log(`Execution: ${abbrev(execution.taskHash)}/${abbrev(execution.inputsHash)}`);
-    console.log('');
-
-    await showLogs(storage, repoPath, execution.taskHash, execution.inputsHash, options.follow ?? false);
   } catch (err) {
     exitError(formatError(err));
   }

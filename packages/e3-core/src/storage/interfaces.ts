@@ -364,4 +364,11 @@ export interface StorageBackend {
 
   /** Execution log storage */
   readonly logs: LogStore;
+
+  /**
+   * Validate that a repository exists and is properly structured.
+   * @param repo - Repository identifier (path to .e3 directory for local storage)
+   * @throws {RepositoryNotFoundError} If repository doesn't exist or is invalid
+   */
+  validateRepository(repo: string): Promise<void>;
 }

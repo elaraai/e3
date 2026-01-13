@@ -632,11 +632,21 @@ async function runCommand(
     });
   });
 
+  // Use promise chains to ensure sequential log writes without overlapping
+  let stdoutWriteChain = Promise.resolve();
+  let stderrWriteChain = Promise.resolve();
+
   // Tee stdout - use storage.logs.append for log persistence
   child.stdout?.on('data', (data: Buffer) => {
     const str = data.toString('utf-8');
-    // Fire-and-forget log append (don't block on it)
-    storage.logs.append(repo, taskHash, inHash, 'stdout', str).catch(() => {});
+    // Chain writes sequentially to avoid overlapping
+    stdoutWriteChain = stdoutWriteChain.then(async () => {
+      try {
+        await storage.logs.append(repo, taskHash, inHash, 'stdout', str);
+      } catch (err) {
+        console.warn(`Failed to append stdout log: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
     if (options.onStdout) {
       options.onStdout(str);
     }
@@ -645,8 +655,14 @@ async function runCommand(
   // Tee stderr - use storage.logs.append for log persistence
   child.stderr?.on('data', (data: Buffer) => {
     const str = data.toString('utf-8');
-    // Fire-and-forget log append (don't block on it)
-    storage.logs.append(repo, taskHash, inHash, 'stderr', str).catch(() => {});
+    // Chain writes sequentially to avoid overlapping
+    stderrWriteChain = stderrWriteChain.then(async () => {
+      try {
+        await storage.logs.append(repo, taskHash, inHash, 'stderr', str);
+      } catch (err) {
+        console.warn(`Failed to append stderr log: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
     if (options.onStderr) {
       options.onStderr(str);
     }
@@ -694,6 +710,9 @@ async function runCommand(
 
   // Wait for process to complete
   const result = await resultPromise;
+
+  // Wait for any pending log writes to complete
+  await Promise.all([stdoutWriteChain, stderrWriteChain]);
 
   // Cleanup
   if (timeoutId) clearTimeout(timeoutId);

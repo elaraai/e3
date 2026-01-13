@@ -11,6 +11,7 @@ import {
   getDataflowStatus,
   getDataflowGraph,
   getTaskLogs,
+  getDataflowExecution,
 } from '../handlers/dataflow.js';
 import { decodeBody } from '../beast2.js';
 import { DataflowRequestType } from '../types.js';
@@ -84,6 +85,19 @@ export function createExecutionRoutes(
     const limit = parseInt(c.req.query('limit') || '65536', 10);
 
     return getTaskLogs(storage, repoPath, ws, taskName, stream, offset, limit);
+  });
+
+  // GET /api/repos/:repo/workspaces/:ws/dataflow/execution - Get execution state (for polling)
+  app.get('/execution', async (c) => {
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const ws = c.req.param('ws')!;
+
+    // Get query params for pagination
+    const offset = c.req.query('offset') ? parseInt(c.req.query('offset')!, 10) : undefined;
+    const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!, 10) : undefined;
+
+    return getDataflowExecution(repoPath, ws, { offset, limit });
   });
 
   return app;
