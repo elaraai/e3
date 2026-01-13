@@ -27,10 +27,16 @@ export type { OidcConfig } from './auth/index.js';
 
 /**
  * Server configuration options.
+ *
+ * Must specify exactly one of:
+ * - reposDir: Multi-repo mode - serves multiple repositories from subdirectories
+ * - singleRepoPath: Single-repo mode - serves a single repository at /repos/default
  */
 export interface ServerConfig {
-  /** Directory containing repositories (each subdirectory with .e3/ is a repo) */
-  reposDir: string;
+  /** Directory containing repositories (multi-repo mode) */
+  reposDir?: string;
+  /** Path to a single repository (single-repo mode, access via /repos/default) */
+  singleRepoPath?: string;
   /** HTTP port (default: 3000) */
   port?: number;
   /** Bind address (default: "localhost") */
@@ -71,13 +77,30 @@ export interface Server {
  * @returns Server instance
  */
 export async function createServer(config: ServerConfig): Promise<Server> {
-  const { reposDir, port = 3000, host = 'localhost', cors: enableCors = false, auth, oidc } = config;
+  const { reposDir, singleRepoPath, port = 3000, host = 'localhost', cors: enableCors = false, auth, oidc } = config;
+
+  // Validate config: exactly one of reposDir or singleRepoPath must be specified
+  if (reposDir && singleRepoPath) {
+    throw new Error('Cannot specify both reposDir and singleRepoPath');
+  }
+  if (!reposDir && !singleRepoPath) {
+    throw new Error('Must specify either reposDir or singleRepoPath');
+  }
+
+  const isSingleRepoMode = !!singleRepoPath;
 
   // Single storage instance shared across all requests
   const storage: StorageBackend = new LocalStorage();
 
   // Helper to compute repo path from repo name
-  const getRepoPath = (repoName: string) => path.join(reposDir, repoName, '.e3');
+  // In single-repo mode, middleware validates 'default' before routes are called
+  const getRepoPath = (repoName: string): string => {
+    if (isSingleRepoMode) {
+      // Middleware ensures repoName === 'default' before we get here
+      return path.join(singleRepoPath!, '.e3');
+    }
+    return path.join(reposDir!, repoName, '.e3');
+  };
 
   const app = new Hono();
 
@@ -111,40 +134,83 @@ export async function createServer(config: ServerConfig): Promise<Server> {
     app.use('/api/repos/:repo/*', authMiddleware);
   }
 
-  // GET /api/repos - List available repositories
-  app.get('/api/repos', async () => {
-    return listRepos(reposDir);
-  });
+  // Single-repo mode: validate repo name and handle disabled operations
+  // Runs AFTER auth middleware (so unauthorized users get 401, not 404/405)
+  if (isSingleRepoMode) {
+    app.use('/api/repos/:repo/*', async (c, next) => {
+      const method = c.req.method;
 
-  // PUT /api/repos/:repo - Create a new repository
-  app.put('/api/repos/:repo', (c) => {
-    const repo = c.req.param('repo');
-    const repoPath = path.join(reposDir, repo);
-    const result = repoInit(repoPath);
-
-    if (!result.success) {
-      if (result.alreadyExists) {
-        return sendError(StringType, variant('internal', { message: `Repository '${repo}' already exists` }));
+      // PUT (create repo) is always disabled in single-repo mode
+      if (method === 'PUT') {
+        return c.json({
+          error: 'method_not_allowed',
+          message: 'Repository creation is disabled in single-repo mode'
+        }, 405);
       }
-      return sendError(StringType, variant('internal', { message: result.error?.message ?? 'Unknown error' }));
-    }
 
-    return sendSuccessWithStatus(StringType, repo, 201);
+      // For DELETE (remove repo), check if it's the 'default' repo
+      if (method === 'DELETE') {
+        // DELETE on 'default' → 405 (deletion disabled)
+        // DELETE on other repos → 404 (repo doesn't exist)
+        const repo = c.req.param('repo');
+        if (repo === 'default') {
+          return c.json({
+            error: 'method_not_allowed',
+            message: 'Repository deletion is disabled in single-repo mode'
+          }, 405);
+        }
+        return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
+      }
+
+      // For other methods (GET, POST, etc.), validate repo name
+      const repo = c.req.param('repo');
+      if (repo !== 'default') {
+        return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
+      }
+      await next();
+    });
+  }
+
+  // GET /api/repos - List available repositories
+  app.get('/api/repos', async (c) => {
+    if (isSingleRepoMode) {
+      return c.json(['default']);
+    }
+    return listRepos(reposDir!);
   });
 
-  // DELETE /api/repos/:repo - Remove a repository
-  app.delete('/api/repos/:repo', (c) => {
-    const repo = c.req.param('repo');
-    const repoPath = path.join(reposDir, repo);
+  // PUT /api/repos/:repo - Create a new repository (multi-repo mode only)
+  // Note: Single-repo mode handler is registered earlier and takes precedence
+  if (!isSingleRepoMode) {
+    app.put('/api/repos/:repo', (c) => {
+      const repo = c.req.param('repo');
+      const repoPath = path.join(reposDir!, repo);
+      const result = repoInit(repoPath);
 
-    try {
-      rmSync(repoPath, { recursive: true, force: true });
-      return sendSuccess(NullType, null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return sendError(NullType, variant('internal', { message }));
-    }
-  });
+      if (!result.success) {
+        if (result.alreadyExists) {
+          return sendError(StringType, variant('internal', { message: `Repository '${repo}' already exists` }));
+        }
+        return sendError(StringType, variant('internal', { message: result.error?.message ?? 'Unknown error' }));
+      }
+
+      return sendSuccessWithStatus(StringType, repo, 201);
+    });
+
+    // DELETE /api/repos/:repo - Remove a repository (multi-repo mode only)
+    app.delete('/api/repos/:repo', (c) => {
+      const repo = c.req.param('repo');
+      const repoPath = path.join(reposDir!, repo);
+
+      try {
+        rmSync(repoPath, { recursive: true, force: true });
+        return sendSuccess(NullType, null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        return sendError(NullType, variant('internal', { message }));
+      }
+    });
+  }
 
   // Mount repository-specific routes
   // Each route file creates a sub-app that uses getRepoPath to resolve the repo
