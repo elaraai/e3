@@ -15,7 +15,6 @@ import { variant, StringType, ArrayType, encodeBeast2For, East, IRType } from '@
 import { TaskObjectType } from '@elaraai/e3-types';
 import {
   inputsHash,
-  executionPath,
   executionGet,
   executionGetOutput,
   executionList,
@@ -25,12 +24,16 @@ import {
 } from './executions.js';
 import { objectWrite } from './objects.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
+import { LocalStorage } from './storage/local/index.js';
+import type { StorageBackend } from './storage/interfaces.js';
 
 describe('executions', () => {
   let testRepo: string;
+  let storage: StorageBackend;
 
   beforeEach(() => {
     testRepo = createTestRepo();
+    storage = new LocalStorage();
   });
 
   afterEach(() => {
@@ -103,22 +106,11 @@ describe('executions', () => {
     });
   });
 
-  describe('executionPath', () => {
-    it('returns correct path structure', () => {
-      const taskHash = 'a'.repeat(64);
-      const inHash = 'b'.repeat(64);
-      const path = executionPath(testRepo, taskHash, inHash);
-      assert.ok(path.includes('executions'));
-      assert.ok(path.includes(taskHash));
-      assert.ok(path.includes(inHash));
-    });
-  });
-
   describe('executionGet', () => {
     it('returns null for non-existent execution', async () => {
       const taskHash = 'a'.repeat(64);
       const inHash = 'b'.repeat(64);
-      const status = await executionGet(testRepo, taskHash, inHash);
+      const status = await executionGet(storage, testRepo, taskHash, inHash);
       assert.strictEqual(status, null);
     });
   });
@@ -127,7 +119,7 @@ describe('executions', () => {
     it('returns null for non-existent execution', async () => {
       const taskHash = 'a'.repeat(64);
       const inHash = 'b'.repeat(64);
-      const output = await executionGetOutput(testRepo, taskHash, inHash);
+      const output = await executionGetOutput(storage, testRepo, taskHash, inHash);
       assert.strictEqual(output, null);
     });
 
@@ -141,14 +133,14 @@ describe('executions', () => {
       mkdirSync(execDir, { recursive: true });
       writeFileSync(join(execDir, 'output'), outputHash + '\n');
 
-      const output = await executionGetOutput(testRepo, taskHash, inHash);
+      const output = await executionGetOutput(storage, testRepo, taskHash, inHash);
       assert.strictEqual(output, outputHash);
     });
   });
 
   describe('executionList', () => {
     it('returns empty array for no executions', async () => {
-      const list = await executionList(testRepo);
+      const list = await executionList(storage, testRepo);
       assert.deepStrictEqual(list, []);
     });
 
@@ -163,7 +155,7 @@ describe('executions', () => {
       mkdirSync(join(testRepo, 'executions', taskHash1, inHash2), { recursive: true });
       mkdirSync(join(testRepo, 'executions', taskHash2, inHash1), { recursive: true });
 
-      const list = await executionList(testRepo);
+      const list = await executionList(storage, testRepo);
       assert.strictEqual(list.length, 3);
     });
   });
@@ -171,7 +163,7 @@ describe('executions', () => {
   describe('executionListForTask', () => {
     it('returns empty array for non-existent task', async () => {
       const taskHash = 'a'.repeat(64);
-      const list = await executionListForTask(testRepo, taskHash);
+      const list = await executionListForTask(storage, testRepo, taskHash);
       assert.deepStrictEqual(list, []);
     });
 
@@ -183,7 +175,7 @@ describe('executions', () => {
       mkdirSync(join(testRepo, 'executions', taskHash, inHash1), { recursive: true });
       mkdirSync(join(testRepo, 'executions', taskHash, inHash2), { recursive: true });
 
-      const list = await executionListForTask(testRepo, taskHash);
+      const list = await executionListForTask(storage, testRepo, taskHash);
       assert.strictEqual(list.length, 2);
       assert.ok(list.includes(inHash1));
       assert.ok(list.includes(inHash2));
@@ -194,7 +186,7 @@ describe('executions', () => {
     it('returns empty chunk for non-existent log', async () => {
       const taskHash = 'a'.repeat(64);
       const inHash = 'b'.repeat(64);
-      const chunk = await executionReadLog(testRepo, taskHash, inHash, 'stdout');
+      const chunk = await executionReadLog(storage, testRepo, taskHash, inHash, 'stdout');
       assert.strictEqual(chunk.data, '');
       assert.strictEqual(chunk.size, 0);
       assert.strictEqual(chunk.complete, true);
@@ -209,7 +201,7 @@ describe('executions', () => {
       mkdirSync(execDir, { recursive: true });
       writeFileSync(join(execDir, 'stdout.txt'), logContent);
 
-      const chunk = await executionReadLog(testRepo, taskHash, inHash, 'stdout');
+      const chunk = await executionReadLog(storage, testRepo, taskHash, inHash, 'stdout');
       assert.strictEqual(chunk.data, logContent);
       assert.strictEqual(chunk.size, logContent.length);
       assert.strictEqual(chunk.totalSize, logContent.length);
@@ -226,7 +218,7 @@ describe('executions', () => {
       writeFileSync(join(execDir, 'stderr.txt'), logContent);
 
       // Read first 5 bytes
-      const chunk1 = await executionReadLog(testRepo, taskHash, inHash, 'stderr', {
+      const chunk1 = await executionReadLog(storage, testRepo, taskHash, inHash, 'stderr', {
         offset: 0,
         limit: 5,
       });
@@ -236,7 +228,7 @@ describe('executions', () => {
       assert.strictEqual(chunk1.complete, false);
 
       // Read next 5 bytes
-      const chunk2 = await executionReadLog(testRepo, taskHash, inHash, 'stderr', {
+      const chunk2 = await executionReadLog(storage, testRepo, taskHash, inHash, 'stderr', {
         offset: 5,
         limit: 5,
       });
@@ -258,7 +250,7 @@ describe('executions', () => {
       const encoder = encodeBeast2For(TaskObjectType);
       const taskHash = await objectWrite(testRepo, encoder(task));
 
-      const result = await taskExecute(testRepo, taskHash, []);
+      const result = await taskExecute(storage, testRepo, taskHash, []);
 
       assert.strictEqual(result.state, 'error');
       assert.ok(result.error?.includes('Failed to evaluate command IR'));
@@ -287,7 +279,7 @@ describe('executions', () => {
       const inputHash = await objectWrite(testRepo, inputData);
 
       // Execute
-      const result = await taskExecute(testRepo, taskHash, [inputHash]);
+      const result = await taskExecute(storage, testRepo, taskHash, [inputHash]);
 
       assert.strictEqual(result.state, 'success');
       assert.strictEqual(result.cached, false);
@@ -318,12 +310,12 @@ describe('executions', () => {
       const inputHash = await objectWrite(testRepo, inputEncoder('test data'));
 
       // First execution
-      const result1 = await taskExecute(testRepo, taskHash, [inputHash]);
+      const result1 = await taskExecute(storage, testRepo, taskHash, [inputHash]);
       assert.strictEqual(result1.cached, false);
       assert.strictEqual(result1.state, 'success');
 
       // Second execution should be cached
-      const result2 = await taskExecute(testRepo, taskHash, [inputHash]);
+      const result2 = await taskExecute(storage, testRepo, taskHash, [inputHash]);
       assert.strictEqual(result2.cached, true);
       assert.strictEqual(result2.state, 'success');
       assert.strictEqual(result2.outputHash, result1.outputHash);
@@ -352,11 +344,11 @@ describe('executions', () => {
       const inputHash = await objectWrite(testRepo, inputEncoder('test data'));
 
       // First execution
-      const result1 = await taskExecute(testRepo, taskHash, [inputHash]);
+      const result1 = await taskExecute(storage, testRepo, taskHash, [inputHash]);
       assert.strictEqual(result1.cached, false);
 
       // Force re-execution
-      const result2 = await taskExecute(testRepo, taskHash, [inputHash], { force: true });
+      const result2 = await taskExecute(storage, testRepo, taskHash, [inputHash], { force: true });
       assert.strictEqual(result2.cached, false);
       assert.strictEqual(result2.state, 'success');
     });
@@ -389,7 +381,7 @@ describe('executions', () => {
       const stdoutChunks: string[] = [];
       const stderrChunks: string[] = [];
 
-      const result = await taskExecute(testRepo, taskHash, [inputHash], {
+      const result = await taskExecute(storage, testRepo, taskHash, [inputHash], {
         onStdout: (data) => stdoutChunks.push(data),
         onStderr: (data) => stderrChunks.push(data),
       });
@@ -402,8 +394,8 @@ describe('executions', () => {
 
       // Check logs were written
       const inHash = result.inputsHash;
-      const stdoutLog = await executionReadLog(testRepo, taskHash, inHash, 'stdout');
-      const stderrLog = await executionReadLog(testRepo, taskHash, inHash, 'stderr');
+      const stdoutLog = await executionReadLog(storage, testRepo, taskHash, inHash, 'stdout');
+      const stderrLog = await executionReadLog(storage, testRepo, taskHash, inHash, 'stderr');
 
       assert.ok(stdoutLog.data.includes('stdout'));
       assert.ok(stderrLog.data.includes('stderr'));
@@ -426,14 +418,14 @@ describe('executions', () => {
       const encoder = encodeBeast2For(TaskObjectType);
       const taskHash = await objectWrite(testRepo, encoder(task));
 
-      const result = await taskExecute(testRepo, taskHash, []);
+      const result = await taskExecute(storage, testRepo, taskHash, []);
 
       assert.strictEqual(result.state, 'failed');
       assert.strictEqual(result.exitCode, 42);
       assert.strictEqual(result.outputHash, null);
 
       // Check status was written
-      const status = await executionGet(testRepo, taskHash, result.inputsHash);
+      const status = await executionGet(storage, testRepo, taskHash, result.inputsHash);
       assert.ok(status);
       assert.strictEqual(status.type, 'failed');
     });

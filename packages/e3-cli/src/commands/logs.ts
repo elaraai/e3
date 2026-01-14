@@ -18,12 +18,17 @@ import {
   executionListForTask,
   executionReadLog,
   executionGet,
-  inputsHash,
-  workspaceGetDatasetHash,
-  workspaceGetTask,
+  executionFindCurrent,
   isProcessAlive,
+  LocalStorage,
+  type StorageBackend,
 } from '@elaraai/e3-core';
-import { resolveRepo, formatError, exitError } from '../utils.js';
+import {
+  taskList as taskListRemote,
+  taskExecutionList as taskExecutionListRemote,
+  taskLogs as taskLogsRemote,
+} from '@elaraai/e3-api-client';
+import { parseRepoLocation, formatError, exitError } from '../utils.js';
 
 /**
  * Format a hash for display (abbreviated).
@@ -49,8 +54,8 @@ function parseTaskPath(pathSpec: string): { ws: string; taskName?: string } {
 /**
  * List tasks in a workspace with their execution status.
  */
-async function listWorkspaceTasks(repoPath: string, ws: string): Promise<void> {
-  const tasks = await workspaceListTasks(repoPath, ws);
+async function listWorkspaceTasks(storage: StorageBackend, repoPath: string, ws: string): Promise<void> {
+  const tasks = await workspaceListTasks(storage, repoPath, ws);
 
   if (tasks.length === 0) {
     console.log(`No tasks in workspace: ${ws}`);
@@ -61,15 +66,15 @@ async function listWorkspaceTasks(repoPath: string, ws: string): Promise<void> {
   console.log('');
 
   for (const taskName of tasks) {
-    const taskHash = await workspaceGetTaskHash(repoPath, ws, taskName);
-    const executions = await executionListForTask(repoPath, taskHash);
+    const taskHash = await workspaceGetTaskHash(storage, repoPath, ws, taskName);
+    const executions = await executionListForTask(storage, repoPath, taskHash);
 
     if (executions.length === 0) {
       console.log(`  ${taskName}  (no executions)`);
     } else {
       // Get status of the most recent execution
       const latestInHash = executions[0];
-      const status = await executionGet(repoPath, taskHash, latestInHash);
+      const status = await executionGet(storage, repoPath, taskHash, latestInHash);
       let state = status?.type ?? 'unknown';
 
       // Check if running process is actually alive
@@ -91,57 +96,20 @@ async function listWorkspaceTasks(repoPath: string, ws: string): Promise<void> {
   console.log(`Use "e3 logs . ${ws}.<taskName>" to view logs.`);
 }
 
-/**
- * Find the inputs hash for the current workspace state of a task.
- * This matches the execution that corresponds to the current input values.
- */
-async function findCurrentExecution(
-  repoPath: string,
-  ws: string,
-  taskName: string
-): Promise<{ taskHash: string; inHash: string } | null> {
-  const taskHash = await workspaceGetTaskHash(repoPath, ws, taskName);
-  const task = await workspaceGetTask(repoPath, ws, taskName);
-
-  // Get the current input hashes from the workspace
-  const currentInputHashes: string[] = [];
-  for (const inputPath of task.inputs) {
-    const { refType, hash } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
-    if (refType !== 'value' || hash === null) {
-      // Input not assigned - can't find matching execution
-      return null;
-    }
-    currentInputHashes.push(hash);
-  }
-
-  const inHash = inputsHash(currentInputHashes);
-
-  // Check if this execution exists
-  const executions = await executionListForTask(repoPath, taskHash);
-  if (executions.includes(inHash)) {
-    return { taskHash, inHash };
-  }
-
-  // Fall back to the most recent execution if current inputs don't match
-  if (executions.length > 0) {
-    return { taskHash, inHash: executions[0] };
-  }
-
-  return null;
-}
 
 /**
  * Show logs for a specific execution.
  */
 async function showLogs(
+  storage: StorageBackend,
   repoPath: string,
   taskHash: string,
   inHash: string,
   follow: boolean
 ): Promise<void> {
   // Read stdout and stderr
-  const stdout = await executionReadLog(repoPath, taskHash, inHash, 'stdout');
-  const stderr = await executionReadLog(repoPath, taskHash, inHash, 'stderr');
+  const stdout = await executionReadLog(storage, repoPath, taskHash, inHash, 'stdout');
+  const stderr = await executionReadLog(storage, repoPath, taskHash, inHash, 'stderr');
 
   if (stdout.totalSize === 0 && stderr.totalSize === 0) {
     console.log('No log output.');
@@ -171,10 +139,10 @@ async function showLogs(
 
     const pollInterval = 500; // ms
     const poll = async () => {
-      const newStdout = await executionReadLog(repoPath, taskHash, inHash, 'stdout', {
+      const newStdout = await executionReadLog(storage, repoPath, taskHash, inHash, 'stdout', {
         offset: stdoutOffset,
       });
-      const newStderr = await executionReadLog(repoPath, taskHash, inHash, 'stderr', {
+      const newStderr = await executionReadLog(storage, repoPath, taskHash, inHash, 'stderr', {
         offset: stderrOffset,
       });
 
@@ -205,6 +173,120 @@ async function showLogs(
 }
 
 /**
+ * List tasks in a workspace (remote).
+ */
+async function listWorkspaceTasksRemote(
+  baseUrl: string,
+  repo: string,
+  ws: string,
+  token: string
+): Promise<void> {
+  const tasks = await taskListRemote(baseUrl, repo, ws, { token });
+
+  if (tasks.length === 0) {
+    console.log(`No tasks in workspace: ${ws}`);
+    return;
+  }
+
+  console.log(`Tasks in workspace: ${ws}`);
+  console.log('');
+
+  for (const task of tasks) {
+    const executions = await taskExecutionListRemote(baseUrl, repo, ws, task.name, { token });
+
+    if (executions.length === 0) {
+      console.log(`  ${task.name}  (no executions)`);
+    } else {
+      // Get status of the most recent execution
+      const latest = executions[0]!;
+      const state = latest.status.type;
+      console.log(`  ${task.name}  [${state}] (${executions.length} execution(s))`);
+    }
+  }
+
+  console.log('');
+  console.log(`Use "e3 logs <repo> ${ws}.<taskName>" to view logs.`);
+}
+
+/**
+ * Show logs for a task (remote).
+ */
+async function showLogsRemote(
+  baseUrl: string,
+  repo: string,
+  ws: string,
+  taskName: string,
+  token: string,
+  follow: boolean
+): Promise<void> {
+  // Read stdout and stderr
+  const stdout = await taskLogsRemote(baseUrl, repo, ws, taskName, { stream: 'stdout' }, { token });
+  const stderr = await taskLogsRemote(baseUrl, repo, ws, taskName, { stream: 'stderr' }, { token });
+
+  if (Number(stdout.totalSize) === 0 && Number(stderr.totalSize) === 0) {
+    console.log('No log output.');
+    return;
+  }
+
+  if (Number(stdout.totalSize) > 0) {
+    console.log('=== STDOUT ===');
+    console.log(stdout.data);
+  }
+
+  if (Number(stderr.totalSize) > 0) {
+    if (Number(stdout.totalSize) > 0) {
+      console.log('');
+    }
+    console.log('=== STDERR ===');
+    console.log(stderr.data);
+  }
+
+  if (follow) {
+    // Follow mode: poll for new content
+    let stdoutOffset = Number(stdout.offset) + Number(stdout.size);
+    let stderrOffset = Number(stderr.offset) + Number(stderr.size);
+
+    console.log('');
+    console.log('[Following... press Ctrl+C to stop]');
+
+    const pollInterval = 500; // ms
+    const poll = async () => {
+      const newStdout = await taskLogsRemote(baseUrl, repo, ws, taskName, {
+        stream: 'stdout',
+        offset: stdoutOffset,
+      }, { token });
+      const newStderr = await taskLogsRemote(baseUrl, repo, ws, taskName, {
+        stream: 'stderr',
+        offset: stderrOffset,
+      }, { token });
+
+      if (Number(newStdout.size) > 0) {
+        process.stdout.write(newStdout.data);
+        stdoutOffset += Number(newStdout.size);
+      }
+
+      if (Number(newStderr.size) > 0) {
+        process.stderr.write(newStderr.data);
+        stderrOffset += Number(newStderr.size);
+      }
+    };
+
+    // Keep polling until interrupted
+    const intervalId = setInterval(() => void poll(), pollInterval);
+    process.on('SIGINT', () => {
+      clearInterval(intervalId);
+      console.log('\n[Stopped]');
+      process.exit(0);
+    });
+
+    // Keep the process alive
+    await new Promise(() => {
+      // Never resolves - will be interrupted by Ctrl+C
+    });
+  }
+}
+
+/**
  * View execution logs for workspace tasks.
  */
 export async function logsCommand(
@@ -213,7 +295,7 @@ export async function logsCommand(
   options: { follow?: boolean } = {}
 ): Promise<void> {
   try {
-    const repoPath = resolveRepo(repoArg);
+    const location = await parseRepoLocation(repoArg);
 
     if (!pathSpec) {
       exitError('Usage: e3 logs <repo> <ws> or e3 logs <repo> <ws.taskName>');
@@ -222,24 +304,40 @@ export async function logsCommand(
     // Parse the path: ws or ws.taskName
     const { ws, taskName } = parseTaskPath(pathSpec);
 
-    if (!taskName) {
-      // No task specified - list tasks in workspace
-      await listWorkspaceTasks(repoPath, ws);
-      return;
+    if (location.type === 'local') {
+      const storage = new LocalStorage();
+
+      if (!taskName) {
+        // No task specified - list tasks in workspace
+        await listWorkspaceTasks(storage, location.path, ws);
+        return;
+      }
+
+      // Find the execution for this task
+      const execution = await executionFindCurrent(storage, location.path, ws, taskName);
+
+      if (!execution) {
+        exitError(`No executions found for task: ${ws}.${taskName}`);
+      }
+
+      console.log(`Task: ${ws}.${taskName}`);
+      console.log(`Execution: ${abbrev(execution.taskHash)}/${abbrev(execution.inputsHash)}`);
+      console.log('');
+
+      await showLogs(storage, location.path, execution.taskHash, execution.inputsHash, options.follow ?? false);
+    } else {
+      // Remote
+      if (!taskName) {
+        // No task specified - list tasks in workspace
+        await listWorkspaceTasksRemote(location.baseUrl, location.repo, ws, location.token);
+        return;
+      }
+
+      console.log(`Task: ${ws}.${taskName}`);
+      console.log('');
+
+      await showLogsRemote(location.baseUrl, location.repo, ws, taskName, location.token, options.follow ?? false);
     }
-
-    // Find the execution for this task
-    const execution = await findCurrentExecution(repoPath, ws, taskName);
-
-    if (!execution) {
-      exitError(`No executions found for task: ${ws}.${taskName}`);
-    }
-
-    console.log(`Task: ${ws}.${taskName}`);
-    console.log(`Execution: ${abbrev(execution.taskHash)}/${abbrev(execution.inHash)}`);
-    console.log('');
-
-    await showLogs(repoPath, execution.taskHash, execution.inHash, options.follow ?? false);
   } catch (err) {
     exitError(formatError(err));
   }

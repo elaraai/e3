@@ -23,7 +23,7 @@
  * write completes, ensuring downstream tasks see consistent state.
  */
 
-import { decodeBeast2For } from '@elaraai/east';
+import { decodeBeast2For, variant } from '@elaraai/east';
 import {
   PackageObjectType,
   TaskObjectType,
@@ -32,7 +32,6 @@ import {
   type TaskObject,
   type TreePath,
 } from '@elaraai/e3-types';
-import { objectRead } from './objects.js';
 import {
   taskExecute,
   executionGetOutput,
@@ -47,17 +46,12 @@ import {
   E3Error,
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
+  WorkspaceLockError,
   TaskNotFoundError,
   DataflowError,
   DataflowAbortedError,
-  isNotFoundError,
 } from './errors.js';
-import {
-  acquireWorkspaceLock,
-  type WorkspaceLockHandle,
-} from './workspaceLock.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import type { StorageBackend, LockHandle } from './storage/interfaces.js';
 
 // =============================================================================
 // Async Mutex for Workspace Updates
@@ -186,7 +180,7 @@ export interface DataflowOptions {
    * Use an external lock when you need to hold the lock across multiple
    * operations (e.g., API server that cancels and restarts dataflow on writes).
    */
-  lock?: WorkspaceLockHandle;
+  lock?: LockHandle;
   /**
    * AbortSignal for cancellation. When aborted:
    * - No new tasks will be started
@@ -209,26 +203,20 @@ export interface DataflowOptions {
 // =============================================================================
 
 /**
- * Read workspace state from file.
+ * Read workspace state.
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace has no package deployed
  */
-async function readWorkspaceState(repoPath: string, ws: string) {
-  const stateFile = path.join(repoPath, 'workspaces', `${ws}.beast2`);
-  let data: Buffer;
-  try {
-    data = await fs.readFile(stateFile);
-  } catch (err) {
-    if (isNotFoundError(err)) {
-      throw new WorkspaceNotFoundError(ws);
-    }
-    throw err;
+async function readWorkspaceState(storage: StorageBackend, repo: string, ws: string) {
+  const data = await storage.refs.workspaceRead(repo, ws);
+  if (data === null) {
+    throw new WorkspaceNotFoundError(ws);
   }
   if (data.length === 0) {
     throw new WorkspaceNotDeployedError(ws);
   }
   const decoder = decodeBeast2For(WorkspaceStateType);
-  return decoder(data);
+  return decoder(Buffer.from(data));
 }
 
 // =============================================================================
@@ -244,7 +232,8 @@ async function readWorkspaceState(repoPath: string, ws: string) {
  * - taskDependents: Map of task name -> set of dependent task names
  */
 async function buildDependencyGraph(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string
 ): Promise<{
   taskNodes: Map<string, TaskNode>;
@@ -252,10 +241,10 @@ async function buildDependencyGraph(
   taskDependents: Map<string, Set<string>>;
 }> {
   // Read workspace state to get package hash
-  const state = await readWorkspaceState(repoPath, ws);
+  const state = await readWorkspaceState(storage, repo, ws);
 
   // Read package object to get tasks map
-  const pkgData = await objectRead(repoPath, state.packageHash);
+  const pkgData = await storage.objects.read(repo, state.packageHash);
   const pkgDecoder = decodeBeast2For(PackageObjectType);
   const pkgObject = pkgDecoder(Buffer.from(pkgData));
 
@@ -265,7 +254,7 @@ async function buildDependencyGraph(
   // First pass: load all tasks and build output->task map
   const taskDecoder = decodeBeast2For(TaskObjectType);
   for (const [taskName, taskHash] of pkgObject.tasks) {
-    const taskData = await objectRead(repoPath, taskHash);
+    const taskData = await storage.objects.read(repo, taskHash);
     const task = taskDecoder(Buffer.from(taskData));
 
     const outputPathStr = pathToString(task.output);
@@ -303,7 +292,7 @@ async function buildDependencyGraph(
       }
       // If not produced by a task, it's an external input - check if assigned
       else {
-        const { refType } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
+        const { refType } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
         if (refType === 'unassigned') {
           // External input that is unassigned - this task can never run
           node.unresolvedCount++;
@@ -330,7 +319,8 @@ async function buildDependencyGraph(
  * to prevent concurrent modifications. If options.lock is provided, uses that
  * lock instead (caller is responsible for releasing it).
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param ws - Workspace name
  * @param options - Execution options
  * @returns Result of the dataflow execution
@@ -341,16 +331,22 @@ async function buildDependencyGraph(
  * @throws {DataflowError} If execution fails for other reasons
  */
 export async function dataflowExecute(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string,
   options: DataflowOptions = {}
 ): Promise<DataflowResult> {
   // Acquire lock if not provided externally
   const externalLock = options.lock;
-  const lock = externalLock ?? await acquireWorkspaceLock(repoPath, ws);
+  const lock = externalLock ?? await storage.locks.acquire(repo, ws, variant('dataflow', null));
+
+  if (!lock) {
+    // Lock couldn't be acquired - the LockService returns null instead of throwing
+    throw new WorkspaceLockError(ws);
+  }
 
   try {
-    return await dataflowExecuteWithLock(repoPath, ws, options);
+    return await dataflowExecuteWithLock(storage, repo, ws, options);
   } finally {
     // Only release the lock if we acquired it internally
     if (!externalLock) {
@@ -365,7 +361,8 @@ export async function dataflowExecute(
  * Returns a promise immediately without awaiting execution. The lock is
  * released automatically when execution completes.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param ws - Workspace name
  * @param options - Execution options (lock must be provided)
  * @returns Promise that resolves when execution completes
@@ -375,11 +372,12 @@ export async function dataflowExecute(
  * @throws {DataflowError} If execution fails for other reasons
  */
 export function dataflowStart(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string,
-  options: DataflowOptions & { lock: WorkspaceLockHandle }
+  options: DataflowOptions & { lock: LockHandle }
 ): Promise<DataflowResult> {
-  return dataflowExecuteWithLock(repoPath, ws, options)
+  return dataflowExecuteWithLock(storage, repo, ws, options)
     .finally(() => options.lock.release());
 }
 
@@ -387,7 +385,8 @@ export function dataflowStart(
  * Internal: Execute dataflow with lock already held.
  */
 async function dataflowExecuteWithLock(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string,
   options: DataflowOptions
 ): Promise<DataflowResult> {
@@ -399,7 +398,7 @@ async function dataflowExecuteWithLock(
 
   try {
     // Build dependency graph
-    const graph = await buildDependencyGraph(repoPath, ws);
+    const graph = await buildDependencyGraph(storage, repo, ws);
     taskNodes = graph.taskNodes;
     taskDependents = graph.taskDependents;
   } catch (err) {
@@ -464,7 +463,7 @@ async function dataflowExecuteWithLock(
     // Gather current input hashes
     const currentInputHashes: string[] = [];
     for (const inputPath of node.inputPaths) {
-      const { refType, hash } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
+      const { refType, hash } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
       if (refType !== 'value' || hash === null) {
         // Input not assigned, can't be cached
         return null;
@@ -474,7 +473,7 @@ async function dataflowExecuteWithLock(
 
     // Check if there's a cached execution for these inputs
     const inHash = inputsHash(currentInputHashes);
-    const cachedOutputHash = await executionGetOutput(repoPath, node.hash, inHash);
+    const cachedOutputHash = await executionGetOutput(storage, repo, node.hash, inHash);
 
     if (cachedOutputHash === null) {
       // No cached execution for current inputs
@@ -483,7 +482,7 @@ async function dataflowExecuteWithLock(
 
     // Also verify the workspace output matches the cached output
     // (in case the workspace was modified outside of execution)
-    const { refType, hash: wsOutputHash } = await workspaceGetDatasetHash(repoPath, ws, node.outputPath);
+    const { refType, hash: wsOutputHash } = await workspaceGetDatasetHash(storage, repo, ws, node.outputPath);
     if (refType !== 'value' || wsOutputHash !== cachedOutputHash) {
       // Workspace output doesn't match cached output, need to re-execute
       // (or update workspace with cached value)
@@ -508,7 +507,7 @@ async function dataflowExecuteWithLock(
     // Gather input hashes
     const inputHashes: string[] = [];
     for (const inputPath of node.inputPaths) {
-      const { refType, hash } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
+      const { refType, hash } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
       if (refType !== 'value' || hash === null) {
         // Input not available - should not happen if dependency tracking is correct
         return {
@@ -530,7 +529,7 @@ async function dataflowExecuteWithLock(
       onStderr: options.onStderr ? (data) => options.onStderr!(taskName, data) : undefined,
     };
 
-    const result = await taskExecute(repoPath, node.hash, inputHashes, execOptions);
+    const result = await taskExecute(storage, repo, node.hash, inputHashes, execOptions);
 
     // Build task result (NOTE: workspace update happens later, in mutex-protected section)
     const taskResult: InternalTaskResult = {
@@ -654,7 +653,7 @@ async function dataflowExecuteWithLock(
               // Write output to workspace BEFORE notifying dependents
               if (result.state === 'success' && result.outputHash) {
                 const node = taskNodes.get(taskName)!;
-                await workspaceSetDatasetByHash(repoPath, ws, node.outputPath, result.outputHash);
+                await workspaceSetDatasetByHash(storage, repo, ws, node.outputPath, result.outputHash);
               }
 
               // Now safe to update execution state and notify dependents
@@ -723,7 +722,8 @@ async function dataflowExecuteWithLock(
 /**
  * Get the dependency graph for a workspace (for visualization/debugging).
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to .e3 directory)
  * @param ws - Workspace name
  * @returns Graph information
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
@@ -731,7 +731,8 @@ async function dataflowExecuteWithLock(
  * @throws {DataflowError} If graph building fails for other reasons
  */
 export async function dataflowGetGraph(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string
 ): Promise<{
   tasks: Array<{
@@ -746,7 +747,7 @@ export async function dataflowGetGraph(
   let outputToTask: Map<string, string>;
 
   try {
-    const graph = await buildDependencyGraph(repoPath, ws);
+    const graph = await buildDependencyGraph(storage, repo, ws);
     taskNodes = graph.taskNodes;
     outputToTask = graph.outputToTask;
   } catch (err) {

@@ -12,6 +12,18 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
+    },
+    "./routes": {
+      "types": "./dist/src/routes/index.d.ts",
+      "default": "./dist/src/routes/index.js"
+    },
+    "./handlers": {
+      "types": "./dist/src/handlers/index.d.ts",
+      "default": "./dist/src/handlers/index.js"
+    },
+    "./beast2": {
+      "types": "./dist/src/beast2.d.ts",
+      "default": "./dist/src/beast2.js"
     }
   },
   "files": [

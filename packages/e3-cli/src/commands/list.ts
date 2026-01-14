@@ -16,31 +16,60 @@ import {
   workspaceList,
   workspaceListTree,
   workspaceGetState,
+  LocalStorage,
 } from '@elaraai/e3-core';
-import { resolveRepo, parseDatasetPath, formatError, exitError } from '../utils.js';
+import {
+  workspaceList as workspaceListRemote,
+  datasetList as datasetListRemote,
+  datasetListAt as datasetListAtRemote,
+} from '@elaraai/e3-api-client';
+import { parseRepoLocation, parseDatasetPath, formatError, exitError } from '../utils.js';
 
 /**
  * List workspaces or tree contents at a path.
  */
 export async function listCommand(repoArg: string, pathSpec?: string): Promise<void> {
   try {
-    const repoPath = resolveRepo(repoArg);
+    const location = await parseRepoLocation(repoArg);
 
     // If no path, list workspaces
     if (!pathSpec) {
-      const workspaces = await workspaceList(repoPath);
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+        const workspaces = await workspaceList(storage, location.path);
 
-      if (workspaces.length === 0) {
-        console.log('No workspaces');
-        return;
-      }
+        if (workspaces.length === 0) {
+          console.log('No workspaces');
+          return;
+        }
 
-      for (const ws of workspaces) {
-        const state = await workspaceGetState(repoPath, ws);
-        if (state) {
-          console.log(`${ws}  (${state.packageName}@${state.packageVersion})`);
-        } else {
-          console.log(`${ws}  (not deployed)`);
+        for (const ws of workspaces) {
+          const state = await workspaceGetState(storage, location.path, ws);
+          if (state) {
+            console.log(`${ws}  (${state.packageName}@${state.packageVersion})`);
+          } else {
+            console.log(`${ws}  (not deployed)`);
+          }
+        }
+      } else {
+        // Remote: list workspaces
+        const workspaces = await workspaceListRemote(
+          location.baseUrl,
+          location.repo,
+          { token: location.token }
+        );
+
+        if (workspaces.length === 0) {
+          console.log('No workspaces');
+          return;
+        }
+
+        for (const ws of workspaces) {
+          if (ws.deployed && ws.packageName.type === 'some' && ws.packageVersion.type === 'some') {
+            console.log(`${ws.name}  (${ws.packageName.value}@${ws.packageVersion.value})`);
+          } else {
+            console.log(`${ws.name}  (not deployed)`);
+          }
         }
       }
       return;
@@ -48,7 +77,30 @@ export async function listCommand(repoArg: string, pathSpec?: string): Promise<v
 
     // Parse path and list tree contents
     const { ws, path } = parseDatasetPath(pathSpec);
-    const fields = await workspaceListTree(repoPath, ws, path);
+    let fields: string[];
+
+    if (location.type === 'local') {
+      const storage = new LocalStorage();
+      fields = await workspaceListTree(storage, location.path, ws, path);
+    } else {
+      // Remote: list tree contents
+      if (path.length === 0) {
+        fields = await datasetListRemote(
+          location.baseUrl,
+          location.repo,
+          ws,
+          { token: location.token }
+        );
+      } else {
+        fields = await datasetListAtRemote(
+          location.baseUrl,
+          location.repo,
+          ws,
+          path,
+          { token: location.token }
+        );
+      }
+    }
 
     if (fields.length === 0) {
       console.log('(empty)');

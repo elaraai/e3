@@ -12,3 +12,12 @@
 
 export { createServer, type ServerConfig, type Server } from './server.js';
 export { ApiTypes } from './types.js';
+
+// Export handlers for Lambda reuse
+export * from './handlers/index.js';
+
+// Export auth middleware
+export { createAuthMiddleware, type AuthConfig } from './middleware/auth.js';
+
+// Export BEAST2 helpers for custom integrations
+export { sendSuccess, sendError, sendSuccessWithStatus, decodeBeast2, decodeBody } from './beast2.js';

@@ -25,6 +25,7 @@ import {
   workspaceDeploy,
   dataflowExecute,
   DataflowAbortedError,
+  LocalStorage,
   type TaskExecutionResult,
 } from '@elaraai/e3-core';
 import { resolveRepo, formatError } from '../utils.js';
@@ -190,8 +191,9 @@ export async function watchCommand(
     }
 
     // Import into repository
+    const deployStorage = new LocalStorage();
     try {
-      await packageImport(repoPath, tempZip);
+      await packageImport(deployStorage, repoPath, tempZip);
     } catch (err) {
       console.log(`[${timestamp()}] Error importing package:`);
       console.log(`  ${err instanceof Error ? err.message : String(err)}`);
@@ -207,11 +209,11 @@ export async function watchCommand(
 
     // Ensure workspace exists
     try {
-      await workspaceGetState(repoPath, workspace);
+      await workspaceGetState(deployStorage, repoPath, workspace);
     } catch {
       // Workspace doesn't exist, create it
       try {
-        await workspaceCreate(repoPath, workspace);
+        await workspaceCreate(deployStorage, repoPath, workspace);
         console.log(`[${timestamp()}] Created workspace: ${workspace}`);
       } catch (err) {
         console.log(`[${timestamp()}] Error creating workspace:`);
@@ -222,7 +224,7 @@ export async function watchCommand(
 
     // Deploy to workspace
     try {
-      await workspaceDeploy(repoPath, workspace, pkg.name, pkg.version);
+      await workspaceDeploy(deployStorage, repoPath, workspace, pkg.name, pkg.version);
       console.log(`[${timestamp()}] Deployed to workspace: ${workspace}`);
     } catch (err) {
       console.log(`[${timestamp()}] Error deploying:`);
@@ -233,6 +235,8 @@ export async function watchCommand(
     return { name: pkg.name, version: pkg.version, watchedFiles };
   }
 
+  const storage = new LocalStorage();
+
   /**
    * Execute the dataflow in the workspace
    */
@@ -240,7 +244,7 @@ export async function watchCommand(
     console.log(`[${timestamp()}] Starting dataflow...`);
 
     try {
-      const result = await dataflowExecute(repoPath, workspace, {
+      const result = await dataflowExecute(storage, repoPath, workspace, {
         concurrency,
         signal,
         onTaskStart: (name) => {

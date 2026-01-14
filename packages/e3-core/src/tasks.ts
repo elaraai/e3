@@ -21,16 +21,13 @@ import {
   WorkspaceStateType,
   type TaskObject,
 } from '@elaraai/e3-types';
-import { objectRead } from './objects.js';
 import { packageRead } from './packages.js';
 import {
   TaskNotFoundError,
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
-  isNotFoundError,
 } from './errors.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import type { StorageBackend } from './storage/interfaces.js';
 
 // =============================================================================
 // Package Task Operations
@@ -39,25 +36,28 @@ import * as path from 'path';
 /**
  * List task names in a package.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Package name
  * @param version - Package version
  * @returns Array of task names
  * @throws If package not found
  */
 export async function packageListTasks(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string,
   version: string
 ): Promise<string[]> {
-  const pkg = await packageRead(repoPath, name, version);
+  const pkg = await packageRead(storage, repo, name, version);
   return Array.from(pkg.tasks.keys());
 }
 
 /**
  * Get task details from a package.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Package name
  * @param version - Package version
  * @param taskName - Name of the task
@@ -66,19 +66,20 @@ export async function packageListTasks(
  * @throws {TaskNotFoundError} If task not found in package
  */
 export async function packageGetTask(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string,
   version: string,
   taskName: string
 ): Promise<TaskObject> {
-  const pkg = await packageRead(repoPath, name, version);
+  const pkg = await packageRead(storage, repo, name, version);
   const taskHash = pkg.tasks.get(taskName);
 
   if (!taskHash) {
     throw new TaskNotFoundError(taskName);
   }
 
-  const taskData = await objectRead(repoPath, taskHash);
+  const taskData = await storage.objects.read(repo, taskHash);
   const decoder = decodeBeast2For(TaskObjectType);
   return decoder(Buffer.from(taskData));
 }
@@ -88,35 +89,31 @@ export async function packageGetTask(
 // =============================================================================
 
 /**
- * Read workspace state from file.
+ * Read workspace state from storage.
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace exists but not deployed
  */
-async function readWorkspaceState(repoPath: string, ws: string) {
-  const stateFile = path.join(repoPath, 'workspaces', `${ws}.beast2`);
+async function readWorkspaceState(storage: StorageBackend, repo: string, ws: string) {
+  const data = await storage.refs.workspaceRead(repo, ws);
 
-  try {
-    const data = await fs.readFile(stateFile);
-    if (data.length === 0) {
-      throw new WorkspaceNotDeployedError(ws);
-    }
-    const decoder = decodeBeast2For(WorkspaceStateType);
-    return decoder(data);
-  } catch (err) {
-    if (err instanceof WorkspaceNotDeployedError) throw err;
-    if (isNotFoundError(err)) {
-      throw new WorkspaceNotFoundError(ws);
-    }
-    throw err;
+  if (data === null) {
+    throw new WorkspaceNotFoundError(ws);
   }
+
+  if (data.length === 0) {
+    throw new WorkspaceNotDeployedError(ws);
+  }
+
+  const decoder = decodeBeast2For(WorkspaceStateType);
+  return decoder(Buffer.from(data));
 }
 
 /**
  * Get the deployed package object for a workspace.
  */
-async function getWorkspacePackageObject(repoPath: string, ws: string) {
-  const state = await readWorkspaceState(repoPath, ws);
-  const pkgData = await objectRead(repoPath, state.packageHash);
+async function getWorkspacePackageObject(storage: StorageBackend, repo: string, ws: string) {
+  const state = await readWorkspaceState(storage, repo, ws);
+  const pkgData = await storage.objects.read(repo, state.packageHash);
   const decoder = decodeBeast2For(PackageObjectType);
   return decoder(Buffer.from(pkgData));
 }
@@ -126,23 +123,26 @@ async function getWorkspacePackageObject(repoPath: string, ws: string) {
  *
  * Tasks are defined by the deployed package.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param ws - Workspace name
  * @returns Array of task names
  * @throws If workspace not found or not deployed
  */
 export async function workspaceListTasks(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string
 ): Promise<string[]> {
-  const pkg = await getWorkspacePackageObject(repoPath, ws);
+  const pkg = await getWorkspacePackageObject(storage, repo, ws);
   return Array.from(pkg.tasks.keys());
 }
 
 /**
  * Get task hash from a workspace.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param ws - Workspace name
  * @param taskName - Name of the task
  * @returns The hash of the TaskObject
@@ -151,11 +151,12 @@ export async function workspaceListTasks(
  * @throws {TaskNotFoundError} If task not found
  */
 export async function workspaceGetTaskHash(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string,
   taskName: string
 ): Promise<string> {
-  const pkg = await getWorkspacePackageObject(repoPath, ws);
+  const pkg = await getWorkspacePackageObject(storage, repo, ws);
   const taskHash = pkg.tasks.get(taskName);
 
   if (!taskHash) {
@@ -170,19 +171,21 @@ export async function workspaceGetTaskHash(
  *
  * Tasks are defined by the deployed package.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param ws - Workspace name
  * @param taskName - Name of the task
  * @returns The TaskObject containing runner, inputs, and output
  * @throws If workspace not deployed or task not found
  */
 export async function workspaceGetTask(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string,
   taskName: string
 ): Promise<TaskObject> {
-  const taskHash = await workspaceGetTaskHash(repoPath, ws, taskName);
-  const taskData = await objectRead(repoPath, taskHash);
+  const taskHash = await workspaceGetTaskHash(storage, repo, ws, taskName);
+  const taskData = await storage.objects.read(repo, taskHash);
   const decoder = decodeBeast2For(TaskObjectType);
   return decoder(Buffer.from(taskData));
 }

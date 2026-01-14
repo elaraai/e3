@@ -12,6 +12,8 @@ import assert from 'node:assert';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { variant, encodeBeast2For, printFor, VariantType } from '@elaraai/east';
+import { LockStateType, ProcessHolderType, type LockState } from '@elaraai/e3-types';
 import {
   acquireWorkspaceLock,
   getWorkspaceLockHolder,
@@ -42,29 +44,29 @@ describe('workspaceLock', () => {
 
   describe('acquireWorkspaceLock', () => {
     it('acquires lock on unlocked workspace', async () => {
-      const lock = await acquireWorkspaceLock(repoPath, 'test-ws');
+      const lock = await acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null));
       assert.strictEqual(lock.workspace, 'test-ws');
       assert.ok(lock.lockPath.endsWith('test-ws.lock'));
       await lock.release();
     });
 
     it('creates lock file with metadata', async () => {
-      const lock = await acquireWorkspaceLock(repoPath, 'test-ws');
+      const lock = await acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null));
 
-      const lockPath = workspaceLockPath(repoPath, 'test-ws');
-      const data = await fs.readFile(lockPath, 'utf-8');
-      const metadata = JSON.parse(data);
-
-      assert.strictEqual(metadata.pid, process.pid);
-      assert.ok(metadata.bootId);
-      assert.ok(metadata.acquiredAt);
-      assert.ok(metadata.command);
+      // Use getWorkspaceLockHolder to read the metadata (it handles beast2 format)
+      const holder = await getWorkspaceLockHolder(repoPath, 'test-ws');
+      assert.ok(holder);
+      assert.strictEqual(holder!.pid, process.pid);
+      assert.ok(holder!.bootId);
+      assert.ok(holder!.acquiredAt);
+      assert.ok(holder!.command);
+      assert.strictEqual(holder!.operation, 'dataflow');
 
       await lock.release();
     });
 
     it('removes lock file on release', async () => {
-      const lock = await acquireWorkspaceLock(repoPath, 'test-ws');
+      const lock = await acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null));
       const lockPath = workspaceLockPath(repoPath, 'test-ws');
 
       // Lock file should exist
@@ -77,18 +79,18 @@ describe('workspaceLock', () => {
     });
 
     it('release is idempotent', async () => {
-      const lock = await acquireWorkspaceLock(repoPath, 'test-ws');
+      const lock = await acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null));
       await lock.release();
       await lock.release(); // Should not throw
       await lock.release(); // Should not throw
     });
 
     it('throws WorkspaceLockError when already locked', async () => {
-      const lock1 = await acquireWorkspaceLock(repoPath, 'test-ws');
+      const lock1 = await acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null));
 
       try {
         await assert.rejects(
-          acquireWorkspaceLock(repoPath, 'test-ws'),
+          acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null)),
           (err: Error) => {
             assert.ok(err instanceof WorkspaceLockError);
             assert.strictEqual((err as WorkspaceLockError).workspace, 'test-ws');
@@ -105,17 +107,17 @@ describe('workspaceLock', () => {
     });
 
     it('allows acquiring lock after release', async () => {
-      const lock1 = await acquireWorkspaceLock(repoPath, 'test-ws');
+      const lock1 = await acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null));
       await lock1.release();
 
-      const lock2 = await acquireWorkspaceLock(repoPath, 'test-ws');
+      const lock2 = await acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null));
       assert.ok(lock2);
       await lock2.release();
     });
 
     it('allows different workspaces to be locked independently', async () => {
-      const lock1 = await acquireWorkspaceLock(repoPath, 'ws1');
-      const lock2 = await acquireWorkspaceLock(repoPath, 'ws2');
+      const lock1 = await acquireWorkspaceLock(repoPath, 'ws1', variant('dataflow', null));
+      const lock2 = await acquireWorkspaceLock(repoPath, 'ws2', variant('dataflow', null));
 
       assert.strictEqual(lock1.workspace, 'ws1');
       assert.strictEqual(lock2.workspace, 'ws2');
@@ -132,7 +134,7 @@ describe('workspaceLock', () => {
     });
 
     it('returns holder info for locked workspace', async () => {
-      const lock = await acquireWorkspaceLock(repoPath, 'test-ws');
+      const lock = await acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null));
 
       const holder = await getWorkspaceLockHolder(repoPath, 'test-ws');
       assert.ok(holder);
@@ -143,7 +145,7 @@ describe('workspaceLock', () => {
     });
 
     it('returns null after lock is released', async () => {
-      const lock = await acquireWorkspaceLock(repoPath, 'test-ws');
+      const lock = await acquireWorkspaceLock(repoPath, 'test-ws', variant('dataflow', null));
       await lock.release();
 
       const holder = await getWorkspaceLockHolder(repoPath, 'test-ws');
@@ -151,16 +153,27 @@ describe('workspaceLock', () => {
     });
 
     it('cleans up stale lock with dead PID', async () => {
-      // Write a fake lock file with a non-existent PID
+      // Write a fake lock file in beast2 format with a non-existent PID
       const lockPath = workspaceLockPath(repoPath, 'test-ws');
-      const fakeMetadata = {
-        pid: 99999999, // Very unlikely to exist
+
+      // Create holder as East text string
+      const HolderVariantType = VariantType({ process: ProcessHolderType });
+      const printHolder = printFor(HolderVariantType);
+      const holderString = printHolder(variant('process', {
+        pid: 99999999n, // Very unlikely to exist
         bootId: 'fake-boot-id',
-        startTime: 0,
-        acquiredAt: new Date().toISOString(),
+        startTime: 0n,
         command: 'fake command',
+      }));
+
+      const fakeLockState: LockState = {
+        operation: variant('dataflow', null),
+        holder: holderString,
+        acquiredAt: new Date(),
+        expiresAt: variant('none', null),
       };
-      await fs.writeFile(lockPath, JSON.stringify(fakeMetadata));
+      const encoder = encodeBeast2For(LockStateType);
+      await fs.writeFile(lockPath, encoder(fakeLockState));
 
       // getWorkspaceLockHolder should detect this as stale and clean up
       const holder = await getWorkspaceLockHolder(repoPath, 'test-ws');

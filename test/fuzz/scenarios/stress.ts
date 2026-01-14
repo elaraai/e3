@@ -64,7 +64,7 @@ export async function testLargeArrays(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -138,7 +138,7 @@ export async function testLargeStrings(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -227,7 +227,7 @@ export async function testNestedStructures(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -342,7 +342,7 @@ export async function testDeepDAG(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -478,7 +478,7 @@ export async function testWideDAG(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -617,7 +617,7 @@ export async function testDiamondChain(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);

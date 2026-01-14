@@ -16,10 +16,10 @@ import { join } from 'node:path';
 import { East, IntegerType, variant } from '@elaraai/east';
 import e3 from '@elaraai/e3';
 import {
-  acquireWorkspaceLock,
   dataflowExecute,
   workspaceSetDataset,
   WorkspaceLockError,
+  LocalStorage,
 } from '@elaraai/e3-core';
 import {
   createTestDir,
@@ -64,7 +64,7 @@ export async function testConcurrentWritesDuringExecution(): Promise<ScenarioRes
 
     // Setup
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -172,7 +172,7 @@ export async function testMultipleSimultaneousStarts(): Promise<ScenarioResult> 
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -271,7 +271,7 @@ export async function testRapidSetStartCycles(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);
@@ -290,13 +290,17 @@ export async function testRapidSetStartCycles(): Promise<ScenarioResult> {
 
       return (async (): Promise<BatchResult> => {
         try {
+          const storage = new LocalStorage();
           // Try to acquire lock (non-blocking)
-          const lock = await acquireWorkspaceLock(e3Dir, 'ws');
+          const lock = await storage.locks.acquire(e3Dir, 'ws', variant('dataflow', null));
+          if (!lock) {
+            return { value: Number(value), success: false, lockError: true };
+          }
           try {
             // Set the input value using the lock
-            await workspaceSetDataset(e3Dir, 'ws', [variant('field', 'inputs'), variant('field', 'x')], value, IntegerType, { lock });
+            await workspaceSetDataset(storage, e3Dir, 'ws', [variant('field', 'inputs'), variant('field', 'x')], value, IntegerType, { lock });
             // Execute dataflow using the lock
-            await dataflowExecute(e3Dir, 'ws', { lock });
+            await dataflowExecute(storage, e3Dir, 'ws', { lock });
             return { value: Number(value), success: true, lockError: false };
           } finally {
             await lock.release();
@@ -396,7 +400,7 @@ export async function testInterleavedMultiWorkspace(): Promise<ScenarioResult> {
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
 
     // Create 3 workspaces

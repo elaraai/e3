@@ -17,14 +17,18 @@ import { packageImport } from './packages.js';
 import { workspaceCreate, workspaceDeploy } from './workspaces.js';
 import { TaskNotFoundError, WorkspaceNotFoundError, WorkspaceNotDeployedError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
+import { LocalStorage } from './storage/local/index.js';
+import type { StorageBackend } from './storage/interfaces.js';
 
 describe('tasks', () => {
   let testRepo: string;
   let tempDir: string;
+  let storage: StorageBackend;
 
   beforeEach(() => {
     testRepo = createTestRepo();
     tempDir = createTempDir();
+    storage = new LocalStorage();
   });
 
   afterEach(() => {
@@ -38,16 +42,16 @@ describe('tasks', () => {
       const pkg = e3.package('no-tasks', '1.0.0', myInput);
       const zipPath = join(tempDir, 'no-tasks.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
-      const tasks = await packageListTasks(testRepo, 'no-tasks', '1.0.0');
+      const tasks = await packageListTasks(storage, testRepo, 'no-tasks', '1.0.0');
 
       assert.deepStrictEqual(tasks, []);
     });
 
     it('throws for non-existent package', async () => {
       await assert.rejects(
-        async () => await packageListTasks(testRepo, 'nonexistent', '1.0.0'),
+        async () => await packageListTasks(storage, testRepo, 'nonexistent', '1.0.0'),
         /not found|ENOENT/
       );
     });
@@ -59,17 +63,17 @@ describe('tasks', () => {
       const pkg = e3.package('no-task', '1.0.0', myInput);
       const zipPath = join(tempDir, 'no-task.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       await assert.rejects(
-        async () => await packageGetTask(testRepo, 'no-task', '1.0.0', 'nonexistent'),
+        async () => await packageGetTask(storage, testRepo, 'no-task', '1.0.0', 'nonexistent'),
         /not found/
       );
     });
 
     it('throws for non-existent package', async () => {
       await assert.rejects(
-        async () => await packageGetTask(testRepo, 'nonexistent', '1.0.0', 'task'),
+        async () => await packageGetTask(storage, testRepo, 'nonexistent', '1.0.0', 'task'),
         /not found|ENOENT/
       );
     });
@@ -79,10 +83,10 @@ describe('tasks', () => {
       const pkg = e3.package('empty-tasks', '1.0.0', myInput);
       const zipPath = join(tempDir, 'empty-tasks.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       await assert.rejects(
-        async () => await packageGetTask(testRepo, 'empty-tasks', '1.0.0', 'nonexistent'),
+        async () => await packageGetTask(storage, testRepo, 'empty-tasks', '1.0.0', 'nonexistent'),
         TaskNotFoundError
       );
     });
@@ -94,26 +98,26 @@ describe('tasks', () => {
       const pkg = e3.package('ws-no-tasks', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-no-tasks.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-no-tasks', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-no-tasks', '1.0.0');
 
-      const tasks = await workspaceListTasks(testRepo, 'myws');
+      const tasks = await workspaceListTasks(storage, testRepo, 'myws');
 
       assert.deepStrictEqual(tasks, []);
     });
 
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
-        async () => await workspaceListTasks(testRepo, 'nonexistent'),
+        async () => await workspaceListTasks(storage, testRepo, 'nonexistent'),
         WorkspaceNotFoundError
       );
     });
 
     it('throws for undeployed workspace', async () => {
-      await workspaceCreate(testRepo, 'empty');
+      await workspaceCreate(storage, testRepo, 'empty');
 
       await assert.rejects(
-        async () => await workspaceListTasks(testRepo, 'empty'),
+        async () => await workspaceListTasks(storage, testRepo, 'empty'),
         WorkspaceNotDeployedError
       );
     });
@@ -125,27 +129,27 @@ describe('tasks', () => {
       const pkg = e3.package('ws-no-task', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-no-task.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-no-task', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-no-task', '1.0.0');
 
       await assert.rejects(
-        async () => await workspaceGetTask(testRepo, 'myws', 'nonexistent'),
+        async () => await workspaceGetTask(storage, testRepo, 'myws', 'nonexistent'),
         /not found/
       );
     });
 
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
-        async () => await workspaceGetTask(testRepo, 'nonexistent', 'task'),
+        async () => await workspaceGetTask(storage, testRepo, 'nonexistent', 'task'),
         WorkspaceNotFoundError
       );
     });
 
     it('throws for undeployed workspace', async () => {
-      await workspaceCreate(testRepo, 'empty');
+      await workspaceCreate(storage, testRepo, 'empty');
 
       await assert.rejects(
-        async () => await workspaceGetTask(testRepo, 'empty', 'task'),
+        async () => await workspaceGetTask(storage, testRepo, 'empty', 'task'),
         WorkspaceNotDeployedError
       );
     });
