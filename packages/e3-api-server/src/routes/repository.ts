@@ -32,7 +32,7 @@ export function createRepositoryRoutes(
   });
 
   // GET /api/repos/:repo/gc/:executionId - Get GC status
-  app.get('/gc/:executionId', async (c) => {
+  app.get('/gc/:executionId', (c) => {
     const executionId = c.req.param('executionId')!;
     return getGcStatus(executionId);
   });

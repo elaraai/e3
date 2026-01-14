@@ -13,7 +13,7 @@
  */
 
 import { variant, some, none } from '@elaraai/east';
-import type { DataflowExecutionState, DataflowEvent, DataflowExecutionSummary } from './types.js';
+import type { DataflowExecutionState, DataflowEvent } from './types.js';
 
 // Internal state tracking (includes mutable event array)
 interface ExecutionStateInternal {

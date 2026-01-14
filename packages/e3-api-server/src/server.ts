@@ -13,7 +13,7 @@ import { createAuthMiddleware, type AuthConfig } from './middleware/auth.js';
 import { createOidcProvider, type OidcProvider, type OidcConfig } from './auth/index.js';
 import { listRepos } from './handlers/repos.js';
 import { startRepoDelete, getRepoDeleteStatus } from './handlers/repository.js';
-import { sendSuccess, sendError, sendSuccessWithStatus } from './beast2.js';
+import { sendError, sendSuccessWithStatus } from './beast2.js';
 import { StringType, NullType, variant } from '@elaraai/east';
 import { createPackageRoutes } from './routes/packages.js';
 import { createWorkspaceRoutes } from './routes/workspaces.js';
