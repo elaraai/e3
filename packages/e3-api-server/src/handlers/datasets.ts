@@ -3,7 +3,7 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import { NullType, ArrayType, StringType, decodeBeast2, none, some, toEastTypeValue, isVariant, type EastTypeValue } from '@elaraai/east';
+import { NullType, ArrayType, StringType, decodeBeast2, none, toEastTypeValue, isVariant, type EastTypeValue } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
 import {
   workspaceListTree,

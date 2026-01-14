@@ -88,7 +88,7 @@ export function createExecutionRoutes(
   });
 
   // GET /api/repos/:repo/workspaces/:ws/dataflow/execution - Get execution state (for polling)
-  app.get('/execution', async (c) => {
+  app.get('/execution', (c) => {
     const repo = c.req.param('repo')!;
     const repoPath = getRepoPath(repo);
     const ws = c.req.param('ws')!;

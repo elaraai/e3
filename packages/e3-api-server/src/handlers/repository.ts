@@ -68,11 +68,11 @@ export async function getStatus(
  * Returns immediately with an executionId. GC runs in background.
  * Poll getGcStatus() for progress.
  */
-export async function startGc(
+export function startGc(
   storage: StorageBackend,
   repoPath: string,
   options: { dryRun: boolean; minAge?: number }
-): Promise<Response> {
+): Response {
   // Create operation and get executionId
   const executionId = createGcOperation();
 
@@ -100,7 +100,7 @@ export async function startGc(
 /**
  * Get garbage collection status.
  */
-export async function getGcStatus(executionId: string): Promise<Response> {
+export function getGcStatus(executionId: string): Response {
   if (!hasGcOperation(executionId)) {
     return sendError(GcStatusResultType, variant('internal', {
       message: `GC operation not found: ${executionId}`,
@@ -137,7 +137,7 @@ import { RepoDeleteStartResultType, RepoDeleteStatusResultType } from '../types.
  * Returns immediately with an executionId. Deletion runs in background.
  * Poll getRepoDeleteStatus() for completion.
  */
-export async function startRepoDelete(repoPath: string): Promise<Response> {
+export function startRepoDelete(repoPath: string): Response {
   // Create operation and get executionId
   const executionId = createRepoDeleteOperation();
 
@@ -161,7 +161,7 @@ export async function startRepoDelete(repoPath: string): Promise<Response> {
 /**
  * Get repository deletion status.
  */
-export async function getRepoDeleteStatus(executionId: string): Promise<Response> {
+export function getRepoDeleteStatus(executionId: string): Response {
   if (!hasRepoDeleteOperation(executionId)) {
     return sendError(RepoDeleteStatusResultType, variant('internal', {
       message: `Repo delete operation not found: ${executionId}`,

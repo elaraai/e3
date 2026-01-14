@@ -434,11 +434,11 @@ export async function getTaskLogs(
  * Returns the current execution state including events for progress tracking.
  * Supports offset/limit for paginating events.
  */
-export async function getDataflowExecution(
+export function getDataflowExecution(
   repoPath: string,
   workspace: string,
   options: { offset?: number; limit?: number } = {}
-): Promise<Response> {
+): Response {
   const state = getExecutionState(repoPath, workspace, options);
 
   if (!state) {
