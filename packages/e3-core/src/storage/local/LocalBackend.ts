@@ -18,7 +18,7 @@ import { RepositoryNotFoundError } from '../../errors.js';
  * This combines the local implementations of all storage interfaces,
  * providing a complete backend for local e3 repositories.
  *
- * The `repo` parameter passed to each method is the path to the .e3 directory.
+ * The `repo` parameter passed to each method is the path to the e3 repository directory.
  * This allows a single LocalStorage instance to be used for multiple repositories.
  *
  * @example
@@ -26,7 +26,7 @@ import { RepositoryNotFoundError } from '../../errors.js';
  * import { LocalStorage } from '@elaraai/e3-core';
  *
  * const storage = new LocalStorage();
- * const repo = '/path/to/.e3';
+ * const repo = '/path/to/repo';
  *
  * // Use the backend with storage-agnostic functions
  * const hash = await storage.objects.write(repo, data);
@@ -49,7 +49,7 @@ export class LocalStorage implements StorageBackend {
   /**
    * Create a new LocalStorage instance.
    *
-   * No configuration needed - the `repo` parameter (path to .e3 directory)
+   * No configuration needed - the `repo` parameter (path to e3 repository directory)
    * is passed to each method call instead.
    */
   constructor() {
@@ -61,7 +61,7 @@ export class LocalStorage implements StorageBackend {
 
   /**
    * Validate that a repository exists and is properly structured.
-   * @param repo - Path to the .e3 directory
+   * @param repo - Path to the e3 repository directory
    * @throws {RepositoryNotFoundError} If repository doesn't exist or is invalid
    */
   async validateRepository(repo: string): Promise<void> {

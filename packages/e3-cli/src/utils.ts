@@ -36,7 +36,7 @@ export type RepoLocation =
  * For remote locations, this function will load and validate the auth token.
  * If not logged in or token is expired and cannot be refreshed, throws an error.
  *
- * @returns For local: { type: 'local', path: '/absolute/path/.e3' }
+ * @returns For local: { type: 'local', path: '/absolute/path/to/repo' }
  *          For remote: { type: 'remote', baseUrl: 'https://example.com', repo: 'my_repo', token: '...' }
  */
 export async function parseRepoLocation(arg: string): Promise<RepoLocation> {

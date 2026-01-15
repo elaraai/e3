@@ -53,7 +53,7 @@ export function inputsHash(inputHashes: string[]): string {
  * Get execution status.
  *
  * @param storage - Storage backend
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @returns ExecutionStatus or null if execution doesn't exist
@@ -72,7 +72,7 @@ export async function executionGet(
  * Get output hash for a completed execution.
  *
  * @param storage - Storage backend
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @returns Output hash or null if not complete or failed
@@ -90,7 +90,7 @@ export async function executionGetOutput(
  * List all input hashes that have executions for a given task.
  *
  * @param storage - Storage backend
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @returns Array of input hashes
  */
@@ -106,7 +106,7 @@ export async function executionListForTask(
  * List all executions in the repository.
  *
  * @param storage - Storage backend
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @returns Array of { taskHash, inputsHash } objects
  */
 export async function executionList(
@@ -136,7 +136,7 @@ export interface CurrentExecutionRef {
  * inputs, falls back to the most recent execution.
  *
  * @param storage - Storage backend
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param ws - Workspace name
  * @param taskName - Task name
  * @returns Execution reference or null if no executions exist
@@ -205,7 +205,7 @@ export type { LogChunk };
  * Read execution logs with pagination support.
  *
  * @param storage - Storage backend
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @param stream - Which log stream to read ('stdout' or 'stderr')
@@ -233,7 +233,7 @@ export async function executionReadLog(
  * The IR is an East function: (inputs: Array<String>, output: String) -> Array<String>
  *
  * @param storage - Storage backend
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param commandIrHash - Hash of the IR object
  * @param inputPaths - Paths to staged input files
  * @param outputPath - Path where output should be written
@@ -386,7 +386,7 @@ export interface ExecutionResult {
  * 6. Stores the output and updates status
  *
  * @param storage - Storage backend
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inputHashes - Array of input dataset hashes
  * @param options - Execution options

@@ -15,7 +15,7 @@ import { isNotFoundError } from '../../errors.js';
  *   executions/<taskHash>/<inputsHash>/stdout.txt
  *   executions/<taskHash>/<inputsHash>/stderr.txt
  *
- * The `repo` parameter is the path to the .e3 directory.
+ * The `repo` parameter is the path to the e3 repository directory.
  */
 export class LocalLogStore implements LogStore {
   private logPath(repo: string, taskHash: string, inputsHash: string, stream: 'stdout' | 'stderr'): string {

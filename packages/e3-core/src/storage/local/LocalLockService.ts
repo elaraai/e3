@@ -17,7 +17,7 @@ import {
  *
  * Uses flock() for kernel-managed locking with lock state
  * stored in beast2 format using LockStateType.
- * The `repo` parameter is the path to the .e3 directory.
+ * The `repo` parameter is the path to the e3 repository directory.
  */
 export class LocalLockService implements LockService {
   async acquire(

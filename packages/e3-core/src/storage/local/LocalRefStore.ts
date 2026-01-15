@@ -14,7 +14,7 @@ import { isNotFoundError, ExecutionCorruptError } from '../../errors.js';
 /**
  * Local filesystem implementation of RefStore.
  *
- * The `repo` parameter is the path to the .e3 directory.
+ * The `repo` parameter is the path to the e3 repository directory.
  */
 export class LocalRefStore implements RefStore {
   // -------------------------------------------------------------------------
