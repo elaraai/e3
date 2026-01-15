@@ -55,6 +55,9 @@ export function workspaceTests(getContext: () => TestContext): void {
       const workspaces = await workspaceList(ctx.config.baseUrl, ctx.repoName, opts);
       assert.strictEqual(workspaces.length, 1);
       assert.strictEqual(workspaces[0].name, 'test-ws');
+
+      // Clean up
+      await workspaceRemove(ctx.config.baseUrl, ctx.repoName, 'test-ws', opts);
     });
 
     it('workspaceRemove deletes workspace', async () => {
@@ -77,13 +80,21 @@ export function workspaceTests(getContext: () => TestContext): void {
         const ctx = getContext();
         const opts = await ctx.opts();
 
-        // Create and import a test package
+        // Create and import a test package (idempotent - may already exist)
         const zipPath = await createPackageZip(ctx.tempDir, 'compute-pkg', '1.0.0');
         const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+        try {
+          await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+        } catch {
+          // Package may already exist from previous test
+        }
 
-        // Create workspace and deploy
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', opts);
+        // Create workspace and deploy (idempotent - may already exist)
+        try {
+          await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', opts);
+        } catch {
+          // Workspace may already exist from previous test
+        }
         await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', 'compute-pkg@1.0.0', opts);
       });
 
