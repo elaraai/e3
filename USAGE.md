@@ -336,7 +336,7 @@ my-e3-project/
 ├── pyproject.toml      # For Python runner (east-py)
 ├── src/
 │   └── index.ts        # Package definition
-└── .e3/                # Repository (created by e3 repo create)
+└── repo/               # Repository (created by e3 repo create)
 ```
 
 **package.json:**

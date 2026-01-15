@@ -97,9 +97,9 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   const getRepoPath = (repoName: string): string => {
     if (isSingleRepoMode) {
       // Middleware ensures repoName === 'default' before we get here
-      return path.join(singleRepoPath!, '.e3');
+      return singleRepoPath!;
     }
-    return path.join(reposDir!, repoName, '.e3');
+    return path.join(reposDir!, repoName);
   };
 
   const app = new Hono();

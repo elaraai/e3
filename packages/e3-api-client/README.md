@@ -20,7 +20,7 @@ Stateless functions for interacting with an e3 API server. Uses BEAST2 binary se
 import { repoStatus, repoGc } from '@elaraai/e3-api-client';
 
 const status = await repoStatus('http://localhost:3000');
-// { path: '/path/to/.e3', objectCount: 42n, packageCount: 3n, workspaceCount: 2n }
+// { path: '/path/to/repo', objectCount: 42n, packageCount: 3n, workspaceCount: 2n }
 
 const gcResult = await repoGc(url, { dryRun: true, minAge: variant('none', null) });
 // { deletedObjects: 0n, retainedObjects: 42n, bytesFreed: 0n, ... }

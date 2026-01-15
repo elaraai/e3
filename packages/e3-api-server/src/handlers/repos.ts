@@ -10,9 +10,30 @@ import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
 
 /**
+ * Check if a directory is a valid e3 repository.
+ * A valid repository has objects, packages, executions, and workspaces subdirectories.
+ */
+async function isValidRepository(repoPath: string): Promise<boolean> {
+  const requiredDirs = ['objects', 'packages', 'executions', 'workspaces'];
+
+  for (const dir of requiredDirs) {
+    try {
+      const stat = await fs.stat(path.join(repoPath, dir));
+      if (!stat.isDirectory()) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * List available repositories in the repos directory.
  *
- * Scans the directory for subdirectories containing a .e3 folder.
+ * Scans the directory for subdirectories that are valid e3 repositories.
  */
 export async function listRepos(reposDir: string): Promise<Response> {
   try {
@@ -21,14 +42,9 @@ export async function listRepos(reposDir: string): Promise<Response> {
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        const e3Path = path.join(reposDir, entry.name, '.e3');
-        try {
-          const stat = await fs.stat(e3Path);
-          if (stat.isDirectory()) {
-            repos.push(entry.name);
-          }
-        } catch {
-          // Not a valid repo - skip
+        const repoPath = path.join(reposDir, entry.name);
+        if (await isValidRepository(repoPath)) {
+          repos.push(entry.name);
         }
       }
     }

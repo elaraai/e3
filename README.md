@@ -46,15 +46,12 @@ e3 get . dev.tasks.my-task.output
 ## Repository Structure
 
 ```
-.e3/                          # e3 repository (like .git/)
+my-repo/                      # e3 repository directory
 ├── objects/                  # Content-addressable storage
 │   └── ab/cd1234...beast2    # IR, args, results, commits
-├── logs/                     # Streaming task logs
-│   └── abc123...eastl        # One log per task_id
-├── queue/                    # Task queues (watched by runners)
-│   └── node/
-├── refs/tasks/               # Named task references
-└── tasks/                    # Task state (task_id → commit_hash)
+├── packages/                 # Package references
+├── workspaces/               # Workspace state
+└── executions/               # Execution cache and logs
 ```
 
 ## License

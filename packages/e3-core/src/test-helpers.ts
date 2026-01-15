@@ -31,13 +31,8 @@ export function removeTempDir(dir: string): void {
 }
 
 /**
- * Track parent directories for cleanup
- */
-const parentDirs = new Map<string, string>();
-
-/**
  * Creates a temporary e3 repository for testing
- * @returns Path to .e3 directory
+ * @returns Path to the repository directory
  */
 export function createTestRepo(): string {
   const dir = createTempDir();
@@ -45,24 +40,15 @@ export function createTestRepo(): string {
   if (!result.success) {
     throw new Error(`Failed to create test repository: ${result.error?.message}`);
   }
-  // Track parent directory for cleanup
-  parentDirs.set(result.e3Dir, dir);
-  return result.e3Dir;
+  return result.repoPath;
 }
 
 /**
- * Remove a test repository (removes parent directory)
- * @param e3Dir Path to .e3 directory
+ * Remove a test repository
+ * @param repoPath Path to repository directory
  */
-export function removeTestRepo(e3Dir: string): void {
-  const parentDir = parentDirs.get(e3Dir);
-  if (parentDir) {
-    removeTempDir(parentDir);
-    parentDirs.delete(e3Dir);
-  } else {
-    // Fallback: remove the .e3 directory itself
-    removeTempDir(e3Dir);
-  }
+export function removeTestRepo(repoPath: string): void {
+  removeTempDir(repoPath);
 }
 
 /**

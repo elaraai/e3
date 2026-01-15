@@ -16,10 +16,10 @@ REST API server exposing e3-core operations over HTTP. Uses BEAST2 binary serial
 
 ```bash
 # Start server on default port 3000
-e3-api-server /path/to/.e3
+e3-api-server /path/to/repo
 
 # Custom port and host
-e3-api-server /path/to/.e3 --port 8080 --host 0.0.0.0
+e3-api-server /path/to/repo --port 8080 --host 0.0.0.0
 ```
 
 ## Programmatic Usage
@@ -28,7 +28,7 @@ e3-api-server /path/to/.e3 --port 8080 --host 0.0.0.0
 import { createServer } from '@elaraai/e3-api-server';
 
 const server = createServer({
-  repo: '/path/to/.e3',
+  repo: '/path/to/repo',
   port: 3000,
   host: 'localhost',
 });

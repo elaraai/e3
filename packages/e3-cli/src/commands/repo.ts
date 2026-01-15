@@ -66,13 +66,13 @@ export const repoCommand = {
 
         if (!result.success) {
           if (result.alreadyExists) {
-            exitError(`e3 repository already exists at ${result.e3Dir}`);
+            exitError(`e3 repository already exists at ${result.repoPath}`);
           } else {
             exitError(`Failed to create repository: ${formatError(result.error)}`);
           }
         }
 
-        console.log(`Initialized e3 repository at ${result.e3Dir}`);
+        console.log(`Initialized e3 repository at ${result.repoPath}`);
         console.log('');
         console.log('Created:');
         console.log('  objects/      Content-addressable storage');
@@ -93,7 +93,7 @@ export const repoCommand = {
       const location = await parseRepoLocation(locationArg);
 
       if (location.type === 'local') {
-        // Remove the .e3 directory
+        // Remove the repository directory
         rmSync(location.path, { recursive: true, force: true });
         console.log(`Removed repository at ${location.path}`);
       } else {

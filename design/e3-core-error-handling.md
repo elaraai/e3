@@ -329,7 +329,7 @@ Add `@throws` JSDoc to all functions:
 /**
  * Execute all tasks in a workspace according to the dependency graph.
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param ws - Workspace name
  * @param options - Execution options
  * @returns Result of the dataflow execution

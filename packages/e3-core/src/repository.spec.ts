@@ -30,63 +30,66 @@ describe('repository', () => {
   });
 
   describe('repoInit', () => {
-    it('creates .e3 directory', () => {
-      const result = repoInit(testDir);
+    it('creates repository directory structure', () => {
+      const repoDir = join(testDir, 'my-repo');
+      const result = repoInit(repoDir);
 
       assert.strictEqual(result.success, true);
-      assert.strictEqual(existsSync(join(testDir, '.e3')), true);
+      assert.strictEqual(existsSync(repoDir), true);
     });
 
     it('creates all required directories', () => {
-      const result = repoInit(testDir);
+      const repoDir = join(testDir, 'my-repo');
+      const result = repoInit(repoDir);
 
       assert.strictEqual(result.success, true);
 
-      const e3Dir = join(testDir, '.e3');
-      assert.strictEqual(existsSync(join(e3Dir, 'objects')), true);
-      assert.strictEqual(existsSync(join(e3Dir, 'packages')), true);
-      assert.strictEqual(existsSync(join(e3Dir, 'executions')), true);
-      assert.strictEqual(existsSync(join(e3Dir, 'workspaces')), true);
+      assert.strictEqual(existsSync(join(repoDir, 'objects')), true);
+      assert.strictEqual(existsSync(join(repoDir, 'packages')), true);
+      assert.strictEqual(existsSync(join(repoDir, 'executions')), true);
+      assert.strictEqual(existsSync(join(repoDir, 'workspaces')), true);
     });
 
     it('does not create any config file', () => {
-      const result = repoInit(testDir);
+      const repoDir = join(testDir, 'my-repo');
+      const result = repoInit(repoDir);
 
       assert.strictEqual(result.success, true);
 
-      const e3Dir = join(testDir, '.e3');
       // No config file should be created - runner config is in tasks
-      assert.strictEqual(existsSync(join(e3Dir, 'e3.east')), false);
-      assert.strictEqual(existsSync(join(e3Dir, 'e3.beast2')), false);
+      assert.strictEqual(existsSync(join(repoDir, 'e3.east')), false);
+      assert.strictEqual(existsSync(join(repoDir, 'e3.beast2')), false);
     });
 
-    it('returns e3Dir path in result', () => {
-      const result = repoInit(testDir);
+    it('returns repoPath in result', () => {
+      const repoDir = join(testDir, 'my-repo');
+      const result = repoInit(repoDir);
 
       assert.strictEqual(result.success, true);
-      assert.strictEqual(result.e3Dir, join(testDir, '.e3'));
+      assert.strictEqual(result.repoPath, repoDir);
     });
 
-    it('fails if .e3 already exists', () => {
+    it('fails if repository already exists', () => {
+      const repoDir = join(testDir, 'my-repo');
+
       // First init succeeds
-      const result1 = repoInit(testDir);
+      const result1 = repoInit(repoDir);
       assert.strictEqual(result1.success, true);
 
       // Second init fails
-      const result2 = repoInit(testDir);
+      const result2 = repoInit(repoDir);
       assert.strictEqual(result2.success, false);
       assert.strictEqual(result2.alreadyExists, true);
       assert.strictEqual(result2.error?.message.includes('already exists'), true);
     });
 
     it('creates repo in nested path', () => {
-      const nestedDir = join(testDir, 'foo', 'bar', 'baz');
-      mkdirSync(nestedDir, { recursive: true });
+      const nestedDir = join(testDir, 'foo', 'bar', 'baz', 'my-repo');
 
       const result = repoInit(nestedDir);
 
       assert.strictEqual(result.success, true);
-      assert.strictEqual(existsSync(join(nestedDir, '.e3')), true);
+      assert.strictEqual(existsSync(join(nestedDir, 'objects')), true);
     });
 
     it('resolves relative paths', () => {
@@ -94,10 +97,10 @@ describe('repository', () => {
       try {
         process.chdir(testDir);
 
-        const result = repoInit('.');
+        const result = repoInit('my-repo');
 
         assert.strictEqual(result.success, true);
-        assert.strictEqual(existsSync(join(testDir, '.e3')), true);
+        assert.strictEqual(existsSync(join(testDir, 'my-repo', 'objects')), true);
       } finally {
         process.chdir(originalCwd);
       }
@@ -105,71 +108,49 @@ describe('repository', () => {
   });
 
   describe('repoFind', () => {
-    it('finds repository in current directory', () => {
-      repoInit(testDir);
+    it('finds repository at specified path', () => {
+      const repoDir = join(testDir, 'my-repo');
+      repoInit(repoDir);
 
-      const found = repoFind(testDir);
+      const found = repoFind(repoDir);
 
-      assert.strictEqual(found, join(testDir, '.e3'));
+      assert.strictEqual(found, repoDir);
     });
 
-    it('finds repository in parent directory', () => {
-      repoInit(testDir);
-
-      const subDir = join(testDir, 'subdir');
-      mkdirSync(subDir);
-
-      const found = repoFind(subDir);
-
-      assert.strictEqual(found, join(testDir, '.e3'));
-    });
-
-    it('finds repository in ancestor directory', () => {
-      repoInit(testDir);
-
-      const deepDir = join(testDir, 'a', 'b', 'c', 'd');
-      mkdirSync(deepDir, { recursive: true });
-
-      const found = repoFind(deepDir);
-
-      assert.strictEqual(found, join(testDir, '.e3'));
-    });
-
-    it('returns null if no repository found', () => {
+    it('returns null for non-repository directory', () => {
+      // testDir exists but is not a repository
       const found = repoFind(testDir);
 
       assert.strictEqual(found, null);
     });
 
-    it('prefers closer repository', () => {
-      // Create repo in testDir
-      repoInit(testDir);
+    it('returns null if no path provided and E3_REPO not set', () => {
+      const originalEnv = process.env.E3_REPO;
+      try {
+        delete process.env.E3_REPO;
 
-      // Create nested dir and repo there
-      const nestedDir = join(testDir, 'nested');
-      mkdirSync(nestedDir);
-      repoInit(nestedDir);
+        const found = repoFind();
 
-      const found = repoFind(nestedDir);
-
-      // Should find the closer one
-      assert.strictEqual(found, join(nestedDir, '.e3'));
+        assert.strictEqual(found, null);
+      } finally {
+        if (originalEnv !== undefined) {
+          process.env.E3_REPO = originalEnv;
+        }
+      }
     });
 
     it('uses E3_REPO environment variable if set', () => {
-      repoInit(testDir);
+      const repoDir = join(testDir, 'my-repo');
+      repoInit(repoDir);
 
       const originalEnv = process.env.E3_REPO;
       try {
-        process.env.E3_REPO = join(testDir, '.e3');
+        process.env.E3_REPO = repoDir;
 
-        // Find from different directory
-        const otherDir = createTempDir();
-        const found = repoFind(otherDir);
+        // Find without specifying path
+        const found = repoFind();
 
-        assert.strictEqual(found, join(testDir, '.e3'));
-
-        removeTempDir(otherDir);
+        assert.strictEqual(found, repoDir);
       } finally {
         if (originalEnv !== undefined) {
           process.env.E3_REPO = originalEnv;
@@ -180,16 +161,17 @@ describe('repository', () => {
     });
 
     it('ignores invalid E3_REPO', () => {
-      repoInit(testDir);
+      const repoDir = join(testDir, 'my-repo');
+      repoInit(repoDir);
 
       const originalEnv = process.env.E3_REPO;
       try {
         process.env.E3_REPO = join(testDir, 'nonexistent');
 
-        const found = repoFind(testDir);
+        // Should still find repo at specified path
+        const found = repoFind(repoDir);
 
-        // Should fall back to directory search
-        assert.strictEqual(found, join(testDir, '.e3'));
+        assert.strictEqual(found, repoDir);
       } finally {
         if (originalEnv !== undefined) {
           process.env.E3_REPO = originalEnv;
@@ -199,50 +181,46 @@ describe('repository', () => {
       }
     });
 
-    it('returns false if missing objects directory', () => {
-      repoInit(testDir);
+    it('returns null if missing objects directory', () => {
+      const repoDir = join(testDir, 'my-repo');
+      repoInit(repoDir);
 
-      const e3Dir = join(testDir, '.e3');
-      const objectsDir = join(e3Dir, 'objects');
-      rmSync(objectsDir, { recursive: true });
+      rmSync(join(repoDir, 'objects'), { recursive: true });
 
-      const found = repoFind(testDir);
-
-      assert.strictEqual(found, null);
-    });
-
-    it('returns false if missing packages directory', () => {
-      repoInit(testDir);
-
-      const e3Dir = join(testDir, '.e3');
-      const packagesDir = join(e3Dir, 'packages');
-      rmSync(packagesDir, { recursive: true });
-
-      const found = repoFind(testDir);
+      const found = repoFind(repoDir);
 
       assert.strictEqual(found, null);
     });
 
-    it('returns false if missing executions directory', () => {
-      repoInit(testDir);
+    it('returns null if missing packages directory', () => {
+      const repoDir = join(testDir, 'my-repo');
+      repoInit(repoDir);
 
-      const e3Dir = join(testDir, '.e3');
-      const executionsDir = join(e3Dir, 'executions');
-      rmSync(executionsDir, { recursive: true });
+      rmSync(join(repoDir, 'packages'), { recursive: true });
 
-      const found = repoFind(testDir);
+      const found = repoFind(repoDir);
 
       assert.strictEqual(found, null);
     });
 
-    it('returns false if missing workspaces directory', () => {
-      repoInit(testDir);
+    it('returns null if missing executions directory', () => {
+      const repoDir = join(testDir, 'my-repo');
+      repoInit(repoDir);
 
-      const e3Dir = join(testDir, '.e3');
-      const workspacesDir = join(e3Dir, 'workspaces');
-      rmSync(workspacesDir, { recursive: true });
+      rmSync(join(repoDir, 'executions'), { recursive: true });
 
-      const found = repoFind(testDir);
+      const found = repoFind(repoDir);
+
+      assert.strictEqual(found, null);
+    });
+
+    it('returns null if missing workspaces directory', () => {
+      const repoDir = join(testDir, 'my-repo');
+      repoInit(repoDir);
+
+      rmSync(join(repoDir, 'workspaces'), { recursive: true });
+
+      const found = repoFind(repoDir);
 
       assert.strictEqual(found, null);
     });
@@ -250,11 +228,12 @@ describe('repository', () => {
 
   describe('repoGet', () => {
     it('returns repository path if found', () => {
-      repoInit(testDir);
+      const repoDir = join(testDir, 'my-repo');
+      repoInit(repoDir);
 
-      const repo = repoGet(testDir);
+      const repo = repoGet(repoDir);
 
-      assert.strictEqual(repo, join(testDir, '.e3'));
+      assert.strictEqual(repo, repoDir);
     });
 
     it('throws if repository not found', () => {
