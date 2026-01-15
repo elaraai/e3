@@ -18,6 +18,7 @@ import {
   repoGc,
   repoCreate,
   repoRemove,
+  packageRemove,
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
@@ -66,6 +67,9 @@ export function repositoryTests(getContext: () => TestContext): void {
       // Import a package then remove it to create garbage
       const zipPath = await ctx.createPackage('gc-test-pkg', '1.0.0');
       await ctx.importPackage(zipPath);
+
+      // Remove the package to create garbage (orphaned objects)
+      await packageRemove(ctx.config.baseUrl, ctx.repoName, 'gc-test-pkg', '1.0.0', opts);
 
       // Run GC (not dry run)
       const result = await repoGc(
