@@ -47,7 +47,7 @@ async function computeHashFromStream(
 /**
  * Atomically write an object to the repository
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param data - Data to store
  * @returns SHA256 hash of the data
  */
@@ -108,7 +108,7 @@ export async function objectWrite(
 /**
  * Atomically write a stream to the repository
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param stream - Stream to store
  * @returns SHA256 hash of the data
  */
@@ -175,7 +175,7 @@ export async function objectWriteStream(
 /**
  * Read an object from the repository
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param hash - SHA256 hash of the object
  * @returns Object data
  * @throws {ObjectNotFoundError} If object not found
@@ -203,7 +203,7 @@ export async function objectRead(
 /**
  * Check if an object exists in the repository
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param hash - SHA256 hash of the object
  * @returns true if object exists
  */
@@ -224,7 +224,7 @@ export async function objectExists(
 /**
  * Get the filesystem path for an object
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param hash - SHA256 hash of the object
  * @returns Filesystem path: objects/<hash[0..2]>/<hash[2..]>.beast2
  */
@@ -240,7 +240,7 @@ export function objectPath(repoPath: string, hash: string): string {
  * Scans the object store to find the shortest prefix of the given hash
  * that uniquely identifies it among all stored objects.
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param hash - Full SHA256 hash of the object
  * @param minLength - Minimum prefix length to return (default: 4)
  * @returns Minimum unambiguous prefix length

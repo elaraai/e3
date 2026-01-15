@@ -94,7 +94,7 @@ export const ResponseType = <T extends EastType>(successType: T) => VariantType(
 /**
  * Repository status information.
  *
- * @property path - Absolute path to the .e3 repository directory
+ * @property path - Absolute path to the e3 repository directory
  * @property objectCount - Number of content-addressed objects stored
  * @property packageCount - Number of imported packages
  * @property workspaceCount - Number of workspaces

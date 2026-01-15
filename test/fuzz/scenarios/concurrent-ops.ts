@@ -267,7 +267,6 @@ export async function testRapidSetStartCycles(): Promise<ScenarioResult> {
     const pkg = e3.package(`rapid_${random.string(6)}`, '1.0.0', task);
 
     const repoDir = join(testDir, 'repo');
-    const e3Dir = join(repoDir, '.e3'); // Core API expects .e3 path
     const zipPath = join(testDir, 'package.zip');
 
     await e3.export(pkg, zipPath);
@@ -292,15 +291,15 @@ export async function testRapidSetStartCycles(): Promise<ScenarioResult> {
         try {
           const storage = new LocalStorage();
           // Try to acquire lock (non-blocking)
-          const lock = await storage.locks.acquire(e3Dir, 'ws', variant('dataflow', null));
+          const lock = await storage.locks.acquire(repoDir, 'ws', variant('dataflow', null));
           if (!lock) {
             return { value: Number(value), success: false, lockError: true };
           }
           try {
             // Set the input value using the lock
-            await workspaceSetDataset(storage, e3Dir, 'ws', [variant('field', 'inputs'), variant('field', 'x')], value, IntegerType, { lock });
+            await workspaceSetDataset(storage, repoDir, 'ws', [variant('field', 'inputs'), variant('field', 'x')], value, IntegerType, { lock });
             // Execute dataflow using the lock
-            await dataflowExecute(storage, e3Dir, 'ws', { lock });
+            await dataflowExecute(storage, repoDir, 'ws', { lock });
             return { value: Number(value), success: true, lockError: false };
           } finally {
             await lock.release();

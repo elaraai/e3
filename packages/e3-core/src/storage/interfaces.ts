@@ -32,7 +32,7 @@ export type { LockState, LockOperation, LockHolderInfo };
  * The store handles deduplication automatically.
  *
  * All methods take `repo` as first parameter to identify the repository.
- * For local storage, `repo` is the path to the .e3 directory.
+ * For local storage, `repo` is the path to the e3 repository directory.
  * For cloud storage, `repo` is a repository identifier used as a key prefix.
  */
 export interface ObjectStore {
@@ -367,7 +367,7 @@ export interface StorageBackend {
 
   /**
    * Validate that a repository exists and is properly structured.
-   * @param repo - Repository identifier (path to .e3 directory for local storage)
+   * @param repo - Repository identifier (path to e3 repository directory for local storage)
    * @throws {RepositoryNotFoundError} If repository doesn't exist or is invalid
    */
   validateRepository(repo: string): Promise<void>;

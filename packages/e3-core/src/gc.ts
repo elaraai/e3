@@ -74,7 +74,7 @@ export interface GcResult {
  * own GC implementation (e.g., using S3 lifecycle policies).
  *
  * @param storage - Storage backend (must be LocalStorage)
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param options - GC options
  * @returns GC result with statistics
  * @throws Error if storage is not a LocalStorage

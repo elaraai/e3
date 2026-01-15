@@ -18,7 +18,7 @@ import { isNotFoundError } from '../../errors.js';
  * Local filesystem implementation of ObjectStore.
  *
  * Wraps the existing objects.ts functions.
- * The `repo` parameter is the path to the .e3 directory.
+ * The `repo` parameter is the path to the e3 repository directory.
  */
 export class LocalObjectStore implements ObjectStore {
   async write(repo: string, data: Uint8Array): Promise<string> {

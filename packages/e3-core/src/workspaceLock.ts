@@ -174,7 +174,7 @@ export async function isLockHolderAlive(holderStr: string): Promise<boolean> {
  * Uses Linux flock() for kernel-managed locking. The lock is automatically
  * released when the process exits (even on crash/kill).
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param workspace - Workspace name to lock
  * @param operation - What operation is acquiring the lock
  * @param options - Lock acquisition options
@@ -350,7 +350,7 @@ async function checkAndCleanStaleLock(lockPath: string): Promise<void> {
 /**
  * Get the lock state for a workspace.
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param workspace - Workspace name to check
  * @returns Lock state if locked, null if not locked
  */
@@ -382,7 +382,7 @@ export async function getWorkspaceLockState(
 /**
  * Get lock holder info for a workspace (for backwards compatibility).
  *
- * @param repoPath - Path to .e3 repository
+ * @param repoPath - Path to e3 repository
  * @param workspace - Workspace name to check
  * @returns Lock holder info if locked, null if not locked
  * @deprecated Use getWorkspaceLockState for full lock information

@@ -179,7 +179,7 @@ async function readWorkspaceState(storage: StorageBackend, repo: string, ws: str
  * and does not require acquiring a lock.
  *
  * @param storage - Storage backend
- * @param repo - Repository identifier (for local storage, the path to .e3 directory)
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param ws - Workspace name
  * @returns Complete status report
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
