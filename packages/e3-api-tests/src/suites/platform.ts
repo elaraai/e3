@@ -64,7 +64,7 @@ export function platformTests(getContext: () => TestContext): void {
       const status = await compiled(ctx.config.baseUrl, ctx.repoName, '');
 
       // Verify results
-      assert.ok(status.path.includes('.e3'), 'path should contain .e3');
+      assert.ok(typeof status.path === 'string' && status.path.length > 0, 'path should be a non-empty string');
       assert.ok(typeof status.objectCount === 'bigint');
       assert.ok(typeof status.packageCount === 'bigint');
       assert.ok(typeof status.workspaceCount === 'bigint');

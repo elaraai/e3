@@ -124,7 +124,7 @@ describe('end-to-end workflow', () => {
 
       const initResult = await runE3Command(['repo', 'create', repoDir], testDir);
       assert.strictEqual(initResult.exitCode, 0, `init failed: ${initResult.stderr}`);
-      assert.ok(existsSync(join(repoDir, '.e3')), '.e3 directory should exist');
+      assert.ok(existsSync(join(repoDir, 'objects')), 'repository should exist');
 
       // =====================================================================
       // Step 4: Import package via CLI

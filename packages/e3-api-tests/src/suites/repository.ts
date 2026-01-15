@@ -35,7 +35,7 @@ export function repositoryTests(getContext: () => TestContext): void {
 
       const status = await repoStatus(ctx.config.baseUrl, ctx.repoName, opts);
 
-      assert.ok(status.path.includes('.e3'), 'path should contain .e3');
+      assert.ok(typeof status.path === 'string' && status.path.length > 0, 'path should be a non-empty string');
       assert.ok(typeof status.objectCount === 'bigint');
       assert.ok(typeof status.packageCount === 'bigint');
       assert.ok(typeof status.workspaceCount === 'bigint');
@@ -92,7 +92,7 @@ export function repositoryTests(getContext: () => TestContext): void {
 
         // Verify it exists by getting status
         const status = await repoStatus(ctx.config.baseUrl, newRepoName, opts);
-        assert.ok(status.path.includes('.e3'), 'new repo path should contain .e3');
+        assert.ok(typeof status.path === 'string' && status.path.length > 0, 'new repo should have a valid path');
       } finally {
         // Clean up
         try {
@@ -113,7 +113,7 @@ export function repositoryTests(getContext: () => TestContext): void {
 
       // Verify it exists
       const status = await repoStatus(ctx.config.baseUrl, tempRepoName, opts);
-      assert.ok(status.path.includes('.e3'));
+      assert.ok(typeof status.path === 'string' && status.path.length > 0);
 
       // Remove it - should complete without error
       await repoRemove(ctx.config.baseUrl, tempRepoName, opts);

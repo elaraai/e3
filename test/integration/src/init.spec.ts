@@ -23,6 +23,7 @@ describe('e3 repo create', () => {
 
   beforeEach(() => {
     testDir = createTestDir();
+    mkdirSync(testDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -30,40 +31,34 @@ describe('e3 repo create', () => {
   });
 
   it('creates a new repository', async () => {
-    // Create the test directory (e3 repo create expects it to exist)
-    mkdirSync(testDir, { recursive: true });
+    // Create repo in a subdirectory (the repo IS the directory)
+    const repoDir = join(testDir, 'my-repo');
 
-    // Run e3 repo create with '.' to use current directory
-    const result = await runE3Command(['repo', 'create', '.'], testDir);
+    const result = await runE3Command(['repo', 'create', repoDir], testDir);
 
     // Check exit code
     assert.strictEqual(result.exitCode, 0, `e3 repo create failed: ${result.stderr}`);
 
-    // Verify .e3 directory was created
-    const e3Dir = join(testDir, '.e3');
-    assert.ok(existsSync(e3Dir), '.e3 directory should exist');
-
-    // Verify subdirectories were created
-    // Current structure: objects, packages, workspaces, executions
-    assert.ok(existsSync(join(e3Dir, 'objects')), '.e3/objects should exist');
-    assert.ok(existsSync(join(e3Dir, 'packages')), '.e3/packages should exist');
-    assert.ok(existsSync(join(e3Dir, 'workspaces')), '.e3/workspaces should exist');
-    assert.ok(existsSync(join(e3Dir, 'executions')), '.e3/executions should exist');
+    // Verify repository directory structure was created
+    assert.ok(existsSync(repoDir), 'repository directory should exist');
+    assert.ok(existsSync(join(repoDir, 'objects')), 'objects should exist');
+    assert.ok(existsSync(join(repoDir, 'packages')), 'packages should exist');
+    assert.ok(existsSync(join(repoDir, 'workspaces')), 'workspaces should exist');
+    assert.ok(existsSync(join(repoDir, 'executions')), 'executions should exist');
 
     // Check for success message in output
     assert.match(result.stdout, /initialized/i);
   });
 
   it('fails if repository already exists', async () => {
-    // Create the test directory
-    mkdirSync(testDir, { recursive: true });
+    const repoDir = join(testDir, 'my-repo');
 
     // Initialize once
-    const firstResult = await runE3Command(['repo', 'create', '.'], testDir);
+    const firstResult = await runE3Command(['repo', 'create', repoDir], testDir);
     assert.strictEqual(firstResult.exitCode, 0);
 
     // Try to initialize again
-    const secondResult = await runE3Command(['repo', 'create', '.'], testDir);
+    const secondResult = await runE3Command(['repo', 'create', repoDir], testDir);
 
     // Should fail
     assert.notStrictEqual(secondResult.exitCode, 0);
@@ -73,50 +68,44 @@ describe('e3 repo create', () => {
   });
 
   it('creates directory if it does not exist', async () => {
-    // Create the test directory but try to create repo in a subdirectory that doesn't exist
-    mkdirSync(testDir, { recursive: true });
-    const nonExistentSubdir = join(testDir, 'nonexistent');
+    // Try to create repo in a directory that doesn't exist
+    const nonExistentDir = join(testDir, 'nonexistent', 'nested', 'repo');
 
-    // Run from testDir but specify nonexistent subdir as repo path
-    // e3 repo create should create the directory (like git init does)
-    const result = await runE3Command(['repo', 'create', nonExistentSubdir], testDir);
+    const result = await runE3Command(['repo', 'create', nonExistentDir], testDir);
+
     // Should succeed since it creates the directory
     assert.strictEqual(result.exitCode, 0, `repo create failed: ${result.stderr}`);
 
     // Verify the repo was created
-    assert.ok(existsSync(join(nonExistentSubdir, '.e3')), '.e3 directory should exist');
+    assert.ok(existsSync(join(nonExistentDir, 'objects')), 'objects directory should exist');
   });
 
-  it('works in current directory when using . as path', async () => {
+  it('works with relative path', async () => {
     // Create the test directory
     mkdirSync(testDir, { recursive: true });
 
-    // Run e3 repo create with '.' to use current directory
-    const result = await runE3Command(['repo', 'create', '.'], testDir);
+    // Run e3 repo create with relative path
+    const result = await runE3Command(['repo', 'create', 'my-repo'], testDir);
 
     // Should succeed
     assert.strictEqual(result.exitCode, 0);
 
-    // Verify .e3 directory exists
-    const e3Dir = join(testDir, '.e3');
-    assert.ok(existsSync(e3Dir));
+    // Verify repository structure exists
+    const repoDir = join(testDir, 'my-repo');
+    assert.ok(existsSync(join(repoDir, 'objects')));
   });
 
   it('creates empty repository structure', async () => {
-    // Create the test directory
-    mkdirSync(testDir, { recursive: true });
+    const repoDir = join(testDir, 'my-repo');
 
-    // Run e3 repo create with '.' to use current directory
-    const result = await runE3Command(['repo', 'create', '.'], testDir);
+    const result = await runE3Command(['repo', 'create', repoDir], testDir);
     assert.strictEqual(result.exitCode, 0);
 
-    // Verify all required directories exist and are empty (or close to it)
-    const e3Dir = join(testDir, '.e3');
-    const objectsDir = join(e3Dir, 'objects');
-    const packagesDir = join(e3Dir, 'packages');
-
-    assert.ok(existsSync(objectsDir), 'objects directory should exist');
-    assert.ok(existsSync(packagesDir), 'packages directory should exist');
+    // Verify all required directories exist
+    assert.ok(existsSync(join(repoDir, 'objects')), 'objects directory should exist');
+    assert.ok(existsSync(join(repoDir, 'packages')), 'packages directory should exist');
+    assert.ok(existsSync(join(repoDir, 'workspaces')), 'workspaces directory should exist');
+    assert.ok(existsSync(join(repoDir, 'executions')), 'executions directory should exist');
   });
 });
 
@@ -125,6 +114,7 @@ describe('e3 repo remove', () => {
 
   beforeEach(() => {
     testDir = createTestDir();
+    mkdirSync(testDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -132,36 +122,30 @@ describe('e3 repo remove', () => {
   });
 
   it('removes an existing repository', async () => {
-    // Create the test directory and initialize a repo
-    mkdirSync(testDir, { recursive: true });
-    await runE3Command(['repo', 'create', '.'], testDir);
+    const repoDir = join(testDir, 'my-repo');
 
-    const e3Dir = join(testDir, '.e3');
-    assert.ok(existsSync(e3Dir), '.e3 directory should exist before remove');
+    // Create a repo
+    await runE3Command(['repo', 'create', repoDir], testDir);
+    assert.ok(existsSync(join(repoDir, 'objects')), 'repo should exist before remove');
 
     // Remove the repository
-    const result = await runE3Command(['repo', 'remove', '.'], testDir);
+    const result = await runE3Command(['repo', 'remove', repoDir], testDir);
 
     assert.strictEqual(result.exitCode, 0, `repo remove failed: ${result.stderr}`);
-    assert.ok(!existsSync(e3Dir), '.e3 directory should not exist after remove');
+    assert.ok(!existsSync(repoDir), 'repository directory should not exist after remove');
     assert.match(result.stdout, /removed/i);
   });
 
   it('removes repository at specified path', async () => {
-    // Create test directory with a subdirectory for the repo
-    mkdirSync(testDir, { recursive: true });
-    const repoSubdir = join(testDir, 'my-repo');
-    mkdirSync(repoSubdir, { recursive: true });
+    const repoDir = join(testDir, 'my-repo');
 
-    await runE3Command(['repo', 'create', repoSubdir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
+    assert.ok(existsSync(join(repoDir, 'objects')), 'repo should exist before remove');
 
-    const e3Dir = join(repoSubdir, '.e3');
-    assert.ok(existsSync(e3Dir), '.e3 directory should exist before remove');
-
-    // Remove using absolute path
-    const result = await runE3Command(['repo', 'remove', repoSubdir], testDir);
+    // Remove using path
+    const result = await runE3Command(['repo', 'remove', repoDir], testDir);
 
     assert.strictEqual(result.exitCode, 0, `repo remove failed: ${result.stderr}`);
-    assert.ok(!existsSync(e3Dir), '.e3 directory should not exist after remove');
+    assert.ok(!existsSync(repoDir), 'repository directory should not exist after remove');
   });
 });
