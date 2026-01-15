@@ -6,11 +6,15 @@ This is an npm workspace monorepo containing the e3 (East Execution Engine) pack
 The directory structure is:
 
  - packages/e3-types - Shared type definitions for e3
- - packages/e3 - TypeScript SKD for user to create e3 packages
+ - packages/e3 - TypeScript SDK for users to create e3 packages
  - packages/e3-core - Core business logic library (like libgit2)
  - packages/e3-cli - CLI tool (like git)
- - integration-tests - End-to-end tests for e3
- - design - design documentation (see design/e3-mvp.md for overview)
+ - packages/e3-api-client - HTTP client for remote e3 repositories
+ - packages/e3-api-server - HTTP server exposing e3-core as REST API
+ - packages/e3-api-tests - Integration tests for API client/server
+ - test/integration - End-to-end CLI tests
+ - test/fuzz - Fuzz testing (Virtual Idiot)
+ - design - Design documentation (see design/e3-mvp.md for overview)
 
 ## Purpose
 

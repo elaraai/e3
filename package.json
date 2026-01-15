@@ -1,5 +1,5 @@
 {
-  "name": "@elaraai/e3",
+  "name": "e3-monorepo",
   "version": "0.0.1-beta.0",
   "private": true,
   "description": "East Execution Engine - Monorepo for e3 packages",
