@@ -839,7 +839,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await repoStatus(url);
     } catch (err: any) {
       throw new EastError(`Failed to get repository status: ${err.message}`, {
-        location: { filename: 'e3_repo_status', line: 0n, column: 0n },
+        location: [{ filename: 'e3_repo_status', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -850,7 +850,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await repoGc(url, options);
     } catch (err: any) {
       throw new EastError(`Failed to run garbage collection: ${err.message}`, {
-        location: { filename: 'e3_repo_gc', line: 0n, column: 0n },
+        location: [{ filename: 'e3_repo_gc', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -862,7 +862,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await packageList(url);
     } catch (err: any) {
       throw new EastError(`Failed to list packages: ${err.message}`, {
-        location: { filename: 'e3_package_list', line: 0n, column: 0n },
+        location: [{ filename: 'e3_package_list', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -873,7 +873,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await packageGet(url, name, version);
     } catch (err: any) {
       throw new EastError(`Failed to get package ${name}@${version}: ${err.message}`, {
-        location: { filename: 'e3_package_get', line: 0n, column: 0n },
+        location: [{ filename: 'e3_package_get', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -884,7 +884,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await packageImport(url, archive);
     } catch (err: any) {
       throw new EastError(`Failed to import package: ${err.message}`, {
-        location: { filename: 'e3_package_import', line: 0n, column: 0n },
+        location: [{ filename: 'e3_package_import', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -895,7 +895,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await packageExport(url, name, version);
     } catch (err: any) {
       throw new EastError(`Failed to export package ${name}@${version}: ${err.message}`, {
-        location: { filename: 'e3_package_export', line: 0n, column: 0n },
+        location: [{ filename: 'e3_package_export', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -907,7 +907,7 @@ const PlatformImpl: PlatformFunction[] = [
       return null;
     } catch (err: any) {
       throw new EastError(`Failed to remove package ${name}@${version}: ${err.message}`, {
-        location: { filename: 'e3_package_remove', line: 0n, column: 0n },
+        location: [{ filename: 'e3_package_remove', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -919,7 +919,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await workspaceList(url);
     } catch (err: any) {
       throw new EastError(`Failed to list workspaces: ${err.message}`, {
-        location: { filename: 'e3_workspace_list', line: 0n, column: 0n },
+        location: [{ filename: 'e3_workspace_list', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -930,7 +930,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await workspaceCreate(url, name);
     } catch (err: any) {
       throw new EastError(`Failed to create workspace ${name}: ${err.message}`, {
-        location: { filename: 'e3_workspace_create', line: 0n, column: 0n },
+        location: [{ filename: 'e3_workspace_create', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -941,7 +941,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await workspaceGet(url, name);
     } catch (err: any) {
       throw new EastError(`Failed to get workspace ${name}: ${err.message}`, {
-        location: { filename: 'e3_workspace_get', line: 0n, column: 0n },
+        location: [{ filename: 'e3_workspace_get', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -952,7 +952,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await workspaceStatus(url, name);
     } catch (err: any) {
       throw new EastError(`Failed to get workspace status ${name}: ${err.message}`, {
-        location: { filename: 'e3_workspace_status', line: 0n, column: 0n },
+        location: [{ filename: 'e3_workspace_status', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -964,7 +964,7 @@ const PlatformImpl: PlatformFunction[] = [
       return null;
     } catch (err: any) {
       throw new EastError(`Failed to remove workspace ${name}: ${err.message}`, {
-        location: { filename: 'e3_workspace_remove', line: 0n, column: 0n },
+        location: [{ filename: 'e3_workspace_remove', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -976,7 +976,7 @@ const PlatformImpl: PlatformFunction[] = [
       return null;
     } catch (err: any) {
       throw new EastError(`Failed to deploy ${packageRef} to workspace ${name}: ${err.message}`, {
-        location: { filename: 'e3_workspace_deploy', line: 0n, column: 0n },
+        location: [{ filename: 'e3_workspace_deploy', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -987,7 +987,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await workspaceExport(url, name);
     } catch (err: any) {
       throw new EastError(`Failed to export workspace ${name}: ${err.message}`, {
-        location: { filename: 'e3_workspace_export', line: 0n, column: 0n },
+        location: [{ filename: 'e3_workspace_export', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -999,7 +999,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await datasetList(url, workspace);
     } catch (err: any) {
       throw new EastError(`Failed to list datasets in ${workspace}: ${err.message}`, {
-        location: { filename: 'e3_dataset_list', line: 0n, column: 0n },
+        location: [{ filename: 'e3_dataset_list', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -1011,7 +1011,7 @@ const PlatformImpl: PlatformFunction[] = [
         return await datasetListAt(url, workspace, path);
       } catch (err: any) {
         throw new EastError(`Failed to list datasets at path in ${workspace}: ${err.message}`, {
-          location: { filename: 'e3_dataset_list_at', line: 0n, column: 0n },
+          location: [{ filename: 'e3_dataset_list_at', line: 0n, column: 0n }],
           cause: err,
         });
       }
@@ -1024,7 +1024,7 @@ const PlatformImpl: PlatformFunction[] = [
         return await datasetGet(url, workspace, path);
       } catch (err: any) {
         throw new EastError(`Failed to get dataset in ${workspace}: ${err.message}`, {
-          location: { filename: 'e3_dataset_get', line: 0n, column: 0n },
+          location: [{ filename: 'e3_dataset_get', line: 0n, column: 0n }],
           cause: err,
         });
       }
@@ -1043,7 +1043,7 @@ const PlatformImpl: PlatformFunction[] = [
         return null;
       } catch (err: any) {
         throw new EastError(`Failed to set dataset in ${workspace}: ${err.message}`, {
-          location: { filename: 'e3_dataset_set', line: 0n, column: 0n },
+          location: [{ filename: 'e3_dataset_set', line: 0n, column: 0n }],
           cause: err,
         });
       }
@@ -1056,7 +1056,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await taskList(url, workspace);
     } catch (err: any) {
       throw new EastError(`Failed to list tasks in ${workspace}: ${err.message}`, {
-        location: { filename: 'e3_task_list', line: 0n, column: 0n },
+        location: [{ filename: 'e3_task_list', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -1067,7 +1067,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await taskGet(url, workspace, name);
     } catch (err: any) {
       throw new EastError(`Failed to get task ${name} in ${workspace}: ${err.message}`, {
-        location: { filename: 'e3_task_get', line: 0n, column: 0n },
+        location: [{ filename: 'e3_task_get', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -1085,7 +1085,7 @@ const PlatformImpl: PlatformFunction[] = [
         return null;
       } catch (err: any) {
         throw new EastError(`Failed to start dataflow in ${workspace}: ${err.message}`, {
-          location: { filename: 'e3_dataflow_start', line: 0n, column: 0n },
+          location: [{ filename: 'e3_dataflow_start', line: 0n, column: 0n }],
           cause: err,
         });
       }
@@ -1102,7 +1102,7 @@ const PlatformImpl: PlatformFunction[] = [
         });
       } catch (err: any) {
         throw new EastError(`Failed to execute dataflow in ${workspace}: ${err.message}`, {
-          location: { filename: 'e3_dataflow_execute', line: 0n, column: 0n },
+          location: [{ filename: 'e3_dataflow_execute', line: 0n, column: 0n }],
           cause: err,
         });
       }
@@ -1114,7 +1114,7 @@ const PlatformImpl: PlatformFunction[] = [
       return await dataflowGraph(url, workspace);
     } catch (err: any) {
       throw new EastError(`Failed to get dataflow graph for ${workspace}: ${err.message}`, {
-        location: { filename: 'e3_dataflow_graph', line: 0n, column: 0n },
+        location: [{ filename: 'e3_dataflow_graph', line: 0n, column: 0n }],
         cause: err,
       });
     }
@@ -1135,7 +1135,7 @@ const PlatformImpl: PlatformFunction[] = [
         });
       } catch (err: any) {
         throw new EastError(`Failed to get logs for task ${task} in ${workspace}: ${err.message}`, {
-          location: { filename: 'e3_task_logs', line: 0n, column: 0n },
+          location: [{ filename: 'e3_task_logs', line: 0n, column: 0n }],
           cause: err,
         });
       }
