@@ -36,8 +36,8 @@
   },
   "dependencies": {
     "@elaraai/e3": "^0.0.2-beta.13",
-    "@elaraai/e3-api-client": "^",
-    "@elaraai/e3-cli": "^",
+    "@elaraai/e3-api-client": "^0.0.2-beta.13",
+    "@elaraai/e3-cli": "^0.0.2-beta.13",
     "@elaraai/east": "^0.0.1-beta.29"
   },
   "devDependencies": {
