@@ -58,7 +58,7 @@ export async function testTaskExecution(config: TaskExecutionConfig = {}): Promi
     await e3.export(pkg, zipPath);
     assert(existsSync(zipPath), 'Package zip should exist');
 
-    let result = await runE3Command(['init', repoDir], testDir);
+    let result = await runE3Command(['repo', 'create', repoDir], testDir);
     assert(result.exitCode === 0, `init failed: ${result.stderr}`);
 
     result = await runE3Command(['package', 'import', repoDir, zipPath], testDir);
@@ -143,7 +143,7 @@ export async function testTaskCaching(config: TaskExecutionConfig = {}): Promise
 
     // Setup
     await e3.export(pkg, zipPath);
-    await runE3Command(['init', repoDir], testDir);
+    await runE3Command(['repo', 'create', repoDir], testDir);
     await runE3Command(['package', 'import', repoDir, zipPath], testDir);
     await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
     await runE3Command(['workspace', 'deploy', repoDir, 'ws', `${pkg.name}@${pkg.version}`], testDir);

@@ -3,67 +3,38 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import { Hono } from 'hono';
-import { repoGc, packageList, workspaceList } from '@elaraai/e3-core';
-import { decodeBody, sendSuccess, sendError } from '../beast2.js';
-import { errorToVariant } from '../errors.js';
-import { RepositoryStatusType, GcRequestType, GcResultType } from '../types.js';
+import type { StorageBackend } from '@elaraai/e3-core';
+import { getStatus, startGc, getGcStatus } from '../handlers/repository.js';
+import { decodeBody } from '../beast2.js';
+import { GcRequestType } from '../types.js';
 
-export function createRepositoryRoutes(repoPath: string) {
+export function createRepositoryRoutes(
+  storage: StorageBackend,
+  getRepoPath: (repo: string) => string
+) {
   const app = new Hono();
 
-  // GET /api/status - Get repository status
+  // GET /api/repos/:repo/status - Get repository status
   app.get('/status', async (c) => {
-    try {
-      // Count objects
-      const objectsDir = path.join(repoPath, 'objects');
-      let objectCount = 0;
-      try {
-        const subdirs = await fs.readdir(objectsDir);
-        for (const subdir of subdirs) {
-          if (subdir.length === 2) {
-            const files = await fs.readdir(path.join(objectsDir, subdir));
-            objectCount += files.length;
-          }
-        }
-      } catch {
-        // objects dir doesn't exist
-      }
-
-      // Count packages and workspaces
-      const packages = await packageList(repoPath);
-      const workspaces = await workspaceList(repoPath);
-
-      const status = {
-        path: repoPath,
-        objectCount: BigInt(objectCount),
-        packageCount: BigInt(packages.length),
-        workspaceCount: BigInt(workspaces.length),
-      };
-      return sendSuccess(c, RepositoryStatusType, status);
-    } catch (err) {
-      return sendError(c, RepositoryStatusType, errorToVariant(err));
-    }
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    return getStatus(storage, repoPath);
   });
 
-  // POST /api/gc - Run garbage collection
+  // POST /api/repos/:repo/gc - Start garbage collection (async)
   app.post('/gc', async (c) => {
-    try {
-      const options = await decodeBody(c, GcRequestType);
-      const minAge = options.minAge?.type === 'some' ? Number(options.minAge.value) : undefined;
-      const result = await repoGc(repoPath, { dryRun: options.dryRun, minAge });
-      return sendSuccess(c, GcResultType, {
-        deletedObjects: BigInt(result.deletedObjects),
-        deletedPartials: BigInt(result.deletedPartials),
-        retainedObjects: BigInt(result.retainedObjects),
-        skippedYoung: BigInt(result.skippedYoung),
-        bytesFreed: BigInt(result.bytesFreed),
-      });
-    } catch (err) {
-      return sendError(c, GcResultType, errorToVariant(err));
-    }
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const options = await decodeBody(c, GcRequestType);
+    const minAge = options.minAge?.type === 'some' ? Number(options.minAge.value) : undefined;
+    return startGc(storage, repoPath, { dryRun: options.dryRun, minAge });
+  });
+
+  // GET /api/repos/:repo/gc/:executionId - Get GC status
+  app.get('/gc/:executionId', (c) => {
+    const executionId = c.req.param('executionId')!;
+    return getGcStatus(executionId);
   });
 
   return app;

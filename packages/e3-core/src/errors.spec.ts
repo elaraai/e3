@@ -16,7 +16,7 @@ import {
   WorkspaceNotDeployedError,
   WorkspaceExistsError,
   WorkspaceLockError,
-  type LockHolder,
+  type LockHolderInfo,
   PackageNotFoundError,
   PackageInvalidError,
   PackageExistsError,
@@ -109,7 +109,7 @@ describe('errors', () => {
     });
 
     it('includes holder info in message when provided', () => {
-      const holder: LockHolder = {
+      const holder: LockHolderInfo = {
         pid: 12345,
         acquiredAt: '2025-01-15T10:30:00Z',
         bootId: 'abc123',

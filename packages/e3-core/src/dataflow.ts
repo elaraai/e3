@@ -23,7 +23,7 @@
  * write completes, ensuring downstream tasks see consistent state.
  */
 
-import { decodeBeast2For } from '@elaraai/east';
+import { decodeBeast2For, variant } from '@elaraai/east';
 import {
   PackageObjectType,
   TaskObjectType,
@@ -32,7 +32,6 @@ import {
   type TaskObject,
   type TreePath,
 } from '@elaraai/e3-types';
-import { objectRead } from './objects.js';
 import {
   taskExecute,
   executionGetOutput,
@@ -47,17 +46,65 @@ import {
   E3Error,
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
+  WorkspaceLockError,
   TaskNotFoundError,
   DataflowError,
   DataflowAbortedError,
-  isNotFoundError,
 } from './errors.js';
-import {
-  acquireWorkspaceLock,
-  type WorkspaceLockHandle,
-} from './workspaceLock.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import type { StorageBackend, LockHandle } from './storage/interfaces.js';
+
+// =============================================================================
+// Path Parsing Helper
+// =============================================================================
+
+/**
+ * Parse a keypath string (from pathToString) back to TreePath.
+ *
+ * The keypath format is: .field1.field2 (dot-separated field names)
+ * Quoted identifiers use backticks: .field1.`complex/name`
+ *
+ * @param pathStr - The path string in keypath format
+ * @returns TreePath array of path segments
+ */
+function parsePathString(pathStr: string): TreePath {
+  if (!pathStr.startsWith('.')) {
+    throw new Error(`Invalid path string: expected '.' prefix, got '${pathStr}'`);
+  }
+
+  const segments: TreePath = [];
+  let i = 1; // Skip the leading '.'
+
+  while (i < pathStr.length) {
+    let fieldName: string;
+
+    if (pathStr[i] === '`') {
+      // Quoted identifier: find closing backtick
+      const endQuote = pathStr.indexOf('`', i + 1);
+      if (endQuote === -1) {
+        throw new Error(`Invalid path string: unclosed backtick at position ${i}`);
+      }
+      fieldName = pathStr.slice(i + 1, endQuote);
+      i = endQuote + 1;
+    } else {
+      // Unquoted identifier: read until '.' or end
+      let end = pathStr.indexOf('.', i);
+      if (end === -1) end = pathStr.length;
+      fieldName = pathStr.slice(i, end);
+      i = end;
+    }
+
+    if (fieldName) {
+      segments.push(variant('field', fieldName));
+    }
+
+    // Skip the '.' separator
+    if (i < pathStr.length && pathStr[i] === '.') {
+      i++;
+    }
+  }
+
+  return segments;
+}
 
 // =============================================================================
 // Async Mutex for Workspace Updates
@@ -186,7 +233,7 @@ export interface DataflowOptions {
    * Use an external lock when you need to hold the lock across multiple
    * operations (e.g., API server that cancels and restarts dataflow on writes).
    */
-  lock?: WorkspaceLockHandle;
+  lock?: LockHandle;
   /**
    * AbortSignal for cancellation. When aborted:
    * - No new tasks will be started
@@ -209,26 +256,20 @@ export interface DataflowOptions {
 // =============================================================================
 
 /**
- * Read workspace state from file.
+ * Read workspace state.
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace has no package deployed
  */
-async function readWorkspaceState(repoPath: string, ws: string) {
-  const stateFile = path.join(repoPath, 'workspaces', `${ws}.beast2`);
-  let data: Buffer;
-  try {
-    data = await fs.readFile(stateFile);
-  } catch (err) {
-    if (isNotFoundError(err)) {
-      throw new WorkspaceNotFoundError(ws);
-    }
-    throw err;
+async function readWorkspaceState(storage: StorageBackend, repo: string, ws: string) {
+  const data = await storage.refs.workspaceRead(repo, ws);
+  if (data === null) {
+    throw new WorkspaceNotFoundError(ws);
   }
   if (data.length === 0) {
     throw new WorkspaceNotDeployedError(ws);
   }
   const decoder = decodeBeast2For(WorkspaceStateType);
-  return decoder(data);
+  return decoder(Buffer.from(data));
 }
 
 // =============================================================================
@@ -244,7 +285,8 @@ async function readWorkspaceState(repoPath: string, ws: string) {
  * - taskDependents: Map of task name -> set of dependent task names
  */
 async function buildDependencyGraph(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string
 ): Promise<{
   taskNodes: Map<string, TaskNode>;
@@ -252,10 +294,10 @@ async function buildDependencyGraph(
   taskDependents: Map<string, Set<string>>;
 }> {
   // Read workspace state to get package hash
-  const state = await readWorkspaceState(repoPath, ws);
+  const state = await readWorkspaceState(storage, repo, ws);
 
   // Read package object to get tasks map
-  const pkgData = await objectRead(repoPath, state.packageHash);
+  const pkgData = await storage.objects.read(repo, state.packageHash);
   const pkgDecoder = decodeBeast2For(PackageObjectType);
   const pkgObject = pkgDecoder(Buffer.from(pkgData));
 
@@ -265,7 +307,7 @@ async function buildDependencyGraph(
   // First pass: load all tasks and build output->task map
   const taskDecoder = decodeBeast2For(TaskObjectType);
   for (const [taskName, taskHash] of pkgObject.tasks) {
-    const taskData = await objectRead(repoPath, taskHash);
+    const taskData = await storage.objects.read(repo, taskHash);
     const task = taskDecoder(Buffer.from(taskData));
 
     const outputPathStr = pathToString(task.output);
@@ -303,7 +345,7 @@ async function buildDependencyGraph(
       }
       // If not produced by a task, it's an external input - check if assigned
       else {
-        const { refType } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
+        const { refType } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
         if (refType === 'unassigned') {
           // External input that is unassigned - this task can never run
           node.unresolvedCount++;
@@ -330,7 +372,8 @@ async function buildDependencyGraph(
  * to prevent concurrent modifications. If options.lock is provided, uses that
  * lock instead (caller is responsible for releasing it).
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param ws - Workspace name
  * @param options - Execution options
  * @returns Result of the dataflow execution
@@ -341,16 +384,22 @@ async function buildDependencyGraph(
  * @throws {DataflowError} If execution fails for other reasons
  */
 export async function dataflowExecute(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string,
   options: DataflowOptions = {}
 ): Promise<DataflowResult> {
   // Acquire lock if not provided externally
   const externalLock = options.lock;
-  const lock = externalLock ?? await acquireWorkspaceLock(repoPath, ws);
+  const lock = externalLock ?? await storage.locks.acquire(repo, ws, variant('dataflow', null));
+
+  if (!lock) {
+    // Lock couldn't be acquired - the LockService returns null instead of throwing
+    throw new WorkspaceLockError(ws);
+  }
 
   try {
-    return await dataflowExecuteWithLock(repoPath, ws, options);
+    return await dataflowExecuteWithLock(storage, repo, ws, options);
   } finally {
     // Only release the lock if we acquired it internally
     if (!externalLock) {
@@ -365,7 +414,8 @@ export async function dataflowExecute(
  * Returns a promise immediately without awaiting execution. The lock is
  * released automatically when execution completes.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param ws - Workspace name
  * @param options - Execution options (lock must be provided)
  * @returns Promise that resolves when execution completes
@@ -375,11 +425,12 @@ export async function dataflowExecute(
  * @throws {DataflowError} If execution fails for other reasons
  */
 export function dataflowStart(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string,
-  options: DataflowOptions & { lock: WorkspaceLockHandle }
+  options: DataflowOptions & { lock: LockHandle }
 ): Promise<DataflowResult> {
-  return dataflowExecuteWithLock(repoPath, ws, options)
+  return dataflowExecuteWithLock(storage, repo, ws, options)
     .finally(() => options.lock.release());
 }
 
@@ -387,7 +438,8 @@ export function dataflowStart(
  * Internal: Execute dataflow with lock already held.
  */
 async function dataflowExecuteWithLock(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string,
   options: DataflowOptions
 ): Promise<DataflowResult> {
@@ -396,18 +448,41 @@ async function dataflowExecuteWithLock(
 
   let taskNodes: Map<string, TaskNode>;
   let taskDependents: Map<string, Set<string>>;
+  let outputToTask: Map<string, string>;
 
   try {
     // Build dependency graph
-    const graph = await buildDependencyGraph(repoPath, ws);
-    taskNodes = graph.taskNodes;
-    taskDependents = graph.taskDependents;
+    const graphResult = await buildDependencyGraph(storage, repo, ws);
+    taskNodes = graphResult.taskNodes;
+    taskDependents = graphResult.taskDependents;
+    outputToTask = graphResult.outputToTask;
   } catch (err) {
     // Re-throw E3Errors as-is
     if (err instanceof E3Error) throw err;
     // Wrap unexpected errors
     throw new DataflowError(`Failed to build dependency graph: ${err instanceof Error ? err.message : err}`);
   }
+
+  // Build DataflowGraph for use with decomposed building blocks
+  const dataflowGraph: DataflowGraph = {
+    tasks: Array.from(taskNodes.entries()).map(([taskName, node]) => {
+      const dependsOn: string[] = [];
+      for (const inputPath of node.inputPaths) {
+        const inputPathStr = pathToString(inputPath);
+        const producerTask = outputToTask.get(inputPathStr);
+        if (producerTask) {
+          dependsOn.push(producerTask);
+        }
+      }
+      return {
+        name: taskName,
+        hash: node.hash,
+        inputs: node.inputPaths.map(pathToString),
+        output: pathToString(node.outputPath),
+        dependsOn,
+      };
+    }),
+  };
 
   // Apply filter if specified
   const filteredTaskNames = options.filter
@@ -445,6 +520,7 @@ async function dataflowExecuteWithLock(
   const readyQueue: string[] = [];
   const completed = new Set<string>();
   const inProgress = new Set<string>();
+  const skippedTasks = new Set<string>(); // Track skipped tasks separately for dataflowGetDependentsToSkip
 
   // Initialize ready queue with tasks that have no unresolved dependencies
   // and pass the filter (if any)
@@ -464,7 +540,7 @@ async function dataflowExecuteWithLock(
     // Gather current input hashes
     const currentInputHashes: string[] = [];
     for (const inputPath of node.inputPaths) {
-      const { refType, hash } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
+      const { refType, hash } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
       if (refType !== 'value' || hash === null) {
         // Input not assigned, can't be cached
         return null;
@@ -474,7 +550,7 @@ async function dataflowExecuteWithLock(
 
     // Check if there's a cached execution for these inputs
     const inHash = inputsHash(currentInputHashes);
-    const cachedOutputHash = await executionGetOutput(repoPath, node.hash, inHash);
+    const cachedOutputHash = await executionGetOutput(storage, repo, node.hash, inHash);
 
     if (cachedOutputHash === null) {
       // No cached execution for current inputs
@@ -483,7 +559,7 @@ async function dataflowExecuteWithLock(
 
     // Also verify the workspace output matches the cached output
     // (in case the workspace was modified outside of execution)
-    const { refType, hash: wsOutputHash } = await workspaceGetDatasetHash(repoPath, ws, node.outputPath);
+    const { refType, hash: wsOutputHash } = await workspaceGetDatasetHash(storage, repo, ws, node.outputPath);
     if (refType !== 'value' || wsOutputHash !== cachedOutputHash) {
       // Workspace output doesn't match cached output, need to re-execute
       // (or update workspace with cached value)
@@ -508,7 +584,7 @@ async function dataflowExecuteWithLock(
     // Gather input hashes
     const inputHashes: string[] = [];
     for (const inputPath of node.inputPaths) {
-      const { refType, hash } = await workspaceGetDatasetHash(repoPath, ws, inputPath);
+      const { refType, hash } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
       if (refType !== 'value' || hash === null) {
         // Input not available - should not happen if dependency tracking is correct
         return {
@@ -530,7 +606,7 @@ async function dataflowExecuteWithLock(
       onStderr: options.onStderr ? (data) => options.onStderr!(taskName, data) : undefined,
     };
 
-    const result = await taskExecute(repoPath, node.hash, inputHashes, execOptions);
+    const result = await taskExecute(storage, repo, node.hash, inputHashes, execOptions);
 
     // Build task result (NOTE: workspace update happens later, in mutex-protected section)
     const taskResult: InternalTaskResult = {
@@ -573,17 +649,18 @@ async function dataflowExecuteWithLock(
     }
   }
 
-  // Mark dependents as skipped when a task fails
+  // Mark dependents as skipped when a task fails.
+  // Uses dataflowGetDependentsToSkip to find all transitive dependents at once
+  // (shared with distributed execution in e3-aws).
   function skipDependents(taskName: string) {
-    const dependents = taskDependents.get(taskName) ?? new Set();
-    for (const depName of dependents) {
-      if (completed.has(depName) || inProgress.has(depName)) continue;
+    // Get all tasks to skip (excludes already completed, already skipped, and in-progress)
+    const toSkip = dataflowGetDependentsToSkip(dataflowGraph, taskName, completed, skippedTasks)
+      .filter(name => !inProgress.has(name))  // Also exclude in-progress tasks
+      .filter(name => !filteredTaskNames || filteredTaskNames.has(name));  // Apply filter
 
-      // Skip dependents not in the filter
-      if (filteredTaskNames && !filteredTaskNames.has(depName)) continue;
-
-      // Recursively skip
+    for (const depName of toSkip) {
       completed.add(depName);
+      skippedTasks.add(depName);
       skipped++;
       results.push({
         name: depName,
@@ -597,8 +674,6 @@ async function dataflowExecuteWithLock(
         state: 'skipped',
         duration: 0,
       });
-
-      skipDependents(depName);
     }
   }
 
@@ -654,7 +729,7 @@ async function dataflowExecuteWithLock(
               // Write output to workspace BEFORE notifying dependents
               if (result.state === 'success' && result.outputHash) {
                 const node = taskNodes.get(taskName)!;
-                await workspaceSetDatasetByHash(repoPath, ws, node.outputPath, result.outputHash);
+                await workspaceSetDatasetByHash(storage, repo, ws, node.outputPath, result.outputHash);
               }
 
               // Now safe to update execution state and notify dependents
@@ -723,7 +798,8 @@ async function dataflowExecuteWithLock(
 /**
  * Get the dependency graph for a workspace (for visualization/debugging).
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param ws - Workspace name
  * @returns Graph information
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
@@ -731,7 +807,8 @@ async function dataflowExecuteWithLock(
  * @throws {DataflowError} If graph building fails for other reasons
  */
 export async function dataflowGetGraph(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   ws: string
 ): Promise<{
   tasks: Array<{
@@ -746,7 +823,7 @@ export async function dataflowGetGraph(
   let outputToTask: Map<string, string>;
 
   try {
-    const graph = await buildDependencyGraph(repoPath, ws);
+    const graph = await buildDependencyGraph(storage, repo, ws);
     taskNodes = graph.taskNodes;
     outputToTask = graph.outputToTask;
   } catch (err) {
@@ -783,4 +860,219 @@ export async function dataflowGetGraph(
   }
 
   return { tasks };
+}
+
+// =============================================================================
+// Graph Traversal Helpers (for distributed execution)
+// =============================================================================
+
+/**
+ * Graph structure returned by dataflowGetGraph.
+ */
+export interface DataflowGraph {
+  tasks: Array<{
+    name: string;
+    hash: string;
+    inputs: string[];
+    output: string;
+    dependsOn: string[];
+  }>;
+}
+
+/**
+ * Get tasks that are ready to execute given the set of completed tasks.
+ *
+ * A task is ready when all tasks it depends on have completed.
+ * This is useful for distributed execution (e.g., AWS Step Functions)
+ * where a coordinator needs to determine which tasks can run next.
+ *
+ * @param graph - The dependency graph from dataflowGetGraph
+ * @param completedTasks - Set of task names that have completed
+ * @returns Array of task names that are ready to execute
+ *
+ * @example
+ * ```typescript
+ * const graph = await dataflowGetGraph(storage, repo, 'production');
+ * const ready = dataflowGetReadyTasks(graph, new Set()); // Initial ready tasks
+ * // Execute ready[0]...
+ * const nextReady = dataflowGetReadyTasks(graph, new Set([ready[0]]));
+ * ```
+ */
+export function dataflowGetReadyTasks(
+  graph: DataflowGraph,
+  completedTasks: Set<string>
+): string[] {
+  const ready: string[] = [];
+
+  for (const task of graph.tasks) {
+    // Skip already completed tasks
+    if (completedTasks.has(task.name)) {
+      continue;
+    }
+
+    // Check if all dependencies are satisfied
+    const allDepsCompleted = task.dependsOn.every(dep => completedTasks.has(dep));
+    if (allDepsCompleted) {
+      ready.push(task.name);
+    }
+  }
+
+  return ready;
+}
+
+/**
+ * Check if a task execution is cached for the given inputs.
+ *
+ * This is useful for distributed execution where a Lambda handler needs
+ * to check if a task can be skipped before spawning execution.
+ *
+ * @param storage - Storage backend
+ * @param repo - Repository path
+ * @param taskHash - Hash of the TaskObject
+ * @param inputHashes - Array of input dataset hashes (in order)
+ * @returns Output hash if cached, null if execution needed
+ *
+ * @example
+ * ```typescript
+ * const outputHash = await dataflowCheckCache(storage, repo, taskHash, inputHashes);
+ * if (outputHash) {
+ *   // Task is cached, use outputHash directly
+ * } else {
+ *   // Need to execute task
+ * }
+ * ```
+ */
+export async function dataflowCheckCache(
+  storage: StorageBackend,
+  repo: string,
+  taskHash: string,
+  inputHashes: string[]
+): Promise<string | null> {
+  const inHash = inputsHash(inputHashes);
+  return executionGetOutput(storage, repo, taskHash, inHash);
+}
+
+/**
+ * Find tasks that should be skipped when a task fails.
+ *
+ * Returns all tasks that transitively depend on the failed task
+ * (directly or through other tasks), excluding already completed
+ * or already skipped tasks.
+ *
+ * This is useful for distributed execution where the coordinator
+ * needs to mark downstream tasks as skipped after a failure.
+ *
+ * @param graph - The dependency graph from dataflowGetGraph
+ * @param failedTask - Name of the task that failed
+ * @param completedTasks - Set of task names already completed (won't be skipped)
+ * @param skippedTasks - Set of task names already skipped (won't be returned again)
+ * @returns Array of task names that should be skipped
+ *
+ * @example
+ * ```typescript
+ * const graph = await dataflowGetGraph(storage, repo, 'production');
+ * // Task 'etl' failed...
+ * const toSkip = dataflowGetDependentsToSkip(graph, 'etl', completed, skipped);
+ * // toSkip might be ['transform', 'aggregate', 'report'] - all downstream tasks
+ * ```
+ */
+export function dataflowGetDependentsToSkip(
+  graph: DataflowGraph,
+  failedTask: string,
+  completedTasks: Set<string>,
+  skippedTasks: Set<string>
+): string[] {
+  // Build reverse dependency map: task -> tasks that depend on it
+  const dependents = new Map<string, string[]>();
+  for (const task of graph.tasks) {
+    dependents.set(task.name, []);
+  }
+  for (const task of graph.tasks) {
+    for (const dep of task.dependsOn) {
+      dependents.get(dep)?.push(task.name);
+    }
+  }
+
+  // BFS to find all transitive dependents
+  const toSkip: string[] = [];
+  const visited = new Set<string>();
+  const queue = [failedTask];
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const deps = dependents.get(current) ?? [];
+
+    for (const dep of deps) {
+      // Skip if already processed
+      if (visited.has(dep)) {
+        continue;
+      }
+      visited.add(dep);
+
+      // Skip if already completed (no need to explore further - completed tasks break the chain)
+      if (completedTasks.has(dep)) {
+        continue;
+      }
+
+      // If already skipped, still explore dependents but don't add to result again
+      if (skippedTasks.has(dep)) {
+        queue.push(dep);
+        continue;
+      }
+
+      // New task to skip
+      toSkip.push(dep);
+      queue.push(dep);
+    }
+  }
+
+  return toSkip;
+}
+
+/**
+ * Resolve input hashes for a task from current workspace state.
+ *
+ * Returns an array of hashes in the same order as the task's inputs.
+ * If any input is unassigned, returns null for that position.
+ *
+ * This is useful for distributed execution where the input hashes
+ * need to be resolved before checking cache or executing.
+ *
+ * @param storage - Storage backend
+ * @param repo - Repository path
+ * @param ws - Workspace name
+ * @param task - Task info from the graph (needs inputs array)
+ * @returns Array of hashes (null if input is unassigned)
+ *
+ * @example
+ * ```typescript
+ * const graph = await dataflowGetGraph(storage, repo, 'production');
+ * const task = graph.tasks.find(t => t.name === 'etl')!;
+ * const inputHashes = await dataflowResolveInputHashes(storage, repo, 'production', task);
+ * if (!inputHashes.includes(null)) {
+ *   const cached = await dataflowCheckCache(storage, repo, task.hash, inputHashes);
+ * }
+ * ```
+ */
+export async function dataflowResolveInputHashes(
+  storage: StorageBackend,
+  repo: string,
+  ws: string,
+  task: DataflowGraph['tasks'][0]
+): Promise<Array<string | null>> {
+  const hashes: Array<string | null> = [];
+
+  for (const inputPathStr of task.inputs) {
+    // Parse the keypath string back to TreePath
+    const inputPath = parsePathString(inputPathStr);
+    const { refType, hash } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
+
+    if (refType === 'value' && hash !== null) {
+      hashes.push(hash);
+    } else {
+      hashes.push(null);
+    }
+  }
+
+  return hashes;
 }

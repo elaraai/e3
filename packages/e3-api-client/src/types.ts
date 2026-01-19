@@ -20,6 +20,7 @@ import {
   FloatType,
   BooleanType,
   NullType,
+  EastTypeType,
   type EastType,
   type ValueTypeOf,
 } from '@elaraai/east';
@@ -58,8 +59,10 @@ export const ObjectNotFoundErrorType = StructType({ hash: StringType });
 export const DataflowErrorType = StructType({ message: StringType });
 export const PermissionDeniedErrorType = StructType({ path: StringType });
 export const InternalErrorType = StructType({ message: StringType });
+export const RepositoryNotFoundErrorType = StructType({ repo: StringType });
 
 export const ErrorType = VariantType({
+  repository_not_found: RepositoryNotFoundErrorType,
   workspace_not_found: WorkspaceNotFoundErrorType,
   workspace_not_deployed: WorkspaceNotDeployedErrorType,
   workspace_exists: WorkspaceExistsErrorType,
@@ -92,7 +95,7 @@ export const ResponseType = <T extends EastType>(successType: T) => VariantType(
 /**
  * Repository status information.
  *
- * @property path - Absolute path to the .e3 repository directory
+ * @property path - Absolute path to the e3 repository directory
  * @property objectCount - Number of content-addressed objects stored
  * @property packageCount - Number of imported packages
  * @property workspaceCount - Number of workspaces
@@ -130,6 +133,65 @@ export const GcResultType = StructType({
   retainedObjects: IntegerType,
   skippedYoung: IntegerType,
   bytesFreed: IntegerType,
+});
+
+// =============================================================================
+// Async Operation Types
+// =============================================================================
+
+/**
+ * Status of an async operation.
+ *
+ * - `running`: Operation is in progress
+ * - `succeeded`: Operation completed successfully
+ * - `failed`: Operation failed with an error
+ */
+export const AsyncOperationStatusType = VariantType({
+  running: NullType,
+  succeeded: NullType,
+  failed: NullType,
+});
+
+/**
+ * Result of starting an async GC operation.
+ *
+ * @property executionId - Unique identifier for this GC execution (UUID locally, Step Function ARN in cloud)
+ */
+export const GcStartResultType = StructType({
+  executionId: StringType,
+});
+
+/**
+ * Status of an async GC operation.
+ *
+ * @property status - Current execution status
+ * @property stats - GC statistics (available when succeeded)
+ * @property error - Error message (available when failed)
+ */
+export const GcStatusResultType = StructType({
+  status: AsyncOperationStatusType,
+  stats: OptionType(GcResultType),
+  error: OptionType(StringType),
+});
+
+/**
+ * Result of starting an async repo deletion.
+ *
+ * @property executionId - Unique identifier for this deletion execution
+ */
+export const RepoDeleteStartResultType = StructType({
+  executionId: StringType,
+});
+
+/**
+ * Status of an async repo deletion.
+ *
+ * @property status - Current execution status
+ * @property error - Error message (available when failed)
+ */
+export const RepoDeleteStatusResultType = StructType({
+  status: AsyncOperationStatusType,
+  error: OptionType(StringType),
 });
 
 // =============================================================================
@@ -516,6 +578,151 @@ export const DataflowResultType = StructType({
 });
 
 // =============================================================================
+// Dataflow Execution State Types (for polling)
+// =============================================================================
+
+/**
+ * Dataflow event types.
+ *
+ * - `start`: Task started executing
+ * - `complete`: Task executed and succeeded
+ * - `cached`: Task result retrieved from cache (no execution)
+ * - `failed`: Task exited with non-zero code
+ * - `error`: Internal error during task execution
+ * - `input_unavailable`: Task couldn't run because inputs not available
+ */
+export const DataflowEventType = VariantType({
+  start: StructType({
+    task: StringType,
+    timestamp: StringType,
+  }),
+  complete: StructType({
+    task: StringType,
+    timestamp: StringType,
+    duration: FloatType,
+  }),
+  cached: StructType({
+    task: StringType,
+    timestamp: StringType,
+  }),
+  failed: StructType({
+    task: StringType,
+    timestamp: StringType,
+    duration: FloatType,
+    exitCode: IntegerType,
+  }),
+  error: StructType({
+    task: StringType,
+    timestamp: StringType,
+    message: StringType,
+  }),
+  input_unavailable: StructType({
+    task: StringType,
+    timestamp: StringType,
+    reason: StringType,
+  }),
+});
+
+/**
+ * Execution status variant.
+ *
+ * - `running`: Execution is in progress
+ * - `completed`: Execution finished successfully
+ * - `failed`: Execution finished with failures
+ * - `aborted`: Execution was cancelled
+ */
+export const ExecutionStatusType = VariantType({
+  running: NullType,
+  completed: NullType,
+  failed: NullType,
+  aborted: NullType,
+});
+
+/**
+ * Summary of dataflow execution results.
+ */
+export const DataflowExecutionSummaryType = StructType({
+  executed: IntegerType,
+  cached: IntegerType,
+  failed: IntegerType,
+  skipped: IntegerType,
+  duration: FloatType,
+});
+
+/**
+ * State of a dataflow execution (for polling).
+ *
+ * @property status - Current execution status
+ * @property startedAt - ISO timestamp when execution started
+ * @property completedAt - ISO timestamp when execution finished (if done)
+ * @property summary - Execution summary (available when complete)
+ * @property events - Task events (may be paginated via offset/limit)
+ * @property totalEvents - Total number of events (for pagination)
+ */
+export const DataflowExecutionStateType = StructType({
+  status: ExecutionStatusType,
+  startedAt: StringType,
+  completedAt: OptionType(StringType),
+  summary: OptionType(DataflowExecutionSummaryType),
+  events: ArrayType(DataflowEventType),
+  totalEvents: IntegerType,
+});
+
+// =============================================================================
+// Task Execution History Types
+// =============================================================================
+
+/**
+ * Execution status for history listing.
+ */
+export const ExecutionHistoryStatusType = VariantType({
+  running: NullType,
+  success: NullType,
+  failed: NullType,
+  error: NullType,
+});
+
+/**
+ * A single execution in task history.
+ *
+ * @property inputsHash - Hash of concatenated inputs (execution identifier)
+ * @property inputHashes - Individual input object hashes
+ * @property status - Execution outcome
+ * @property startedAt - ISO timestamp when execution started
+ * @property completedAt - ISO timestamp when execution finished (if done)
+ * @property duration - Execution duration in milliseconds (if done)
+ * @property exitCode - Process exit code (if failed)
+ */
+export const ExecutionListItemType = StructType({
+  inputsHash: StringType,
+  inputHashes: ArrayType(StringType),
+  status: ExecutionHistoryStatusType,
+  startedAt: StringType,
+  completedAt: OptionType(StringType),
+  duration: OptionType(IntegerType),
+  exitCode: OptionType(IntegerType),
+});
+
+// =============================================================================
+// Dataset List Types (recursive)
+// =============================================================================
+
+/**
+ * A dataset in the flat list response.
+ *
+ * @property path - Full path to dataset (e.g., ".inputs.a.x")
+ * @property type - East type of the dataset (mandatory)
+ * @property hash - Object hash of the value (None if unassigned)
+ * @property size - Size in bytes (None if unassigned)
+ */
+export const DatasetListItemType = StructType({
+  path: StringType,
+  type: EastTypeType,
+  hash: OptionType(StringType),
+  size: OptionType(IntegerType),
+});
+
+// =============================================================================
 // Value type aliases
 // =============================================================================
 
@@ -523,6 +730,11 @@ export type Error = ValueTypeOf<typeof ErrorType>;
 export type RepositoryStatus = ValueTypeOf<typeof RepositoryStatusType>;
 export type GcRequest = ValueTypeOf<typeof GcRequestType>;
 export type GcResult = ValueTypeOf<typeof GcResultType>;
+export type AsyncOperationStatus = ValueTypeOf<typeof AsyncOperationStatusType>;
+export type GcStartResult = ValueTypeOf<typeof GcStartResultType>;
+export type GcStatusResult = ValueTypeOf<typeof GcStatusResultType>;
+export type RepoDeleteStartResult = ValueTypeOf<typeof RepoDeleteStartResultType>;
+export type RepoDeleteStatusResult = ValueTypeOf<typeof RepoDeleteStatusResultType>;
 export type PackageListItem = ValueTypeOf<typeof PackageListItemType>;
 export type PackageImportResult = ValueTypeOf<typeof PackageImportResultType>;
 export type PackageInfo = ValueTypeOf<typeof PackageInfoType>;
@@ -544,6 +756,13 @@ export type DataflowGraph = ValueTypeOf<typeof DataflowGraphType>;
 export type LogChunk = ValueTypeOf<typeof LogChunkType>;
 export type TaskExecutionResult = ValueTypeOf<typeof TaskExecutionResultType>;
 export type DataflowResult = ValueTypeOf<typeof DataflowResultType>;
+export type DataflowEvent = ValueTypeOf<typeof DataflowEventType>;
+export type ExecutionStatus = ValueTypeOf<typeof ExecutionStatusType>;
+export type DataflowExecutionSummary = ValueTypeOf<typeof DataflowExecutionSummaryType>;
+export type DataflowExecutionState = ValueTypeOf<typeof DataflowExecutionStateType>;
+export type ExecutionHistoryStatus = ValueTypeOf<typeof ExecutionHistoryStatusType>;
+export type ExecutionListItem = ValueTypeOf<typeof ExecutionListItemType>;
+export type DatasetListItem = ValueTypeOf<typeof DatasetListItemType>;
 
 // =============================================================================
 // Namespace export for convenience
@@ -552,6 +771,7 @@ export type DataflowResult = ValueTypeOf<typeof DataflowResultType>;
 export const ApiTypes = {
   // Errors
   ErrorType,
+  RepositoryNotFoundErrorType,
   WorkspaceNotFoundErrorType,
   WorkspaceNotDeployedErrorType,
   WorkspaceExistsErrorType,
@@ -574,6 +794,13 @@ export const ApiTypes = {
   RepositoryStatusType,
   GcRequestType,
   GcResultType,
+
+  // Async Operations
+  AsyncOperationStatusType,
+  GcStartResultType,
+  GcStatusResultType,
+  RepoDeleteStartResultType,
+  RepoDeleteStatusResultType,
 
   // Packages
   PackageListItemType,
@@ -611,4 +838,17 @@ export const ApiTypes = {
   LogChunkType,
   TaskExecutionResultType,
   DataflowResultType,
+
+  // Execution State (polling)
+  DataflowEventType,
+  ExecutionStatusType,
+  DataflowExecutionSummaryType,
+  DataflowExecutionStateType,
+
+  // Task Execution History
+  ExecutionHistoryStatusType,
+  ExecutionListItemType,
+
+  // Dataset List (recursive)
+  DatasetListItemType,
 } as const;

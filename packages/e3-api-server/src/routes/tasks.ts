@@ -4,66 +4,39 @@
  */
 
 import { Hono } from 'hono';
-import { ArrayType } from '@elaraai/east';
-import {
-  workspaceListTasks,
-  workspaceGetTask,
-  workspaceGetTaskHash,
-} from '@elaraai/e3-core';
-import { sendSuccess, sendError } from '../beast2.js';
-import { errorToVariant } from '../errors.js';
-import { TaskInfoType, TaskDetailsType } from '../types.js';
+import type { StorageBackend } from '@elaraai/e3-core';
+import { listTasks, getTask, listExecutions } from '../handlers/tasks.js';
 
-export function createTaskRoutes(repoPath: string) {
+export function createTaskRoutes(
+  storage: StorageBackend,
+  getRepoPath: (repo: string) => string
+) {
   const app = new Hono();
 
-  // GET /api/workspaces/:ws/tasks - List tasks
+  // GET /api/repos/:repo/workspaces/:ws/tasks - List tasks
   app.get('/', async (c) => {
-    try {
-      const workspace = c.req.param('ws');
-      if (!workspace) {
-        return sendError(c, ArrayType(TaskInfoType), errorToVariant(new Error('Missing workspace parameter')));
-      }
-      // workspaceListTasks returns string[] of task names
-      const taskNames = await workspaceListTasks(repoPath, workspace);
-
-      // Get hash for each task
-      const result = await Promise.all(
-        taskNames.map(async (name) => {
-          const hash = await workspaceGetTaskHash(repoPath, workspace, name);
-          return { name, hash };
-        })
-      );
-
-      return sendSuccess(c, ArrayType(TaskInfoType), result);
-    } catch (err) {
-      return sendError(c, ArrayType(TaskInfoType), errorToVariant(err));
-    }
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const ws = c.req.param('ws')!;
+    return listTasks(storage, repoPath, ws);
   });
 
-  // GET /api/workspaces/:ws/tasks/:name - Get task details
-  app.get('/:name', async (c) => {
-    try {
-      const workspace = c.req.param('ws');
-      const name = c.req.param('name');
-      if (!workspace || !name) {
-        return sendError(c, TaskDetailsType, errorToVariant(new Error('Missing workspace or task name parameter')));
-      }
+  // GET /api/repos/:repo/workspaces/:ws/tasks/:task - Get task details
+  app.get('/:task', async (c) => {
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const ws = c.req.param('ws')!;
+    const taskName = c.req.param('task')!;
+    return getTask(storage, repoPath, ws, taskName);
+  });
 
-      // Get hash and task object
-      const hash = await workspaceGetTaskHash(repoPath, workspace, name);
-      const task = await workspaceGetTask(repoPath, workspace, name);
-
-      return sendSuccess(c, TaskDetailsType, {
-        name,
-        hash,
-        commandIr: task.commandIr,
-        inputs: task.inputs,
-        output: task.output,
-      });
-    } catch (err) {
-      return sendError(c, TaskDetailsType, errorToVariant(err));
-    }
+  // GET /api/repos/:repo/workspaces/:ws/tasks/:task/executions - List execution history
+  app.get('/:task/executions', async (c) => {
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const ws = c.req.param('ws')!;
+    const taskName = c.req.param('task')!;
+    return listExecutions(storage, repoPath, ws, taskName);
   });
 
   return app;

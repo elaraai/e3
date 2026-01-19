@@ -11,6 +11,23 @@
  * used programmatically.
  */
 
+// =============================================================================
+// Storage and Execution Abstractions
+// =============================================================================
+// These interfaces enable e3-core to work against different backends:
+// - Local filesystem (default, CLI and local dev)
+// - AWS EFS (Lambda/Fargate cloud deployment)
+// - S3 + DynamoDB (future optimization)
+
+export * from './storage/index.js';
+export * from './execution/index.js';
+
+// =============================================================================
+// Repository Operations (filesystem-based)
+// =============================================================================
+// These functions use repoPath directly. Future versions will also accept
+// a StorageBackend for backend-agnostic operation.
+
 // Repository management
 export {
   repoInit,
@@ -29,7 +46,6 @@ export {
   objectWriteStream,
   objectRead,
   objectExists,
-  objectPath,
   objectAbbrev,
 } from './objects.js';
 
@@ -48,9 +64,9 @@ export {
 
 // Workspace operations
 export {
+  workspaceList,
   workspaceCreate,
   workspaceRemove,
-  workspaceList,
   workspaceGetState,
   workspaceGetPackage,
   workspaceGetRoot,
@@ -101,16 +117,18 @@ export {
 export {
   // Identity
   inputsHash,
-  executionPath,
   // Status
   executionGet,
   executionGetOutput,
   executionListForTask,
   executionList,
+  // Find current execution for a task in workspace
+  executionFindCurrent,
+  type CurrentExecutionRef,
   // Logs
   executionReadLog,
   type LogReadOptions,
-  type LogChunk,
+  // Note: LogChunk is exported from './storage/index.js' (aligned interface)
   // Command IR evaluation
   evaluateCommandIr,
   // Process detection
@@ -128,6 +146,11 @@ export {
   dataflowExecute,
   dataflowStart,
   dataflowGetGraph,
+  dataflowGetReadyTasks,
+  dataflowCheckCache,
+  dataflowGetDependentsToSkip,
+  dataflowResolveInputHashes,
+  type DataflowGraph,
   type DataflowOptions,
   type DataflowResult,
   type TaskExecutionResult,
@@ -136,7 +159,10 @@ export {
 // Workspace locking
 export {
   acquireWorkspaceLock,
+  getWorkspaceLockState,
   getWorkspaceLockHolder,
+  lockStateToHolderInfo,
+  isLockHolderAlive,
   workspaceLockPath,
   type WorkspaceLockHandle,
   type AcquireLockOptions,
@@ -163,7 +189,7 @@ export {
   WorkspaceNotDeployedError,
   WorkspaceExistsError,
   WorkspaceLockError,
-  type LockHolder,
+  type LockHolderInfo,
   // Package
   PackageNotFoundError,
   PackageInvalidError,

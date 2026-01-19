@@ -1,5 +1,5 @@
 {
-  "name": "@elaraai/e3",
+  "name": "e3-monorepo",
   "version": "0.0.1-beta.0",
   "private": true,
   "description": "East Execution Engine - Monorepo for e3 packages",
@@ -10,7 +10,7 @@
     "test/integration"
   ],
   "scripts": {
-    "build": "npm run build -w @elaraai/e3-types && npm run build -w @elaraai/e3 && npm run build -w @elaraai/e3-core && npm run build -w @elaraai/e3-cli && npm run build -w @elaraai/e3-api-client && npm run build -w @elaraai/e3-api-server && npm run build -w e3-integration-tests && npm run build -w e3-fuzz",
+    "build": "npm run build -w @elaraai/e3-types && npm run build -w @elaraai/e3 && npm run build -w @elaraai/e3-core && npm run build -w @elaraai/e3-cli && npm run build -w @elaraai/e3-api-client && npm run build -w @elaraai/e3-api-server && npm run build -w @elaraai/e3-api-tests && npm run build -w e3-integration-tests && npm run build -w e3-fuzz",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

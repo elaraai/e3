@@ -122,9 +122,9 @@ describe('end-to-end workflow', () => {
       // Step 3: Initialize repository via CLI
       // =====================================================================
 
-      const initResult = await runE3Command(['init', repoDir], testDir);
+      const initResult = await runE3Command(['repo', 'create', repoDir], testDir);
       assert.strictEqual(initResult.exitCode, 0, `init failed: ${initResult.stderr}`);
-      assert.ok(existsSync(join(repoDir, '.e3')), '.e3 directory should exist');
+      assert.ok(existsSync(join(repoDir, 'objects')), 'repository should exist');
 
       // =====================================================================
       // Step 4: Import package via CLI
@@ -166,7 +166,7 @@ describe('end-to-end workflow', () => {
       // Step 7: Check workspace status - should show tasks need execution
       // =====================================================================
 
-      const statusResult = await runE3Command(['status', repoDir], testDir);
+      const statusResult = await runE3Command(['workspace', 'status', repoDir, 'test-ws'], testDir);
       assert.strictEqual(statusResult.exitCode, 0, `status failed: ${statusResult.stderr}`);
 
       // =====================================================================
@@ -245,7 +245,7 @@ describe('end-to-end workflow', () => {
       // Export and set up
       await e3.export(pkg, packageZipPath);
 
-      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['repo', 'create', repoDir], testDir);
       await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
       await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
       await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'double-test@1.0.0'], testDir);
@@ -305,7 +305,7 @@ describe('end-to-end workflow', () => {
       // Export and set up
       await e3.export(pkg, packageZipPath);
 
-      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['repo', 'create', repoDir], testDir);
       const importResult = await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
       assert.strictEqual(importResult.exitCode, 0, `import failed: ${importResult.stderr}`);
 
@@ -363,7 +363,7 @@ describe('end-to-end workflow', () => {
       // Export and set up
       await e3.export(pkg, packageZipPath);
 
-      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['repo', 'create', repoDir], testDir);
       await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
       await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
       await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'mixed-test@1.0.0'], testDir);
@@ -395,7 +395,7 @@ describe('end-to-end workflow', () => {
 
       await e3.export(pkg, packageZipPath);
 
-      await runE3Command(['init', repoDir], testDir);
+      await runE3Command(['repo', 'create', repoDir], testDir);
       await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
       await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
       await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'fail-test@1.0.0'], testDir);

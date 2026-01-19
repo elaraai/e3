@@ -13,9 +13,10 @@
  *   e3 tree . dev --types         # Show dataset types
  */
 
-import { workspaceGetTree, type TreeNode } from '@elaraai/e3-core';
+import { workspaceGetTree, type TreeNode, LocalStorage } from '@elaraai/e3-core';
 import { printFor, EastTypeType } from '@elaraai/east';
-import { resolveRepo, parseDatasetPath, formatError, exitError } from '../utils.js';
+import { datasetListRecursive as datasetListRecursiveRemote, type DatasetListItem } from '@elaraai/e3-api-client';
+import { parseRepoLocation, parseDatasetPath, formatError, exitError } from '../utils.js';
 
 // Printer for type values (decoded types are EastTypeValue, not EastType)
 const printTypeValue = printFor(EastTypeType);
@@ -60,6 +61,84 @@ function renderTree(nodes: TreeNode[], prefix: string = '', showTypes: boolean =
 }
 
 /**
+ * Build tree structure from flat dataset list.
+ */
+interface FlatTreeNode {
+  name: string;
+  type?: string;
+  children: Map<string, FlatTreeNode>;
+  isDataset: boolean;
+}
+
+function buildTreeFromFlat(items: DatasetListItem[], showTypes: boolean): FlatTreeNode {
+  const root: FlatTreeNode = { name: '', children: new Map(), isDataset: false };
+
+  for (const item of items) {
+    // Path is like ".inputs.a.x" - split into segments
+    const segments = item.path.split('.').filter(s => s !== '');
+    let current = root;
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i]!;
+      const isLast = i === segments.length - 1;
+
+      if (!current.children.has(segment)) {
+        current.children.set(segment, {
+          name: segment,
+          children: new Map(),
+          isDataset: false,
+        });
+      }
+
+      const node = current.children.get(segment)!;
+      if (isLast) {
+        node.isDataset = true;
+        if (showTypes) {
+          try {
+            node.type = printTypeValue(item.type);
+          } catch {
+            node.type = '?';
+          }
+        }
+      }
+      current = node;
+    }
+  }
+
+  return root;
+}
+
+/**
+ * Render flat tree structure with box-drawing characters.
+ */
+function renderFlatTree(node: FlatTreeNode, prefix: string = '', showTypes: boolean = false): string[] {
+  const lines: string[] = [];
+  const children = Array.from(node.children.values());
+
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]!;
+    const isLast = i === children.length - 1;
+    const connector = isLast ? '└── ' : '├── ';
+    const childPrefix = isLast ? '    ' : '│   ';
+
+    let nodeName = child.name;
+    if (showTypes && child.isDataset && child.type) {
+      nodeName += ` (${child.type})`;
+    }
+
+    lines.push(prefix + connector + nodeName);
+
+    // Recurse into children
+    if (child.children.size > 0) {
+      const childLines = renderFlatTree(child, prefix + childPrefix, showTypes);
+      lines.push(...childLines);
+    }
+  }
+
+  return lines;
+}
+
+/**
  * Show full tree structure of a workspace.
  */
 export async function treeCommand(
@@ -68,29 +147,75 @@ export async function treeCommand(
   options: TreeOptions
 ): Promise<void> {
   try {
-    const repoPath = resolveRepo(repoArg);
+    const location = await parseRepoLocation(repoArg);
     const { ws, path } = parseDatasetPath(pathSpec);
 
     const maxDepth = options.depth !== undefined ? parseInt(options.depth, 10) : undefined;
     const includeTypes = options.types ?? false;
 
-    const nodes = await workspaceGetTree(repoPath, ws, path, {
-      maxDepth,
-      includeTypes,
-    });
+    if (location.type === 'local') {
+      const storage = new LocalStorage();
 
-    if (nodes.length === 0) {
-      console.log('(empty)');
-      return;
-    }
+      const nodes = await workspaceGetTree(storage, location.path, ws, path, {
+        maxDepth,
+        includeTypes,
+      });
 
-    // Print root path
-    console.log(pathSpec);
+      if (nodes.length === 0) {
+        console.log('(empty)');
+        return;
+      }
 
-    // Render and print tree
-    const lines = renderTree(nodes, '', includeTypes);
-    for (const line of lines) {
-      console.log(line);
+      // Print root path
+      console.log(pathSpec);
+
+      // Render and print tree
+      const lines = renderTree(nodes, '', includeTypes);
+      for (const line of lines) {
+        console.log(line);
+      }
+    } else {
+      // Remote: use flat list and build tree
+      const items = await datasetListRecursiveRemote(
+        location.baseUrl,
+        location.repo,
+        ws,
+        path,
+        { token: location.token }
+      );
+
+      if (items.length === 0) {
+        console.log('(empty)');
+        return;
+      }
+
+      // Print root path
+      console.log(pathSpec);
+
+      // Build tree from flat list and render
+      const tree = buildTreeFromFlat(items, includeTypes);
+
+      // Apply depth limit if specified
+      const lines = renderFlatTree(tree, '', includeTypes);
+
+      // Apply depth filter if needed
+      if (maxDepth !== undefined) {
+        const filteredLines: string[] = [];
+        for (const line of lines) {
+          // Count depth by counting connector patterns
+          const depth = (line.match(/[├└]/g) || []).length;
+          if (depth <= maxDepth) {
+            filteredLines.push(line);
+          }
+        }
+        for (const line of filteredLines) {
+          console.log(line);
+        }
+      } else {
+        for (const line of lines) {
+          console.log(line);
+        }
+      }
     }
   } catch (err) {
     exitError(formatError(err));

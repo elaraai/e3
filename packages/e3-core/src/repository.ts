@@ -11,7 +11,7 @@ import * as path from 'path';
  */
 export interface InitRepositoryResult {
   success: boolean;
-  e3Dir: string;
+  repoPath: string;
   error?: Error;
   alreadyExists?: boolean;
 }
@@ -19,52 +19,53 @@ export interface InitRepositoryResult {
 /**
  * Initialize a new e3 repository
  *
- * Creates:
+ * Creates the repository directory structure:
  * - objects/
  * - packages/
  * - executions/
  * - workspaces/
  *
+ * The repository IS the specified directory - subdirectories are created directly within it.
+ *
  * Pure business logic - no UI dependencies
  */
 export function repoInit(repoPath: string): InitRepositoryResult {
   const targetPath = path.resolve(repoPath);
-  const e3Dir = path.join(targetPath, '.e3');
 
-  // Check if .e3 already exists
-  if (fs.existsSync(e3Dir)) {
+  // Check if directory already is a valid repository
+  if (isValidRepository(targetPath)) {
     return {
       success: false,
-      e3Dir,
+      repoPath: targetPath,
       alreadyExists: true,
-      error: new Error(`e3 repository already exists at ${e3Dir}`),
+      error: new Error(`e3 repository already exists at ${targetPath}`),
     };
   }
 
   try {
-    // Create main .e3 directory
-    fs.mkdirSync(e3Dir, { recursive: true });
+    // Create the repository directory if it doesn't exist
+    fs.mkdirSync(targetPath, { recursive: true });
 
     // Create objects directory (content-addressed storage)
-    fs.mkdirSync(path.join(e3Dir, 'objects'), { recursive: true });
+    fs.mkdirSync(path.join(targetPath, 'objects'), { recursive: true });
 
     // Create packages directory (package refs: packages/<name>/<version> -> hash)
-    fs.mkdirSync(path.join(e3Dir, 'packages'), { recursive: true });
+    fs.mkdirSync(path.join(targetPath, 'packages'), { recursive: true });
 
     // Create executions directory (execution cache: executions/<hash>/output -> hash)
-    fs.mkdirSync(path.join(e3Dir, 'executions'), { recursive: true });
+    fs.mkdirSync(path.join(targetPath, 'executions'), { recursive: true });
 
     // Create workspaces directory (workspace state)
-    fs.mkdirSync(path.join(e3Dir, 'workspaces'), { recursive: true });
+    fs.mkdirSync(path.join(targetPath, 'workspaces'), { recursive: true });
 
     return {
       success: true,
-      e3Dir,
+      repoPath: targetPath,
     };
   } catch (error) {
     return {
       success: false,
-      e3Dir,
+      repoPath: targetPath,
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
@@ -83,9 +84,11 @@ function isValidRepository(repoPath: string): boolean {
 /**
  * Find the e3 repository directory
  *
- * Searches:
+ * Checks:
  * 1. E3_REPO environment variable
- * 2. Current directory and parents (like git)
+ * 2. The provided startPath (if given)
+ *
+ * Returns null if no valid repository is found.
  */
 export function repoFind(startPath?: string): string | null {
   // 1. Check E3_REPO environment variable
@@ -96,20 +99,12 @@ export function repoFind(startPath?: string): string | null {
     }
   }
 
-  // 2. Check current directory and parents
-  let currentDir = startPath !== undefined ? path.resolve(startPath) : process.cwd();
-  while (true) {
-    const e3Dir = path.join(currentDir, '.e3');
-    if (fs.existsSync(e3Dir) && isValidRepository(e3Dir)) {
-      return e3Dir;
+  // 2. Check the provided path
+  if (startPath !== undefined) {
+    const repoPath = path.resolve(startPath);
+    if (fs.existsSync(repoPath) && isValidRepository(repoPath)) {
+      return repoPath;
     }
-
-    const parentDir = path.dirname(currentDir);
-    if (parentDir === currentDir) {
-      // Reached root
-      break;
-    }
-    currentDir = parentDir;
   }
 
   return null;
@@ -122,9 +117,8 @@ export function repoGet(repoPath?: string): string {
   const repo = repoFind(repoPath);
 
   if (!repo) {
-    throw new Error('e3 repository not found. Run `e3 init` to create one.');
+    throw new Error('e3 repository not found. Run `e3 repo create` to create one.');
   }
 
   return repo;
 }
-

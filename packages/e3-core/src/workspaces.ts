@@ -15,48 +15,39 @@
  * No state file means the workspace does not exist.
  */
 
-import * as fs from 'fs/promises';
 import { createWriteStream } from 'fs';
-import * as path from 'path';
+import * as fs from 'fs/promises';
 import yazl from 'yazl';
-import { decodeBeast2For, encodeBeast2For } from '@elaraai/east';
+import { decodeBeast2For, encodeBeast2For, variant } from '@elaraai/east';
 import { PackageObjectType, WorkspaceStateType } from '@elaraai/e3-types';
 import type { PackageObject, WorkspaceState } from '@elaraai/e3-types';
-import { objectRead, objectWrite } from './objects.js';
 import { packageResolve, packageRead } from './packages.js';
 import {
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
   WorkspaceExistsError,
-  isNotFoundError,
+  WorkspaceLockError,
 } from './errors.js';
-import { acquireWorkspaceLock, type WorkspaceLockHandle } from './workspaceLock.js';
+import type { StorageBackend, LockHandle } from './storage/interfaces.js';
 
 /**
- * Get the path to a workspace's state file.
+ * List workspace names.
+ *
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
+ * @returns Array of workspace names
  */
-function statePath(repoPath: string, name: string): string {
-  return path.join(repoPath, 'workspaces', `${name}.beast2`);
+export async function workspaceList(storage: StorageBackend, repo: string): Promise<string[]> {
+  return storage.refs.workspaceList(repo);
 }
 
 /**
- * Atomically write workspace state.
+ * Write workspace state via storage backend.
  */
-async function writeState(repoPath: string, name: string, state: WorkspaceState): Promise<void> {
-  const wsDir = path.join(repoPath, 'workspaces');
-  const stateFile = statePath(repoPath, name);
-
-  // Ensure workspaces directory exists
-  await fs.mkdir(wsDir, { recursive: true });
-
+async function writeState(storage: StorageBackend, repo: string, name: string, state: WorkspaceState): Promise<void> {
   const encoder = encodeBeast2For(WorkspaceStateType);
   const data = encoder(state);
-
-  // Write atomically: write to temp file, then rename
-  const randomSuffix = Math.random().toString(36).slice(2, 10);
-  const tempPath = path.join(wsDir, `.${name}.${Date.now()}.${randomSuffix}.tmp`);
-  await fs.writeFile(tempPath, data);
-  await fs.rename(tempPath, stateFile);
+  await storage.refs.workspaceWrite(repo, name, data);
 }
 
 /**
@@ -66,29 +57,27 @@ async function writeState(repoPath: string, name: string, state: WorkspaceState)
  * Returns { exists: true, deployed: true, state } if workspace is deployed.
  */
 async function readState(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string
 ): Promise<
   | { exists: false }
   | { exists: true; deployed: false }
   | { exists: true; deployed: true; state: WorkspaceState }
 > {
-  const stateFile = statePath(repoPath, name);
+  const data = await storage.refs.workspaceRead(repo, name);
 
-  try {
-    const data = await fs.readFile(stateFile);
-    // Empty file means workspace exists but is not deployed
-    if (data.length === 0) {
-      return { exists: true, deployed: false };
-    }
-    const decoder = decodeBeast2For(WorkspaceStateType);
-    return { exists: true, deployed: true, state: decoder(data) };
-  } catch (err) {
-    if (isNotFoundError(err)) {
-      return { exists: false };
-    }
-    throw err;
+  if (data === null) {
+    return { exists: false };
   }
+
+  // Empty file means workspace exists but is not deployed
+  if (data.length === 0) {
+    return { exists: true, deployed: false };
+  }
+
+  const decoder = decodeBeast2For(WorkspaceStateType);
+  return { exists: true, deployed: true, state: decoder(Buffer.from(data)) };
 }
 
 /**
@@ -96,8 +85,8 @@ async function readState(
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
  */
-async function readStateOrThrow(repoPath: string, name: string): Promise<WorkspaceState> {
-  const result = await readState(repoPath, name);
+async function readStateOrThrow(storage: StorageBackend, repo: string, name: string): Promise<WorkspaceState> {
+  const result = await readState(storage, repo, name);
   if (!result.exists) {
     throw new WorkspaceNotFoundError(name);
   }
@@ -107,40 +96,31 @@ async function readStateOrThrow(repoPath: string, name: string): Promise<Workspa
   return result.state;
 }
 
+
 /**
  * Create an empty workspace.
  *
  * Creates an undeployed workspace (state file with null package info).
  * Use workspaceDeploy to deploy a package.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Workspace name
  * @throws {WorkspaceExistsError} If workspace already exists
  */
 export async function workspaceCreate(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string
 ): Promise<void> {
-  const stateFile = statePath(repoPath, name);
-
   // Check if workspace already exists
-  try {
-    await fs.access(stateFile);
+  const existing = await storage.refs.workspaceRead(repo, name);
+  if (existing !== null) {
     throw new WorkspaceExistsError(name);
-  } catch (err) {
-    if (err instanceof WorkspaceExistsError) throw err;
-    if (!isNotFoundError(err)) {
-      throw err;
-    }
   }
 
-  // Create workspaces directory if needed
-  const wsDir = path.join(repoPath, 'workspaces');
-  await fs.mkdir(wsDir, { recursive: true });
-
-  // Create empty file to mark workspace as existing but not deployed
-  // We use an empty file rather than a state file since there's no valid state yet
-  await fs.writeFile(stateFile, '');
+  // Create empty state to mark workspace as existing but not deployed
+  await storage.refs.workspaceWrite(repo, name, new Uint8Array(0));
 }
 
 /**
@@ -152,7 +132,7 @@ export interface WorkspaceRemoveOptions {
    * for releasing the lock after the operation. If not provided, workspaceRemove
    * will acquire and release a lock internally.
    */
-  lock?: WorkspaceLockHandle;
+  lock?: LockHandle;
 }
 
 /**
@@ -163,30 +143,40 @@ export interface WorkspaceRemoveOptions {
  * Acquires a workspace lock to prevent removing a workspace while a dataflow
  * is running. Throws WorkspaceLockError if the workspace is currently locked.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Workspace name
  * @param options - Optional settings including external lock
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceLockError} If workspace is locked by another process
  */
 export async function workspaceRemove(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string,
   options: WorkspaceRemoveOptions = {}
 ): Promise<void> {
   // Acquire lock if not provided externally
   const externalLock = options.lock;
-  const lock = externalLock ?? await acquireWorkspaceLock(repoPath, name);
-  try {
-    const stateFile = statePath(repoPath, name);
-    try {
-      await fs.unlink(stateFile);
-    } catch (err) {
-      if (isNotFoundError(err)) {
-        throw new WorkspaceNotFoundError(name);
-      }
-      throw err;
+  let lock: LockHandle | null = externalLock ?? null;
+  if (!lock) {
+    lock = await storage.locks.acquire(repo, name, variant('removal', null));
+    if (!lock) {
+      const state = await storage.locks.getState(repo, name);
+      throw new WorkspaceLockError(name, state ? {
+        acquiredAt: state.acquiredAt.toISOString(),
+        operation: state.operation.type,
+      } : undefined);
     }
+  }
+  try {
+    // Check if workspace exists
+    const existing = await storage.refs.workspaceRead(repo, name);
+    if (existing === null) {
+      throw new WorkspaceNotFoundError(name);
+    }
+
+    await storage.refs.workspaceRemove(repo, name);
   } finally {
     // Only release the lock if we acquired it internally
     if (!externalLock) {
@@ -196,43 +186,19 @@ export async function workspaceRemove(
 }
 
 /**
- * List workspace names.
- *
- * @param repoPath - Path to .e3 repository
- * @returns Array of workspace names
- */
-export async function workspaceList(
-  repoPath: string
-): Promise<string[]> {
-  const workspacesDir = path.join(repoPath, 'workspaces');
-  const names: string[] = [];
-
-  try {
-    const entries = await fs.readdir(workspacesDir);
-    for (const entry of entries) {
-      if (entry.endsWith('.beast2')) {
-        names.push(entry.slice(0, -7)); // Remove .beast2 extension
-      }
-    }
-  } catch {
-    // workspaces directory doesn't exist
-  }
-
-  return names;
-}
-
-/**
  * Get the full state for a workspace.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Workspace name
  * @returns Workspace state, or null if workspace doesn't exist or is not deployed
  */
 export async function workspaceGetState(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string
 ): Promise<WorkspaceState | null> {
-  const result = await readState(repoPath, name);
+  const result = await readState(storage, repo, name);
   if (!result.exists || !result.deployed) {
     return null;
   }
@@ -242,17 +208,19 @@ export async function workspaceGetState(
 /**
  * Get the deployed package for a workspace.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Workspace name
  * @returns Package name, version, and hash
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
  */
 export async function workspaceGetPackage(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string
 ): Promise<{ name: string; version: string; hash: string }> {
-  const state = await readStateOrThrow(repoPath, name);
+  const state = await readStateOrThrow(storage, repo, name);
   return {
     name: state.packageName,
     version: state.packageVersion,
@@ -263,35 +231,39 @@ export async function workspaceGetPackage(
 /**
  * Get the root tree hash for a workspace.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Workspace name
  * @returns Root tree object hash
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
  */
 export async function workspaceGetRoot(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string
 ): Promise<string> {
-  const state = await readStateOrThrow(repoPath, name);
+  const state = await readStateOrThrow(storage, repo, name);
   return state.rootHash;
 }
 
 /**
  * Atomically update the root tree hash for a workspace.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Workspace name
  * @param hash - New root tree object hash
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
  */
 export async function workspaceSetRoot(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string,
   hash: string
 ): Promise<void> {
-  const state = await readStateOrThrow(repoPath, name);
+  const state = await readStateOrThrow(storage, repo, name);
 
   const newState: WorkspaceState = {
     ...state,
@@ -299,7 +271,7 @@ export async function workspaceSetRoot(
     rootUpdatedAt: new Date(),
   };
 
-  await writeState(repoPath, name, newState);
+  await writeState(storage, repo, name, newState);
 }
 
 /**
@@ -311,7 +283,7 @@ export interface WorkspaceDeployOptions {
    * for releasing the lock after the operation. If not provided, workspaceDeploy
    * will acquire and release a lock internally.
    */
-  lock?: WorkspaceLockHandle;
+  lock?: LockHandle;
 }
 
 /**
@@ -324,7 +296,8 @@ export interface WorkspaceDeployOptions {
  * or concurrent deploys. Throws WorkspaceLockError if the workspace is
  * currently locked by another process.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Workspace name
  * @param pkgName - Package name
  * @param pkgVersion - Package version
@@ -332,7 +305,8 @@ export interface WorkspaceDeployOptions {
  * @throws {WorkspaceLockError} If workspace is locked by another process
  */
 export async function workspaceDeploy(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string,
   pkgName: string,
   pkgVersion: string,
@@ -340,11 +314,21 @@ export async function workspaceDeploy(
 ): Promise<void> {
   // Acquire lock if not provided externally
   const externalLock = options.lock;
-  const lock = externalLock ?? await acquireWorkspaceLock(repoPath, name);
+  let lock: LockHandle | null = externalLock ?? null;
+  if (!lock) {
+    lock = await storage.locks.acquire(repo, name, variant('deployment', null));
+    if (!lock) {
+      const state = await storage.locks.getState(repo, name);
+      throw new WorkspaceLockError(name, state ? {
+        acquiredAt: state.acquiredAt.toISOString(),
+        operation: state.operation.type,
+      } : undefined);
+    }
+  }
   try {
     // Resolve package hash and read package object
-    const packageHash = await packageResolve(repoPath, pkgName, pkgVersion);
-    const pkg = await packageRead(repoPath, pkgName, pkgVersion);
+    const packageHash = await packageResolve(storage, repo, pkgName, pkgVersion);
+    const pkg = await packageRead(storage, repo, pkgName, pkgVersion);
 
     const now = new Date();
     const state: WorkspaceState = {
@@ -356,7 +340,7 @@ export async function workspaceDeploy(
       rootUpdatedAt: now,
     };
 
-    await writeState(repoPath, name, state);
+    await writeState(storage, repo, name, state);
   } finally {
     // Only release the lock if we acquired it internally
     if (!externalLock) {
@@ -389,7 +373,8 @@ const DETERMINISTIC_MTIME = new Date(0);
  * 4. Collect all referenced objects
  * 5. Write to .zip
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param name - Workspace name
  * @param zipPath - Path to write the .zip file
  * @param outputName - Package name (default: deployed package name)
@@ -399,7 +384,8 @@ const DETERMINISTIC_MTIME = new Date(0);
  * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
  */
 export async function workspaceExport(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   name: string,
   zipPath: string,
   outputName?: string,
@@ -408,10 +394,10 @@ export async function workspaceExport(
   const partialPath = `${zipPath}.partial`;
 
   // Get workspace state
-  const state = await readStateOrThrow(repoPath, name);
+  const state = await readStateOrThrow(storage, repo, name);
 
   // Read the deployed package object using the stored hash
-  const deployedPkgData = await objectRead(repoPath, state.packageHash);
+  const deployedPkgData = await storage.objects.read(repo, state.packageHash);
   const decoder = decodeBeast2For(PackageObjectType);
   const deployedPkgObject = decoder(Buffer.from(deployedPkgData));
 
@@ -431,7 +417,7 @@ export async function workspaceExport(
   // Encode and store the new package object
   const encoder = encodeBeast2For(PackageObjectType);
   const pkgData = encoder(newPkgObject);
-  const packageHash = await objectWrite(repoPath, pkgData);
+  const packageHash = await storage.objects.write(repo, pkgData);
 
   // Create zip file
   const zipfile = new yazl.ZipFile();
@@ -444,7 +430,7 @@ export async function workspaceExport(
     if (addedObjects.has(hash)) return;
     addedObjects.add(hash);
 
-    const data = await objectRead(repoPath, hash);
+    const data = await storage.objects.read(repo, hash);
     const objPath = `objects/${hash.slice(0, 2)}/${hash.slice(2)}.beast2`;
     zipfile.addBuffer(Buffer.from(data), objPath, { mtime: DETERMINISTIC_MTIME });
   };
@@ -461,7 +447,7 @@ export async function workspaceExport(
 
       try {
         await addObject(potentialHash);
-        const childData = await objectRead(repoPath, potentialHash);
+        const childData = await storage.objects.read(repo, potentialHash);
         await collectTreeChildren(childData);
       } catch {
         addedObjects.delete(potentialHash);
@@ -479,7 +465,7 @@ export async function workspaceExport(
 
   // Collect the root tree and all its children
   await addObject(state.rootHash);
-  const rootTreeData = await objectRead(repoPath, state.rootHash);
+  const rootTreeData = await storage.objects.read(repo, state.rootHash);
   await collectTreeChildren(rootTreeData);
 
   // Write the package ref

@@ -23,19 +23,25 @@ import {
 import {
   dataflowExecute,
   dataflowGetGraph,
+  dataflowGetReadyTasks,
+  dataflowGetDependentsToSkip,
+  type DataflowGraph,
 } from './dataflow.js';
 import { objectWrite } from './objects.js';
 import { workspaceDeploy } from './workspaces.js';
 import { workspaceGetDataset, workspaceSetDataset } from './trees.js';
-import { acquireWorkspaceLock } from './workspaceLock.js';
 import { WorkspaceLockError, DataflowAbortedError } from './errors.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
+import { LocalStorage } from './storage/local/index.js';
+import type { StorageBackend } from './storage/interfaces.js';
 
 describe('dataflow', () => {
   let testRepo: string;
+  let storage: StorageBackend;
 
   beforeEach(() => {
     testRepo = createTestRepo();
+    storage = new LocalStorage();
   });
 
   afterEach(() => {
@@ -157,9 +163,9 @@ describe('dataflow', () => {
       } as unknown as Structure;
 
       await createPackageWithTasks(testRepo, [], structure);
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
 
-      const graph = await dataflowGetGraph(testRepo, 'test-ws');
+      const graph = await dataflowGetGraph(storage, testRepo, 'test-ws');
       assert.strictEqual(graph.tasks.length, 0);
     });
 
@@ -186,9 +192,9 @@ describe('dataflow', () => {
         ],
         structure
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
 
-      const graph = await dataflowGetGraph(testRepo, 'test-ws');
+      const graph = await dataflowGetGraph(storage, testRepo, 'test-ws');
       assert.strictEqual(graph.tasks.length, 2);
 
       const taskA = graph.tasks.find((t) => t.name === 'task-a');
@@ -198,6 +204,172 @@ describe('dataflow', () => {
       assert.ok(taskB);
       assert.deepStrictEqual(taskA.dependsOn, []); // A depends on external input
       assert.deepStrictEqual(taskB.dependsOn, ['task-a']); // B depends on A
+    });
+  });
+
+  describe('dataflowGetReadyTasks', () => {
+    it('returns all tasks when none have dependencies', () => {
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: [] },
+          { name: 'c', hash: 'h3', inputs: [], output: 'out-c', dependsOn: [] },
+        ],
+      };
+
+      const ready = dataflowGetReadyTasks(graph, new Set());
+      assert.deepStrictEqual(ready.sort(), ['a', 'b', 'c']);
+    });
+
+    it('returns only tasks with satisfied dependencies', () => {
+      // Diamond: A -> B, A -> C, B -> D, C -> D
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: ['a'] },
+          { name: 'c', hash: 'h3', inputs: [], output: 'out-c', dependsOn: ['a'] },
+          { name: 'd', hash: 'h4', inputs: [], output: 'out-d', dependsOn: ['b', 'c'] },
+        ],
+      };
+
+      // Initially only A is ready
+      let ready = dataflowGetReadyTasks(graph, new Set());
+      assert.deepStrictEqual(ready, ['a']);
+
+      // After A completes, B and C are ready
+      ready = dataflowGetReadyTasks(graph, new Set(['a']));
+      assert.deepStrictEqual(ready.sort(), ['b', 'c']);
+
+      // After A and B complete, C is ready (D still waiting for C)
+      ready = dataflowGetReadyTasks(graph, new Set(['a', 'b']));
+      assert.deepStrictEqual(ready, ['c']);
+
+      // After A, B, C complete, D is ready
+      ready = dataflowGetReadyTasks(graph, new Set(['a', 'b', 'c']));
+      assert.deepStrictEqual(ready, ['d']);
+
+      // After all complete, nothing is ready
+      ready = dataflowGetReadyTasks(graph, new Set(['a', 'b', 'c', 'd']));
+      assert.deepStrictEqual(ready, []);
+    });
+
+    it('excludes already completed tasks', () => {
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: [] },
+        ],
+      };
+
+      const ready = dataflowGetReadyTasks(graph, new Set(['a']));
+      assert.deepStrictEqual(ready, ['b']);
+    });
+  });
+
+  describe('dataflowGetDependentsToSkip', () => {
+    it('returns empty array when no tasks depend on failed task', () => {
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: [] },
+        ],
+      };
+
+      const toSkip = dataflowGetDependentsToSkip(graph, 'a', new Set(), new Set());
+      assert.deepStrictEqual(toSkip, []);
+    });
+
+    it('returns direct dependents', () => {
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: ['a'] },
+          { name: 'c', hash: 'h3', inputs: [], output: 'out-c', dependsOn: ['a'] },
+        ],
+      };
+
+      const toSkip = dataflowGetDependentsToSkip(graph, 'a', new Set(), new Set());
+      assert.deepStrictEqual(toSkip.sort(), ['b', 'c']);
+    });
+
+    it('returns transitive dependents', () => {
+      // a -> b -> c -> d
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: ['a'] },
+          { name: 'c', hash: 'h3', inputs: [], output: 'out-c', dependsOn: ['b'] },
+          { name: 'd', hash: 'h4', inputs: [], output: 'out-d', dependsOn: ['c'] },
+        ],
+      };
+
+      const toSkip = dataflowGetDependentsToSkip(graph, 'a', new Set(), new Set());
+      assert.deepStrictEqual(toSkip.sort(), ['b', 'c', 'd']);
+    });
+
+    it('handles diamond dependencies', () => {
+      // a -> b -> d
+      // a -> c -> d
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: ['a'] },
+          { name: 'c', hash: 'h3', inputs: [], output: 'out-c', dependsOn: ['a'] },
+          { name: 'd', hash: 'h4', inputs: [], output: 'out-d', dependsOn: ['b', 'c'] },
+        ],
+      };
+
+      const toSkip = dataflowGetDependentsToSkip(graph, 'a', new Set(), new Set());
+      assert.deepStrictEqual(toSkip.sort(), ['b', 'c', 'd']);
+    });
+
+    it('excludes already completed tasks', () => {
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: ['a'] },
+          { name: 'c', hash: 'h3', inputs: [], output: 'out-c', dependsOn: ['a'] },
+        ],
+      };
+
+      // b is already completed
+      const toSkip = dataflowGetDependentsToSkip(graph, 'a', new Set(['b']), new Set());
+      assert.deepStrictEqual(toSkip, ['c']);
+    });
+
+    it('excludes already skipped tasks', () => {
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: ['a'] },
+          { name: 'c', hash: 'h3', inputs: [], output: 'out-c', dependsOn: ['b'] },
+        ],
+      };
+
+      // b is already skipped
+      const toSkip = dataflowGetDependentsToSkip(graph, 'a', new Set(), new Set(['b']));
+      // c depends on b which is already skipped, so only c should be returned (not b again)
+      // But since b is skipped, we skip it, and c is a transitive dependent through b
+      assert.deepStrictEqual(toSkip, ['c']);
+    });
+
+    it('does not skip tasks that have alternative paths', () => {
+      // a (fails) -> b -> d
+      // c (success) -> d
+      // d depends on both b and c. If a fails, b is skipped, but d might still be reachable via c
+      // However, our function finds ALL transitive dependents - the caller decides what to do
+      const graph: DataflowGraph = {
+        tasks: [
+          { name: 'a', hash: 'h1', inputs: [], output: 'out-a', dependsOn: [] },
+          { name: 'b', hash: 'h2', inputs: [], output: 'out-b', dependsOn: ['a'] },
+          { name: 'c', hash: 'h3', inputs: [], output: 'out-c', dependsOn: [] },
+          { name: 'd', hash: 'h4', inputs: [], output: 'out-d', dependsOn: ['b', 'c'] },
+        ],
+      };
+
+      // d is a transitive dependent of a through b
+      const toSkip = dataflowGetDependentsToSkip(graph, 'a', new Set(), new Set());
+      assert.deepStrictEqual(toSkip.sort(), ['b', 'd']);
     });
   });
 
@@ -230,12 +402,12 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
 
       // Set the input value in workspace
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'hello world', StringType);
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'hello world', StringType);
 
-      const result = await dataflowExecute(testRepo, 'test-ws');
+      const result = await dataflowExecute(storage, testRepo, 'test-ws');
 
       assert.strictEqual(result.success, true);
       assert.strictEqual(result.executed, 1);
@@ -244,7 +416,7 @@ describe('dataflow', () => {
       assert.strictEqual(result.tasks[0].state, 'success');
 
       // Verify output was written
-      const outputValue = await workspaceGetDataset(testRepo, 'test-ws', outputPath);
+      const outputValue = await workspaceGetDataset(storage, testRepo, 'test-ws', outputPath);
       assert.strictEqual(outputValue, 'hello world');
     });
 
@@ -281,13 +453,13 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
 
       // Set the input value in workspace
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'chain test', StringType);
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'chain test', StringType);
 
       const completedOrder: string[] = [];
-      const result = await dataflowExecute(testRepo, 'test-ws', {
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
         onTaskComplete: (r) => completedOrder.push(r.name),
       });
 
@@ -297,7 +469,7 @@ describe('dataflow', () => {
       assert.strictEqual(completedOrder[1], 'task-b');
 
       // Verify final output
-      const outputValue = await workspaceGetDataset(testRepo, 'test-ws', outputPath);
+      const outputValue = await workspaceGetDataset(storage, testRepo, 'test-ws', outputPath);
       assert.strictEqual(outputValue, 'chain test');
     });
 
@@ -334,12 +506,12 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
 
       // Set the input value
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'fail test', StringType);
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'fail test', StringType);
 
-      const result = await dataflowExecute(testRepo, 'test-ws');
+      const result = await dataflowExecute(storage, testRepo, 'test-ws');
 
       assert.strictEqual(result.success, false);
       assert.strictEqual(result.failed, 1);
@@ -381,16 +553,16 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'cache test', StringType);
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'cache test', StringType);
 
       // First execution
-      const result1 = await dataflowExecute(testRepo, 'test-ws');
+      const result1 = await dataflowExecute(storage, testRepo, 'test-ws');
       assert.strictEqual(result1.executed, 1);
       assert.strictEqual(result1.cached, 0);
 
       // Second execution should be cached (output already assigned)
-      const result2 = await dataflowExecute(testRepo, 'test-ws');
+      const result2 = await dataflowExecute(storage, testRepo, 'test-ws');
       assert.strictEqual(result2.executed, 0);
       assert.strictEqual(result2.cached, 1);
     });
@@ -432,14 +604,14 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'parallel test', StringType);
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'parallel test', StringType);
 
       // Track concurrent execution count
       let currentConcurrent = 0;
       let maxConcurrent = 0;
 
-      const result = await dataflowExecute(testRepo, 'test-ws', {
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
         concurrency: 2,
         onTaskStart: () => {
           currentConcurrent++;
@@ -484,18 +656,18 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
 
       // Start first execution (don't await)
-      const firstExecution = dataflowExecute(testRepo, 'test-ws');
+      const firstExecution = dataflowExecute(storage, testRepo, 'test-ws');
 
       // Give it a moment to acquire the lock
       await new Promise(resolve => setTimeout(resolve, 150));
 
       // Try to start second execution - should fail with WorkspaceLockError
       await assert.rejects(
-        dataflowExecute(testRepo, 'test-ws'),
+        dataflowExecute(storage, testRepo, 'test-ws'),
         (err: Error) => {
           assert.ok(err instanceof WorkspaceLockError, `Expected WorkspaceLockError, got ${err.constructor.name}`);
           assert.strictEqual((err as WorkspaceLockError).workspace, 'test-ws');
@@ -535,15 +707,15 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
 
       // First execution
-      const result1 = await dataflowExecute(testRepo, 'test-ws');
+      const result1 = await dataflowExecute(storage, testRepo, 'test-ws');
       assert.strictEqual(result1.success, true);
 
       // Second execution (should succeed because first released the lock)
-      const result2 = await dataflowExecute(testRepo, 'test-ws');
+      const result2 = await dataflowExecute(storage, testRepo, 'test-ws');
       assert.strictEqual(result2.success, true);
     });
 
@@ -574,28 +746,28 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
 
       // Acquire lock externally
-      const lock = await acquireWorkspaceLock(testRepo, 'test-ws');
+      const lock = await storage.locks.acquire(testRepo, 'test-ws', variant('dataflow', null));
+      assert.ok(lock);
 
       try {
         // Execute with external lock
-        const result = await dataflowExecute(testRepo, 'test-ws', { lock });
+        const result = await dataflowExecute(storage, testRepo, 'test-ws', { lock });
         assert.strictEqual(result.success, true);
 
         // Lock should still be held (we can't acquire another)
-        await assert.rejects(
-          acquireWorkspaceLock(testRepo, 'test-ws'),
-          (err: Error) => err instanceof WorkspaceLockError
-        );
+        const attemptedLock = await storage.locks.acquire(testRepo, 'test-ws', variant('dataflow', null));
+        assert.strictEqual(attemptedLock, null);
       } finally {
         await lock.release();
       }
 
       // Now lock should be released - can acquire again
-      const lock2 = await acquireWorkspaceLock(testRepo, 'test-ws');
+      const lock2 = await storage.locks.acquire(testRepo, 'test-ws', variant('dataflow', null));
+      assert.ok(lock2);
       await lock2.release();
     });
 
@@ -628,13 +800,13 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
 
       const controller = new AbortController();
 
       // Start execution
-      const executionPromise = dataflowExecute(testRepo, 'test-ws', {
+      const executionPromise = dataflowExecute(storage, testRepo, 'test-ws', {
         signal: controller.signal,
       });
 
@@ -685,13 +857,13 @@ describe('dataflow', () => {
           },
         }
       );
-      await workspaceDeploy(testRepo, 'test-ws', 'test', '1.0.0');
-      await workspaceSetDataset(testRepo, 'test-ws', inputPath, 'test', StringType);
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
 
       const controller = new AbortController();
 
       // Start execution with concurrency 2 so both tasks start
-      const executionPromise = dataflowExecute(testRepo, 'test-ws', {
+      const executionPromise = dataflowExecute(storage, testRepo, 'test-ws', {
         signal: controller.signal,
         concurrency: 2,
       });

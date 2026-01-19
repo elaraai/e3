@@ -16,18 +16,16 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { createWriteStream } from 'fs';
 import { tmpdir } from 'os';
-import { decodeBeast2For, encodeBeast2For, variant, EastIR, IRType } from '@elaraai/east';
+import { decodeBeast2For, variant, EastIR, IRType } from '@elaraai/east';
 import type { FunctionIR } from '@elaraai/east';
 import {
-  ExecutionStatusType,
   type ExecutionStatus,
   TaskObjectType,
   type TaskObject,
 } from '@elaraai/e3-types';
-import { computeHash, objectRead, objectWrite } from './objects.js';
-import { ExecutionCorruptError, isNotFoundError } from './errors.js';
+import { computeHash } from './objects.js';
+import type { StorageBackend, LogChunk } from './storage/interfaces.js';
 
 // ============================================================================
 // Execution Identity
@@ -47,22 +45,6 @@ export function inputsHash(inputHashes: string[]): string {
   return computeHash(new TextEncoder().encode(data));
 }
 
-/**
- * Get the filesystem path for an execution directory.
- *
- * @param repoPath - Path to .e3 repository
- * @param taskHash - Hash of the task object
- * @param inHash - Combined hash of input hashes
- * @returns Path to execution directory: executions/<taskHash>/<inputsHash>/
- */
-export function executionPath(
-  repoPath: string,
-  taskHash: string,
-  inHash: string
-): string {
-  return path.join(repoPath, 'executions', taskHash, inHash);
-}
-
 // ============================================================================
 // Execution Status
 // ============================================================================
@@ -70,121 +52,136 @@ export function executionPath(
 /**
  * Get execution status.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @returns ExecutionStatus or null if execution doesn't exist
  * @throws {ExecutionCorruptError} If status file exists but cannot be decoded
  */
 export async function executionGet(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   taskHash: string,
   inHash: string
 ): Promise<ExecutionStatus | null> {
-  const execDir = executionPath(repoPath, taskHash, inHash);
-  const statusPath = path.join(execDir, 'status.beast2');
-
-  let data: Buffer;
-  try {
-    data = await fs.readFile(statusPath);
-  } catch (err) {
-    if (isNotFoundError(err)) {
-      return null;
-    }
-    throw err;
-  }
-
-  try {
-    const decoder = decodeBeast2For(ExecutionStatusType);
-    return decoder(data);
-  } catch (err) {
-    throw new ExecutionCorruptError(taskHash, inHash, err instanceof Error ? err : new Error(String(err)));
-  }
+  return storage.refs.executionGet(repo, taskHash, inHash);
 }
 
 /**
  * Get output hash for a completed execution.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @returns Output hash or null if not complete or failed
  */
 export async function executionGetOutput(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   taskHash: string,
   inHash: string
 ): Promise<string | null> {
-  const execDir = executionPath(repoPath, taskHash, inHash);
-  const outputPath = path.join(execDir, 'output');
-
-  try {
-    const content = await fs.readFile(outputPath, 'utf-8');
-    return content.trim();
-  } catch (err) {
-    if (isNotFoundError(err)) {
-      return null;
-    }
-    throw err;
-  }
+  return storage.refs.executionGetOutput(repo, taskHash, inHash);
 }
 
 /**
  * List all input hashes that have executions for a given task.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @returns Array of input hashes
  */
 export async function executionListForTask(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   taskHash: string
 ): Promise<string[]> {
-  const taskDir = path.join(repoPath, 'executions', taskHash);
-
-  try {
-    const entries = await fs.readdir(taskDir);
-    // Filter to only valid hash directories (64 hex chars)
-    return entries.filter((e) => /^[a-f0-9]{64}$/.test(e));
-  } catch {
-    return [];
-  }
+  return storage.refs.executionListForTask(repo, taskHash);
 }
 
 /**
  * List all executions in the repository.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @returns Array of { taskHash, inputsHash } objects
  */
 export async function executionList(
-  repoPath: string
+  storage: StorageBackend,
+  repo: string
 ): Promise<Array<{ taskHash: string; inputsHash: string }>> {
-  const executionsDir = path.join(repoPath, 'executions');
-  const result: Array<{ taskHash: string; inputsHash: string }> = [];
+  return storage.refs.executionList(repo);
+}
 
-  try {
-    const taskDirs = await fs.readdir(executionsDir);
+/**
+ * Result of finding the current execution for a task
+ */
+export interface CurrentExecutionRef {
+  /** Hash of the task object */
+  taskHash: string;
+  /** Combined hash of input hashes */
+  inputsHash: string;
+  /** True if this matches the current workspace input state */
+  isCurrent: boolean;
+}
 
-    for (const taskHash of taskDirs) {
-      if (!/^[a-f0-9]{64}$/.test(taskHash)) continue;
+/**
+ * Find the execution reference for a task in a workspace.
+ *
+ * This looks up the task's current input hashes from the workspace state
+ * and finds the matching execution. If no execution exists for the current
+ * inputs, falls back to the most recent execution.
+ *
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
+ * @param ws - Workspace name
+ * @param taskName - Task name
+ * @returns Execution reference or null if no executions exist
+ */
+export async function executionFindCurrent(
+  storage: StorageBackend,
+  repo: string,
+  ws: string,
+  taskName: string
+): Promise<CurrentExecutionRef | null> {
+  // Import here to avoid circular dependency
+  const { workspaceGetTaskHash, workspaceGetTask } = await import('./tasks.js');
+  const { workspaceGetDatasetHash } = await import('./trees.js');
 
-      const taskDir = path.join(executionsDir, taskHash);
-      const stat = await fs.stat(taskDir);
-      if (!stat.isDirectory()) continue;
+  const taskHash = await workspaceGetTaskHash(storage, repo, ws, taskName);
+  const task = await workspaceGetTask(storage, repo, ws, taskName);
 
-      const inputsDirs = await fs.readdir(taskDir);
-      for (const inputsHash of inputsDirs) {
-        if (/^[a-f0-9]{64}$/.test(inputsHash)) {
-          result.push({ taskHash, inputsHash });
-        }
-      }
+  // Get the current input hashes from the workspace
+  const currentInputHashes: string[] = [];
+  let allInputsAssigned = true;
+
+  for (const inputPath of task.inputs) {
+    const { refType, hash } = await workspaceGetDatasetHash(storage, repo, ws, inputPath);
+    if (refType !== 'value' || hash === null) {
+      allInputsAssigned = false;
+      break;
     }
-  } catch {
-    // Executions directory doesn't exist
+    currentInputHashes.push(hash);
   }
 
-  return result;
+  const executions = await executionListForTask(storage, repo, taskHash);
+
+  if (allInputsAssigned) {
+    const inHash = inputsHash(currentInputHashes);
+    if (executions.includes(inHash)) {
+      return { taskHash, inputsHash: inHash, isCurrent: true };
+    }
+  }
+
+  // Fall back to most recent execution
+  if (executions.length > 0) {
+    return { taskHash, inputsHash: executions[0]!, isCurrent: false };
+  }
+
+  return null;
 }
 
 // ============================================================================
@@ -201,26 +198,14 @@ export interface LogReadOptions {
   limit?: number;
 }
 
-/**
- * Result of reading a log chunk
- */
-export interface LogChunk {
-  /** Log content (UTF-8) */
-  data: string;
-  /** Byte offset of this chunk */
-  offset: number;
-  /** Bytes in this chunk */
-  size: number;
-  /** Total log file size (for pagination) */
-  totalSize: number;
-  /** True if this is the end of the file */
-  complete: boolean;
-}
+// Re-export LogChunk from storage interfaces for backwards compatibility
+export type { LogChunk };
 
 /**
  * Read execution logs with pagination support.
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
  * @param stream - Which log stream to read ('stdout' or 'stderr')
@@ -228,48 +213,14 @@ export interface LogChunk {
  * @returns Log chunk with data and metadata
  */
 export async function executionReadLog(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   taskHash: string,
   inHash: string,
   stream: 'stdout' | 'stderr',
   options: LogReadOptions = {}
 ): Promise<LogChunk> {
-  const execDir = executionPath(repoPath, taskHash, inHash);
-  const logPath = path.join(execDir, `${stream}.txt`);
-
-  const offset = options.offset ?? 0;
-  const limit = options.limit ?? 65536; // 64KB default
-
-  try {
-    const stat = await fs.stat(logPath);
-    const totalSize = stat.size;
-
-    // Open file and read chunk
-    const fd = await fs.open(logPath, 'r');
-    try {
-      const buffer = Buffer.alloc(Math.min(limit, totalSize - offset));
-      const { bytesRead } = await fd.read(buffer, 0, buffer.length, offset);
-
-      return {
-        data: buffer.slice(0, bytesRead).toString('utf-8'),
-        offset,
-        size: bytesRead,
-        totalSize,
-        complete: offset + bytesRead >= totalSize,
-      };
-    } finally {
-      await fd.close();
-    }
-  } catch {
-    // Log file doesn't exist yet
-    return {
-      data: '',
-      offset: 0,
-      size: 0,
-      totalSize: 0,
-      complete: true,
-    };
-  }
+  return storage.logs.read(repo, taskHash, inHash, stream, options);
 }
 
 // ============================================================================
@@ -281,19 +232,21 @@ export async function executionReadLog(
  *
  * The IR is an East function: (inputs: Array<String>, output: String) -> Array<String>
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param commandIrHash - Hash of the IR object
  * @param inputPaths - Paths to staged input files
  * @param outputPath - Path where output should be written
  * @returns Array of strings to exec
  */
 export async function evaluateCommandIr(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   commandIrHash: string,
   inputPaths: string[],
   outputPath: string
 ): Promise<string[]> {
-  const irData = await objectRead(repoPath, commandIrHash);
+  const irData = await storage.objects.read(repo, commandIrHash);
 
   try {
     // Decode the IR from beast2 format
@@ -432,27 +385,28 @@ export interface ExecutionResult {
  * 5. Runs the command
  * 6. Stores the output and updates status
  *
- * @param repoPath - Path to .e3 repository
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inputHashes - Array of input dataset hashes
  * @param options - Execution options
  * @returns Execution result
  */
 export async function taskExecute(
-  repoPath: string,
+  storage: StorageBackend,
+  repo: string,
   taskHash: string,
   inputHashes: string[],
   options: ExecuteOptions = {}
 ): Promise<ExecutionResult> {
   const inHash = inputsHash(inputHashes);
-  const execDir = executionPath(repoPath, taskHash, inHash);
   const startTime = Date.now();
 
   // Step 1: Check cache (unless force)
   if (!options.force) {
-    const existingOutput = await executionGetOutput(repoPath, taskHash, inHash);
+    const existingOutput = await storage.refs.executionGetOutput(repo, taskHash, inHash);
     if (existingOutput !== null) {
-      const status = await executionGet(repoPath, taskHash, inHash);
+      const status = await storage.refs.executionGet(repo, taskHash, inHash);
       if (status && status.type === 'success') {
         return {
           inputsHash: inHash,
@@ -470,7 +424,7 @@ export async function taskExecute(
   // Step 2: Read task object
   let task: TaskObject;
   try {
-    const taskData = await objectRead(repoPath, taskHash);
+    const taskData = await storage.objects.read(repo, taskHash);
     const decoder = decodeBeast2For(TaskObjectType);
     task = decoder(Buffer.from(taskData));
   } catch (err) {
@@ -499,7 +453,7 @@ export async function taskExecute(
     const inputPaths: string[] = [];
     for (let i = 0; i < inputHashes.length; i++) {
       const inputPath = path.join(scratchDir, `input-${i}.beast2`);
-      const inputData = await objectRead(repoPath, inputHashes[i]);
+      const inputData = await storage.objects.read(repo, inputHashes[i]!);
       await fs.writeFile(inputPath, inputData);
       inputPaths.push(inputPath);
     }
@@ -508,7 +462,7 @@ export async function taskExecute(
     const outputPath = path.join(scratchDir, 'output.beast2');
     let args: string[];
     try {
-      args = await evaluateCommandIr(repoPath, task.commandIr, inputPaths, outputPath);
+      args = await evaluateCommandIr(storage, repo, task.commandIr, inputPaths, outputPath);
     } catch (err) {
       return {
         inputsHash: inHash,
@@ -533,40 +487,38 @@ export async function taskExecute(
       };
     }
 
-    // Step 6: Create execution directory
-    await fs.mkdir(execDir, { recursive: true });
-
-    // Step 7: Get boot ID for crash detection
+    // Step 6: Get boot ID for crash detection
     const bootId = await getBootId();
 
-    // Step 8: Execute command
+    // Step 7: Execute command
     const result = await runCommand(
+      storage,
+      repo,
+      taskHash,
+      inHash,
       args,
-      execDir,
       inputHashes,
       bootId,
       options
     );
 
-    // Step 9: Handle result
+    // Step 8: Handle result
     if (result.exitCode === 0) {
       // Success - read and store output
       try {
         const outputData = await fs.readFile(outputPath);
-        const outputHash = await objectWrite(repoPath, outputData);
+        const outputHash = await storage.objects.write(repo, outputData);
 
-        // Write output ref
-        await fs.writeFile(path.join(execDir, 'output'), outputHash + '\n');
+        // Write output ref and success status
+        await storage.refs.executionWriteOutput(repo, taskHash, inHash, outputHash);
 
-        // Write success status
         const status: ExecutionStatus = variant('success', {
           inputHashes,
           outputHash,
           startedAt: new Date(startTime),
           completedAt: new Date(),
         });
-        const encoder = encodeBeast2For(ExecutionStatusType);
-        await fs.writeFile(path.join(execDir, 'status.beast2'), encoder(status));
+        await storage.refs.executionWrite(repo, taskHash, inHash, status);
 
         return {
           inputsHash: inHash,
@@ -585,8 +537,7 @@ export async function taskExecute(
           completedAt: new Date(),
           message: `Failed to read output: ${err}`,
         });
-        const encoder = encodeBeast2For(ExecutionStatusType);
-        await fs.writeFile(path.join(execDir, 'status.beast2'), encoder(status));
+        await storage.refs.executionWrite(repo, taskHash, inHash, status);
 
         return {
           inputsHash: inHash,
@@ -606,8 +557,7 @@ export async function taskExecute(
         completedAt: new Date(),
         exitCode: BigInt(result?.exitCode ?? -1),
       });
-      const encoder = encodeBeast2For(ExecutionStatusType);
-      await fs.writeFile(path.join(execDir, 'status.beast2'), encoder(status));
+      await storage.refs.executionWrite(repo, taskHash, inHash, status);
 
       return {
         inputsHash: inHash,
@@ -633,8 +583,11 @@ export async function taskExecute(
  * Run a command and capture output
  */
 async function runCommand(
+  storage: StorageBackend,
+  repo: string,
+  taskHash: string,
+  inHash: string,
   args: string[],
-  execDir: string,
   inputHashes: string[],
   bootId: string,
   options: ExecuteOptions
@@ -679,23 +632,39 @@ async function runCommand(
     });
   });
 
-  // Open log files for writing
-  const stdoutStream = createWriteStream(path.join(execDir, 'stdout.txt'));
-  const stderrStream = createWriteStream(path.join(execDir, 'stderr.txt'));
+  // Use promise chains to ensure sequential log writes without overlapping
+  let stdoutWriteChain = Promise.resolve();
+  let stderrWriteChain = Promise.resolve();
 
-  // Tee stdout
+  // Tee stdout - use storage.logs.append for log persistence
   child.stdout?.on('data', (data: Buffer) => {
-    stdoutStream.write(data);
+    const str = data.toString('utf-8');
+    // Chain writes sequentially to avoid overlapping
+    stdoutWriteChain = stdoutWriteChain.then(async () => {
+      try {
+        await storage.logs.append(repo, taskHash, inHash, 'stdout', str);
+      } catch (err) {
+        console.warn(`Failed to append stdout log: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
     if (options.onStdout) {
-      options.onStdout(data.toString('utf-8'));
+      options.onStdout(str);
     }
   });
 
-  // Tee stderr
+  // Tee stderr - use storage.logs.append for log persistence
   child.stderr?.on('data', (data: Buffer) => {
-    stderrStream.write(data);
+    const str = data.toString('utf-8');
+    // Chain writes sequentially to avoid overlapping
+    stderrWriteChain = stderrWriteChain.then(async () => {
+      try {
+        await storage.logs.append(repo, taskHash, inHash, 'stderr', str);
+      } catch (err) {
+        console.warn(`Failed to append stderr log: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
     if (options.onStderr) {
-      options.onStderr(data.toString('utf-8'));
+      options.onStderr(str);
     }
   });
 
@@ -728,7 +697,7 @@ async function runCommand(
     }
   }
 
-  // Write running status with actual child PID (can be async now)
+  // Write running status with actual child PID
   const pidStartTime = await getPidStartTime(child.pid!);
   const status: ExecutionStatus = variant('running', {
     inputHashes,
@@ -737,19 +706,19 @@ async function runCommand(
     pidStartTime: BigInt(pidStartTime ?? -1),
     bootId,
   });
-  const encoder = encodeBeast2For(ExecutionStatusType);
-  await fs.writeFile(path.join(execDir, 'status.beast2'), encoder(status));
+  await storage.refs.executionWrite(repo, taskHash, inHash, status);
 
   // Wait for process to complete
   const result = await resultPromise;
+
+  // Wait for any pending log writes to complete
+  await Promise.all([stdoutWriteChain, stderrWriteChain]);
 
   // Cleanup
   if (timeoutId) clearTimeout(timeoutId);
   if (options.signal) {
     options.signal.removeEventListener('abort', killProcessGroup);
   }
-  stdoutStream.end();
-  stderrStream.end();
 
   return result;
 }

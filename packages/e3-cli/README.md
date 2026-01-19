@@ -13,18 +13,19 @@ npm install -g @elaraai/e3-cli
 ### Repository
 
 ```bash
-e3 init <repo>                    # Initialize a new repository
-e3 status <repo>                  # Show repository status
-e3 gc <repo> [--dry-run]          # Remove unreferenced objects
+e3 repo create <repo>             # Create a new repository
+e3 repo status <repo>             # Show repository status
+e3 repo remove <repo>             # Remove a repository
+e3 repo gc <repo> [--dry-run]     # Remove unreferenced objects
 ```
 
 ### Packages
 
 ```bash
-e3 package import <repo> <zip>    # Import package from .zip
+e3 package import <repo> <zip>        # Import package from .zip
 e3 package export <repo> <pkg> <zip>  # Export package to .zip
-e3 package list <repo>            # List installed packages
-e3 package remove <repo> <pkg>    # Remove a package
+e3 package list <repo>                # List installed packages
+e3 package remove <repo> <pkg>        # Remove a package
 ```
 
 ### Workspaces
@@ -34,6 +35,7 @@ e3 workspace create <repo> <name>     # Create empty workspace
 e3 workspace deploy <repo> <ws> <pkg> # Deploy package to workspace
 e3 workspace export <repo> <ws> <zip> # Export workspace as package
 e3 workspace list <repo>              # List workspaces
+e3 workspace status <repo> <ws>       # Show workspace status
 e3 workspace remove <repo> <ws>       # Remove workspace
 ```
 
@@ -41,6 +43,7 @@ e3 workspace remove <repo> <ws>       # Remove workspace
 
 ```bash
 e3 list <repo> [path]             # List workspaces or tree contents
+e3 tree <repo> <path>             # Show full tree structure
 e3 get <repo> <path> [-f format]  # Get dataset value (east/json/beast2)
 e3 set <repo> <path> <file>       # Set dataset value from file
 ```
@@ -48,8 +51,9 @@ e3 set <repo> <path> <file>       # Set dataset value from file
 ### Execution
 
 ```bash
-e3 run <repo> <task> [inputs...]  # Run task ad-hoc
 e3 start <repo> <ws>              # Execute tasks in workspace
+e3 run <repo> <task> [inputs...]  # Run task ad-hoc
+e3 watch <repo> <ws> <source.ts>  # Watch and auto-deploy on changes
 e3 logs <repo> <path> [--follow]  # View task logs
 ```
 
@@ -59,11 +63,19 @@ e3 logs <repo> <path> [--follow]  # View task logs
 e3 convert [input] --to <format>  # Convert between .east/.json/.beast2
 ```
 
+### Authentication (for remote servers)
+
+```bash
+e3 login <url>                    # Authenticate with remote server
+e3 logout <url>                   # Clear stored credentials
+e3 auth status                    # Show authentication status
+```
+
 ## Example
 
 ```bash
-# Initialize repository and import a package
-e3 init ./my-project
+# Create repository and import a package
+e3 repo create ./my-project
 e3 package import ./my-project ./greeting-pkg-1.0.0.zip
 
 # Create workspace and deploy package

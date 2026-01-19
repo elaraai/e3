@@ -4,14 +4,15 @@
  */
 
 import { NullType, none, some } from '@elaraai/east';
-import type { LogChunk, DataflowGraph, DataflowResult } from './types.js';
+import type { LogChunk, DataflowGraph, DataflowResult, DataflowExecutionState } from './types.js';
 import {
   LogChunkType,
   DataflowRequestType,
   DataflowGraphType,
   DataflowResultType,
+  DataflowExecutionStateType,
 } from './types.js';
-import { get, post, unwrap } from './http.js';
+import { get, post, unwrap, type RequestOptions } from './http.js';
 
 /**
  * Options for starting dataflow execution.
@@ -32,24 +33,29 @@ export interface DataflowOptions {
  * Use workspaceStatus() to poll for progress.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
- * @param options - Execution options
+ * @param dataflowOptions - Execution options
+ * @param options - Request options including auth token
  */
 export async function dataflowStart(
   url: string,
+  repo: string,
   workspace: string,
-  options: DataflowOptions = {}
+  dataflowOptions: DataflowOptions = {},
+  options: RequestOptions
 ): Promise<void> {
   const response = await post(
     url,
-    `/api/workspaces/${encodeURIComponent(workspace)}/start`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow`,
     {
-      concurrency: options.concurrency != null ? some(BigInt(options.concurrency)) : none,
-      force: options.force ?? false,
-      filter: options.filter != null ? some(options.filter) : none,
+      concurrency: dataflowOptions.concurrency != null ? some(BigInt(dataflowOptions.concurrency)) : none,
+      force: dataflowOptions.force ?? false,
+      filter: dataflowOptions.filter != null ? some(dataflowOptions.filter) : none,
     },
     DataflowRequestType,
-    NullType
+    NullType,
+    options
   );
   unwrap(response);
 }
@@ -60,25 +66,30 @@ export async function dataflowStart(
  * Waits for execution to complete and returns the result.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
- * @param options - Execution options
+ * @param dataflowOptions - Execution options
+ * @param options - Request options including auth token
  * @returns Dataflow execution result
  */
 export async function dataflowExecute(
   url: string,
+  repo: string,
   workspace: string,
-  options: DataflowOptions = {}
+  dataflowOptions: DataflowOptions = {},
+  options: RequestOptions
 ): Promise<DataflowResult> {
   const response = await post(
     url,
-    `/api/workspaces/${encodeURIComponent(workspace)}/execute`,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/execute`,
     {
-      concurrency: options.concurrency != null ? some(BigInt(options.concurrency)) : none,
-      force: options.force ?? false,
-      filter: options.filter != null ? some(options.filter) : none,
+      concurrency: dataflowOptions.concurrency != null ? some(BigInt(dataflowOptions.concurrency)) : none,
+      force: dataflowOptions.force ?? false,
+      filter: dataflowOptions.filter != null ? some(dataflowOptions.filter) : none,
     },
     DataflowRequestType,
-    DataflowResultType
+    DataflowResultType,
+    options
   );
   return unwrap(response);
 }
@@ -87,17 +98,22 @@ export async function dataflowExecute(
  * Get the dependency graph for a workspace.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
+ * @param options - Request options including auth token
  * @returns Dataflow graph with tasks and dependencies
  */
 export async function dataflowGraph(
   url: string,
-  workspace: string
+  repo: string,
+  workspace: string,
+  options: RequestOptions
 ): Promise<DataflowGraph> {
   const response = await get(
     url,
-    `/api/workspaces/${encodeURIComponent(workspace)}/graph`,
-    DataflowGraphType
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/graph`,
+    DataflowGraphType,
+    options
   );
   return unwrap(response);
 }
@@ -118,25 +134,70 @@ export interface LogOptions {
  * Read task logs from a workspace.
  *
  * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
  * @param workspace - Workspace name
  * @param task - Task name
- * @param options - Log reading options
+ * @param logOptions - Log reading options
+ * @param options - Request options including auth token
  * @returns Log chunk with data and metadata
  */
 export async function taskLogs(
   url: string,
+  repo: string,
   workspace: string,
   task: string,
-  options: LogOptions = {}
+  logOptions: LogOptions = {},
+  options: RequestOptions
 ): Promise<LogChunk> {
   const params = new URLSearchParams();
-  if (options.stream) params.set('stream', options.stream);
-  if (options.offset != null) params.set('offset', String(options.offset));
-  if (options.limit != null) params.set('limit', String(options.limit));
+  if (logOptions.stream) params.set('stream', logOptions.stream);
+  if (logOptions.offset != null) params.set('offset', String(logOptions.offset));
+  if (logOptions.limit != null) params.set('limit', String(logOptions.limit));
 
   const query = params.toString();
-  const path = `/api/workspaces/${encodeURIComponent(workspace)}/logs/${encodeURIComponent(task)}${query ? `?${query}` : ''}`;
+  const path = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/logs/${encodeURIComponent(task)}${query ? `?${query}` : ''}`;
 
-  const response = await get(url, path, LogChunkType);
+  const response = await get(url, path, LogChunkType, options);
+  return unwrap(response);
+}
+
+/**
+ * Options for getting execution state.
+ */
+export interface ExecutionStateOptions {
+  /** Skip first N events (default: 0) */
+  offset?: number;
+  /** Maximum events to return (default: all) */
+  limit?: number;
+}
+
+/**
+ * Get dataflow execution state (for polling).
+ *
+ * Returns the current execution state including events for progress tracking.
+ * Use offset/limit for pagination of events.
+ *
+ * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
+ * @param workspace - Workspace name
+ * @param stateOptions - Pagination options for events
+ * @param options - Request options including auth token
+ * @returns Execution state with events and summary
+ */
+export async function dataflowExecution(
+  url: string,
+  repo: string,
+  workspace: string,
+  stateOptions: ExecutionStateOptions = {},
+  options: RequestOptions
+): Promise<DataflowExecutionState> {
+  const params = new URLSearchParams();
+  if (stateOptions.offset != null) params.set('offset', String(stateOptions.offset));
+  if (stateOptions.limit != null) params.set('limit', String(stateOptions.limit));
+
+  const query = params.toString();
+  const path = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/execution${query ? `?${query}` : ''}`;
+
+  const response = await get(url, path, DataflowExecutionStateType, options);
   return unwrap(response);
 }

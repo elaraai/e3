@@ -18,14 +18,18 @@ import { packageImport } from './packages.js';
 import { workspaceCreate, workspaceDeploy } from './workspaces.js';
 import { WorkspaceNotFoundError, WorkspaceNotDeployedError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
+import { LocalStorage } from './storage/local/index.js';
+import type { StorageBackend } from './storage/interfaces.js';
 
 describe('trees', () => {
   let testRepo: string;
   let tempDir: string;
+  let storage: StorageBackend;
 
   beforeEach(() => {
     testRepo = createTestRepo();
     tempDir = createTempDir();
+    storage = new LocalStorage();
   });
 
   afterEach(() => {
@@ -48,8 +52,8 @@ describe('trees', () => {
       const structure = structStructure({});
       const tree: Record<string, DataRef> = {};
 
-      const hash = await treeWrite(testRepo, tree, structure);
-      const loaded = await treeRead(testRepo, hash, structure);
+      const hash = await treeWrite(storage, testRepo, tree, structure);
+      const loaded = await treeRead(storage, testRepo, hash, structure);
 
       assert.deepStrictEqual(loaded, {});
     });
@@ -64,8 +68,8 @@ describe('trees', () => {
         field2: variant('value', '789xyz012345'.padEnd(64, '0')),
       };
 
-      const hash = await treeWrite(testRepo, tree, structure);
-      const loaded = await treeRead(testRepo, hash, structure);
+      const hash = await treeWrite(storage, testRepo, tree, structure);
+      const loaded = await treeRead(storage, testRepo, hash, structure);
 
       assert.deepStrictEqual(loaded.field1, tree.field1);
       assert.deepStrictEqual(loaded.field2, tree.field2);
@@ -79,8 +83,8 @@ describe('trees', () => {
         subtree: variant('tree', 'subtreehash'.padEnd(64, '0')),
       };
 
-      const hash = await treeWrite(testRepo, tree, structure);
-      const loaded = await treeRead(testRepo, hash, structure);
+      const hash = await treeWrite(storage, testRepo, tree, structure);
+      const loaded = await treeRead(storage, testRepo, hash, structure);
 
       assert.ok(loaded.subtree);
       assert.strictEqual(loaded.subtree.type, 'tree');
@@ -95,8 +99,8 @@ describe('trees', () => {
         pending: variant('unassigned', null),
       };
 
-      const hash = await treeWrite(testRepo, tree, structure);
-      const loaded = await treeRead(testRepo, hash, structure);
+      const hash = await treeWrite(storage, testRepo, tree, structure);
+      const loaded = await treeRead(storage, testRepo, hash, structure);
 
       assert.ok(loaded.pending);
       assert.strictEqual(loaded.pending.type, 'unassigned');
@@ -110,8 +114,8 @@ describe('trees', () => {
         nullValue: variant('null', null),
       };
 
-      const hash = await treeWrite(testRepo, tree, structure);
-      const loaded = await treeRead(testRepo, hash, structure);
+      const hash = await treeWrite(storage, testRepo, tree, structure);
+      const loaded = await treeRead(storage, testRepo, hash, structure);
 
       assert.ok(loaded.nullValue);
       assert.strictEqual(loaded.nullValue.type, 'null');
@@ -131,8 +135,8 @@ describe('trees', () => {
         null: variant('null', null),
       };
 
-      const hash = await treeWrite(testRepo, tree, structure);
-      const loaded = await treeRead(testRepo, hash, structure);
+      const hash = await treeWrite(storage, testRepo, tree, structure);
+      const loaded = await treeRead(storage, testRepo, hash, structure);
 
       assert.strictEqual(loaded.value?.type, 'value');
       assert.strictEqual(loaded.tree?.type, 'tree');
@@ -151,8 +155,8 @@ describe('trees', () => {
         a: variant('value', 'hash'.padEnd(64, '0')),
       };
 
-      const hash1 = await treeWrite(testRepo, tree1, structure);
-      const hash2 = await treeWrite(testRepo, tree2, structure);
+      const hash1 = await treeWrite(storage, testRepo, tree1, structure);
+      const hash2 = await treeWrite(storage, testRepo, tree2, structure);
 
       assert.strictEqual(hash1, hash2);
     });
@@ -168,8 +172,8 @@ describe('trees', () => {
         a: variant('value', 'hash2'.padEnd(64, '0')),
       };
 
-      const hash1 = await treeWrite(testRepo, tree1, structure);
-      const hash2 = await treeWrite(testRepo, tree2, structure);
+      const hash1 = await treeWrite(storage, testRepo, tree1, structure);
+      const hash2 = await treeWrite(storage, testRepo, tree2, structure);
 
       assert.notStrictEqual(hash1, hash2);
     });
@@ -179,7 +183,7 @@ describe('trees', () => {
       const fakeHash = 'nonexistent'.padEnd(64, '0');
 
       await assert.rejects(
-        async () => await treeRead(testRepo, fakeHash, structure),
+        async () => await treeRead(storage, testRepo, fakeHash, structure),
         /not found/
       );
     });
@@ -188,7 +192,7 @@ describe('trees', () => {
       const structure = valueStructure(StringType);
 
       await assert.rejects(
-        async () => await treeWrite(testRepo, {}, structure),
+        async () => await treeWrite(storage, testRepo, {}, structure),
         /dataset, not a tree/
       );
     });
@@ -198,8 +202,8 @@ describe('trees', () => {
     it('writes and reads string value', async () => {
       const value = 'hello world';
 
-      const hash = await datasetWrite(testRepo, value, StringType);
-      const result = await datasetRead(testRepo, hash);
+      const hash = await datasetWrite(storage, testRepo, value, StringType);
+      const result = await datasetRead(storage, testRepo, hash);
 
       assert.strictEqual(result.value, value);
       assert.strictEqual(result.type.type, 'String');
@@ -208,8 +212,8 @@ describe('trees', () => {
     it('writes and reads integer value', async () => {
       const value = 42n;
 
-      const hash = await datasetWrite(testRepo, value, IntegerType);
-      const result = await datasetRead(testRepo, hash);
+      const hash = await datasetWrite(storage, testRepo, value, IntegerType);
+      const result = await datasetRead(storage, testRepo, hash);
 
       assert.strictEqual(result.value, value);
       assert.strictEqual(result.type.type, 'Integer');
@@ -222,8 +226,8 @@ describe('trees', () => {
       });
       const value = { name: 'Alice', age: 30n };
 
-      const hash = await datasetWrite(testRepo, value, PersonType);
-      const result = await datasetRead(testRepo, hash);
+      const hash = await datasetWrite(storage, testRepo, value, PersonType);
+      const result = await datasetRead(storage, testRepo, hash);
 
       assert.deepStrictEqual(result.value, value);
       assert.strictEqual(result.type.type, 'Struct');
@@ -233,23 +237,23 @@ describe('trees', () => {
       const NumbersType = ArrayType(IntegerType);
       const value = [1n, 2n, 3n, 4n, 5n];
 
-      const hash = await datasetWrite(testRepo, value, NumbersType);
-      const result = await datasetRead(testRepo, hash);
+      const hash = await datasetWrite(storage, testRepo, value, NumbersType);
+      const result = await datasetRead(storage, testRepo, hash);
 
       assert.deepStrictEqual(result.value, value);
       assert.strictEqual(result.type.type, 'Array');
     });
 
     it('produces same hash for same content', async () => {
-      const hash1 = await datasetWrite(testRepo, 'test', StringType);
-      const hash2 = await datasetWrite(testRepo, 'test', StringType);
+      const hash1 = await datasetWrite(storage, testRepo, 'test', StringType);
+      const hash2 = await datasetWrite(storage, testRepo, 'test', StringType);
 
       assert.strictEqual(hash1, hash2);
     });
 
     it('produces different hash for different content', async () => {
-      const hash1 = await datasetWrite(testRepo, 'test1', StringType);
-      const hash2 = await datasetWrite(testRepo, 'test2', StringType);
+      const hash1 = await datasetWrite(storage, testRepo, 'test1', StringType);
+      const hash2 = await datasetWrite(storage, testRepo, 'test2', StringType);
 
       assert.notStrictEqual(hash1, hash2);
     });
@@ -258,7 +262,7 @@ describe('trees', () => {
       const fakeHash = 'nonexistent'.padEnd(64, '0');
 
       await assert.rejects(
-        async () => await datasetRead(testRepo, fakeHash),
+        async () => await datasetRead(storage, testRepo, fakeHash),
         /not found/
       );
     });
@@ -273,32 +277,32 @@ describe('trees', () => {
 
       // Create a leaf dataset
       const salesData = [100n, 200n, 300n];
-      const salesHash = await datasetWrite(testRepo, salesData, ArrayType(IntegerType));
+      const salesHash = await datasetWrite(storage, testRepo, salesData, ArrayType(IntegerType));
 
       // Create an inputs subtree
       const inputsTree: Record<string, DataRef> = {
         sales: variant('value', salesHash),
       };
-      const inputsHash = await treeWrite(testRepo, inputsTree, inputsStructure);
+      const inputsHash = await treeWrite(storage, testRepo, inputsTree, inputsStructure);
 
       // Create root tree
       const rootTree: Record<string, DataRef> = {
         inputs: variant('tree', inputsHash),
       };
-      const rootHash = await treeWrite(testRepo, rootTree, rootStructure);
+      const rootHash = await treeWrite(storage, testRepo, rootTree, rootStructure);
 
       // Traverse: root -> inputs -> sales
-      const loadedRoot = await treeRead(testRepo, rootHash, rootStructure);
+      const loadedRoot = await treeRead(storage, testRepo, rootHash, rootStructure);
       const inputsRef = loadedRoot.inputs;
       assert.ok(inputsRef);
       assert.strictEqual(inputsRef.type, 'tree');
 
-      const loadedInputs = await treeRead(testRepo, inputsRef.value, inputsStructure);
+      const loadedInputs = await treeRead(storage, testRepo, inputsRef.value, inputsStructure);
       const salesRef = loadedInputs.sales;
       assert.ok(salesRef);
       assert.strictEqual(salesRef.type, 'value');
 
-      const loadedSales = await datasetRead(testRepo, salesRef.value);
+      const loadedSales = await datasetRead(storage, testRepo, salesRef.value);
       assert.deepStrictEqual(loadedSales.value, salesData);
     });
   });
@@ -310,10 +314,10 @@ describe('trees', () => {
       const pkg = e3.package('list-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'list-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       // List root
-      const fields = await packageListTree(testRepo, 'list-test', '1.0.0', []);
+      const fields = await packageListTree(storage, testRepo, 'list-test', '1.0.0', []);
 
       assert.ok(fields.includes('inputs'));
     });
@@ -325,10 +329,10 @@ describe('trees', () => {
       const pkg = e3.package('nested-list', '1.0.0', input1, input2);
       const zipPath = join(tempDir, 'nested-list.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       // List inputs subtree
-      const fields = await packageListTree(testRepo, 'nested-list', '1.0.0', [
+      const fields = await packageListTree(storage, testRepo, 'nested-list', '1.0.0', [
         variant('field', 'inputs'),
       ]);
 
@@ -339,7 +343,7 @@ describe('trees', () => {
 
     it('throws for non-existent package', async () => {
       await assert.rejects(
-        async () => await packageListTree(testRepo, 'nonexistent', '1.0.0', []),
+        async () => await packageListTree(storage, testRepo, 'nonexistent', '1.0.0', []),
         /not found|ENOENT/
       );
     });
@@ -349,10 +353,10 @@ describe('trees', () => {
       const pkg = e3.package('path-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'path-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       await assert.rejects(
-        async () => await packageListTree(testRepo, 'path-test', '1.0.0', [
+        async () => await packageListTree(storage, testRepo, 'path-test', '1.0.0', [
           variant('field', 'nonexistent'),
         ]),
         /not found/
@@ -364,10 +368,10 @@ describe('trees', () => {
       const pkg = e3.package('dataset-path', '1.0.0', myInput);
       const zipPath = join(tempDir, 'dataset-path.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       await assert.rejects(
-        async () => await packageListTree(testRepo, 'dataset-path', '1.0.0', [
+        async () => await packageListTree(storage, testRepo, 'dataset-path', '1.0.0', [
           variant('field', 'inputs'),
           variant('field', 'value'),
         ]),
@@ -382,9 +386,9 @@ describe('trees', () => {
       const pkg = e3.package('get-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'get-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
-      const value = await packageGetDataset(testRepo, 'get-test', '1.0.0', [
+      const value = await packageGetDataset(storage, testRepo, 'get-test', '1.0.0', [
         variant('field', 'inputs'),
         variant('field', 'greeting'),
       ]);
@@ -397,9 +401,9 @@ describe('trees', () => {
       const pkg = e3.package('int-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'int-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
-      const value = await packageGetDataset(testRepo, 'int-test', '1.0.0', [
+      const value = await packageGetDataset(storage, testRepo, 'int-test', '1.0.0', [
         variant('field', 'inputs'),
         variant('field', 'count'),
       ]);
@@ -412,10 +416,10 @@ describe('trees', () => {
       const pkg = e3.package('empty-path', '1.0.0', myInput);
       const zipPath = join(tempDir, 'empty-path.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       await assert.rejects(
-        async () => await packageGetDataset(testRepo, 'empty-path', '1.0.0', []),
+        async () => await packageGetDataset(storage, testRepo, 'empty-path', '1.0.0', []),
         /root.*tree/
       );
     });
@@ -425,10 +429,10 @@ describe('trees', () => {
       const pkg = e3.package('tree-path', '1.0.0', myInput);
       const zipPath = join(tempDir, 'tree-path.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       await assert.rejects(
-        async () => await packageGetDataset(testRepo, 'tree-path', '1.0.0', [
+        async () => await packageGetDataset(storage, testRepo, 'tree-path', '1.0.0', [
           variant('field', 'inputs'),
         ]),
         /tree, not a dataset/
@@ -440,10 +444,10 @@ describe('trees', () => {
       const pkg = e3.package('bad-path', '1.0.0', myInput);
       const zipPath = join(tempDir, 'bad-path.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
+      await packageImport(storage, testRepo, zipPath);
 
       await assert.rejects(
-        async () => await packageGetDataset(testRepo, 'bad-path', '1.0.0', [
+        async () => await packageGetDataset(storage, testRepo, 'bad-path', '1.0.0', [
           variant('field', 'inputs'),
           variant('field', 'nonexistent'),
         ]),
@@ -458,10 +462,10 @@ describe('trees', () => {
       const pkg = e3.package('ws-list-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-list-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-list-test', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-list-test', '1.0.0');
 
-      const fields = await workspaceListTree(testRepo, 'myws', []);
+      const fields = await workspaceListTree(storage, testRepo, 'myws', []);
 
       assert.ok(fields.includes('inputs'));
     });
@@ -472,10 +476,10 @@ describe('trees', () => {
       const pkg = e3.package('ws-nested-list', '1.0.0', input1, input2);
       const zipPath = join(tempDir, 'ws-nested-list.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-nested-list', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-nested-list', '1.0.0');
 
-      const fields = await workspaceListTree(testRepo, 'myws', [
+      const fields = await workspaceListTree(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
       ]);
 
@@ -486,16 +490,16 @@ describe('trees', () => {
 
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
-        async () => await workspaceListTree(testRepo, 'nonexistent', []),
+        async () => await workspaceListTree(storage, testRepo, 'nonexistent', []),
         WorkspaceNotFoundError
       );
     });
 
     it('throws for undeployed workspace', async () => {
-      await workspaceCreate(testRepo, 'empty');
+      await workspaceCreate(storage, testRepo, 'empty');
 
       await assert.rejects(
-        async () => await workspaceListTree(testRepo, 'empty', []),
+        async () => await workspaceListTree(storage, testRepo, 'empty', []),
         WorkspaceNotDeployedError
       );
     });
@@ -505,11 +509,11 @@ describe('trees', () => {
       const pkg = e3.package('ws-dataset-path', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-dataset-path.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-dataset-path', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-dataset-path', '1.0.0');
 
       await assert.rejects(
-        async () => await workspaceListTree(testRepo, 'myws', [
+        async () => await workspaceListTree(storage, testRepo, 'myws', [
           variant('field', 'inputs'),
           variant('field', 'value'),
         ]),
@@ -524,10 +528,10 @@ describe('trees', () => {
       const pkg = e3.package('ws-get-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-get-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-get-test', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-get-test', '1.0.0');
 
-      const value = await workspaceGetDataset(testRepo, 'myws', [
+      const value = await workspaceGetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'greeting'),
       ]);
@@ -540,10 +544,10 @@ describe('trees', () => {
       const pkg = e3.package('ws-int-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-int-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-int-test', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-int-test', '1.0.0');
 
-      const value = await workspaceGetDataset(testRepo, 'myws', [
+      const value = await workspaceGetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'count'),
       ]);
@@ -556,11 +560,11 @@ describe('trees', () => {
       const pkg = e3.package('ws-empty-path', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-empty-path.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-empty-path', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-empty-path', '1.0.0');
 
       await assert.rejects(
-        async () => await workspaceGetDataset(testRepo, 'myws', []),
+        async () => await workspaceGetDataset(storage, testRepo, 'myws', []),
         /root.*tree/
       );
     });
@@ -570,11 +574,11 @@ describe('trees', () => {
       const pkg = e3.package('ws-tree-path', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-tree-path.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-tree-path', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-tree-path', '1.0.0');
 
       await assert.rejects(
-        async () => await workspaceGetDataset(testRepo, 'myws', [
+        async () => await workspaceGetDataset(storage, testRepo, 'myws', [
           variant('field', 'inputs'),
         ]),
         /tree, not a dataset/
@@ -583,7 +587,7 @@ describe('trees', () => {
 
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
-        async () => await workspaceGetDataset(testRepo, 'nonexistent', [
+        async () => await workspaceGetDataset(storage, testRepo, 'nonexistent', [
           variant('field', 'inputs'),
         ]),
         WorkspaceNotFoundError
@@ -591,10 +595,10 @@ describe('trees', () => {
     });
 
     it('throws for undeployed workspace', async () => {
-      await workspaceCreate(testRepo, 'empty');
+      await workspaceCreate(storage, testRepo, 'empty');
 
       await assert.rejects(
-        async () => await workspaceGetDataset(testRepo, 'empty', [
+        async () => await workspaceGetDataset(storage, testRepo, 'empty', [
           variant('field', 'inputs'),
         ]),
         WorkspaceNotDeployedError
@@ -608,24 +612,24 @@ describe('trees', () => {
       const pkg = e3.package('ws-set-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-set-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-set-test', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-set-test', '1.0.0');
 
       // Verify initial value
-      const initial = await workspaceGetDataset(testRepo, 'myws', [
+      const initial = await workspaceGetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'greeting'),
       ]);
       assert.strictEqual(initial, 'hello');
 
       // Update the value
-      await workspaceSetDataset(testRepo, 'myws', [
+      await workspaceSetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'greeting'),
       ], 'goodbye', StringType);
 
       // Verify updated value
-      const updated = await workspaceGetDataset(testRepo, 'myws', [
+      const updated = await workspaceGetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'greeting'),
       ]);
@@ -637,15 +641,15 @@ describe('trees', () => {
       const pkg = e3.package('ws-set-int', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-set-int.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-set-int', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-set-int', '1.0.0');
 
-      await workspaceSetDataset(testRepo, 'myws', [
+      await workspaceSetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'count'),
       ], 200n, IntegerType);
 
-      const value = await workspaceGetDataset(testRepo, 'myws', [
+      const value = await workspaceGetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'count'),
       ]);
@@ -658,24 +662,24 @@ describe('trees', () => {
       const pkg = e3.package('ws-share-test', '1.0.0', input1, input2);
       const zipPath = join(tempDir, 'ws-share-test.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-share-test', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-share-test', '1.0.0');
 
       // Update only 'a'
-      await workspaceSetDataset(testRepo, 'myws', [
+      await workspaceSetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'a'),
       ], 'updated-alpha', StringType);
 
       // Verify 'a' was updated
-      const valueA = await workspaceGetDataset(testRepo, 'myws', [
+      const valueA = await workspaceGetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'a'),
       ]);
       assert.strictEqual(valueA, 'updated-alpha');
 
       // Verify 'b' is unchanged
-      const valueB = await workspaceGetDataset(testRepo, 'myws', [
+      const valueB = await workspaceGetDataset(storage, testRepo, 'myws', [
         variant('field', 'inputs'),
         variant('field', 'b'),
       ]);
@@ -687,11 +691,11 @@ describe('trees', () => {
       const pkg = e3.package('ws-set-empty', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-set-empty.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-set-empty', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-set-empty', '1.0.0');
 
       await assert.rejects(
-        async () => await workspaceSetDataset(testRepo, 'myws', [], 'value', StringType),
+        async () => await workspaceSetDataset(storage, testRepo, 'myws', [], 'value', StringType),
         /root.*tree/
       );
     });
@@ -701,11 +705,11 @@ describe('trees', () => {
       const pkg = e3.package('ws-set-tree', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-set-tree.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-set-tree', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-set-tree', '1.0.0');
 
       await assert.rejects(
-        async () => await workspaceSetDataset(testRepo, 'myws', [
+        async () => await workspaceSetDataset(storage, testRepo, 'myws', [
           variant('field', 'inputs'),
         ], 'value', StringType),
         /tree, not a dataset/
@@ -717,11 +721,11 @@ describe('trees', () => {
       const pkg = e3.package('ws-set-bad', '1.0.0', myInput);
       const zipPath = join(tempDir, 'ws-set-bad.zip');
       await e3.export(pkg, zipPath);
-      await packageImport(testRepo, zipPath);
-      await workspaceDeploy(testRepo, 'myws', 'ws-set-bad', '1.0.0');
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'ws-set-bad', '1.0.0');
 
       await assert.rejects(
-        async () => await workspaceSetDataset(testRepo, 'myws', [
+        async () => await workspaceSetDataset(storage, testRepo, 'myws', [
           variant('field', 'inputs'),
           variant('field', 'nonexistent'),
         ], 'value', StringType),
@@ -731,7 +735,7 @@ describe('trees', () => {
 
     it('throws for non-existent workspace', async () => {
       await assert.rejects(
-        async () => await workspaceSetDataset(testRepo, 'nonexistent', [
+        async () => await workspaceSetDataset(storage, testRepo, 'nonexistent', [
           variant('field', 'inputs'),
         ], 'value', StringType),
         WorkspaceNotFoundError
@@ -739,10 +743,10 @@ describe('trees', () => {
     });
 
     it('throws for undeployed workspace', async () => {
-      await workspaceCreate(testRepo, 'empty');
+      await workspaceCreate(storage, testRepo, 'empty');
 
       await assert.rejects(
-        async () => await workspaceSetDataset(testRepo, 'empty', [
+        async () => await workspaceSetDataset(storage, testRepo, 'empty', [
           variant('field', 'inputs'),
         ], 'value', StringType),
         WorkspaceNotDeployedError

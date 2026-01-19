@@ -35,10 +35,11 @@
   },
   "dependencies": {
     "@elaraai/e3": "^0.0.2-beta.12",
+    "@elaraai/e3-api-client": "^0.0.2-beta.12",
     "@elaraai/e3-core": "^0.0.2-beta.12",
     "@elaraai/e3-types": "^0.0.2-beta.12",
     "commander": "^12.0.0",
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.27.2"
   },
   "peerDependencies": {
     "@elaraai/east": "^0.0.1-beta.29"

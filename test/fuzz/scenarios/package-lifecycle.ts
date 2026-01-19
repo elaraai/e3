@@ -63,9 +63,9 @@ export async function testPackageLifecycle(config: PackageLifecycleConfig = {}):
     assert(existsSync(zipPath), 'Package zip should exist after export');
 
     // Step 3: Init repository
-    const initResult = await runE3Command(['init', repoDir], testDir);
+    const initResult = await runE3Command(['repo', 'create', repoDir], testDir);
     assert(initResult.exitCode === 0, `init failed: ${initResult.stderr}`);
-    assert(existsSync(join(repoDir, '.e3')), '.e3 directory should exist');
+    assert(existsSync(join(repoDir, 'objects')), 'objects directory should exist');
 
     // Step 4: Import package
     const importResult = await runE3Command(['package', 'import', repoDir, zipPath], testDir);
@@ -92,7 +92,7 @@ export async function testPackageLifecycle(config: PackageLifecycleConfig = {}):
     assert(deployResult.exitCode === 0, `deploy failed: ${deployResult.stderr}`);
 
     // Step 7: Verify status
-    const statusResult = await runE3Command(['status', repoDir], testDir);
+    const statusResult = await runE3Command(['repo', 'status', repoDir], testDir);
     assert(statusResult.exitCode === 0, `status failed: ${statusResult.stderr}`);
 
     // Clean up on success

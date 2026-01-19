@@ -31,18 +31,23 @@ on:
         required: true
         default: true
         type: boolean
-      publish_e3_cli:
-        description: 'Publish @elaraai/e3-cli'
-        required: true
-        default: true
-        type: boolean
       publish_e3_api_client:
         description: 'Publish @elaraai/e3-api-client'
         required: true
         default: true
         type: boolean
+      publish_e3_cli:
+        description: 'Publish @elaraai/e3-cli'
+        required: true
+        default: true
+        type: boolean
       publish_e3_api_server:
         description: 'Publish @elaraai/e3-api-server'
+        required: true
+        default: true
+        type: boolean
+      publish_e3_api_tests:
+        description: 'Publish @elaraai/e3-api-tests'
         required: true
         default: true
         type: boolean
@@ -160,18 +165,6 @@ jobs:
           fi
           echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
-      - name: Bump e3-cli version
-        if: ${{ inputs.publish_e3_cli }}
-        id: version_cli
-        working-directory: packages/e3-cli
-        run: |
-          if [[ "${{ inputs.release_type }}" == pre* ]]; then
-            npm version ${{ inputs.release_type }} --preid=beta --no-git-tag-version
-          else
-            npm version ${{ inputs.release_type }} --no-git-tag-version
-          fi
-          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
-
       - name: Bump e3-api-client version
         if: ${{ inputs.publish_e3_api_client }}
         id: version_api_client
@@ -184,10 +177,34 @@ jobs:
           fi
           echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
+      - name: Bump e3-cli version
+        if: ${{ inputs.publish_e3_cli }}
+        id: version_cli
+        working-directory: packages/e3-cli
+        run: |
+          if [[ "${{ inputs.release_type }}" == pre* ]]; then
+            npm version ${{ inputs.release_type }} --preid=beta --no-git-tag-version
+          else
+            npm version ${{ inputs.release_type }} --no-git-tag-version
+          fi
+          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
       - name: Bump e3-api-server version
         if: ${{ inputs.publish_e3_api_server }}
         id: version_api_server
         working-directory: packages/e3-api-server
+        run: |
+          if [[ "${{ inputs.release_type }}" == pre* ]]; then
+            npm version ${{ inputs.release_type }} --preid=beta --no-git-tag-version
+          else
+            npm version ${{ inputs.release_type }} --no-git-tag-version
+          fi
+          echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Bump e3-api-tests version
+        if: ${{ inputs.publish_e3_api_tests }}
+        id: version_api_tests
+        working-directory: packages/e3-api-tests
         run: |
           if [[ "${{ inputs.release_type }}" == pre* ]]; then
             npm version ${{ inputs.release_type }} --preid=beta --no-git-tag-version
@@ -214,15 +231,16 @@ jobs:
           npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
           cd ../..
 
-          # e3-cli depends on e3, e3-core and e3-types
-          cd packages/e3-cli
-          npm pkg set "dependencies.@elaraai/e3=^${E3_VERSION}"
-          npm pkg set "dependencies.@elaraai/e3-core=^${E3_CORE_VERSION}"
+          # e3-api-client depends on e3-types
+          cd packages/e3-api-client
           npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
           cd ../..
 
-          # e3-api-client depends on e3-types
-          cd packages/e3-api-client
+          # e3-cli depends on e3, e3-core, e3-api-client and e3-types
+          cd packages/e3-cli
+          npm pkg set "dependencies.@elaraai/e3=^${E3_VERSION}"
+          npm pkg set "dependencies.@elaraai/e3-core=^${E3_CORE_VERSION}"
+          npm pkg set "dependencies.@elaraai/e3-api-client=^${E3_API_CLIENT_VERSION}"
           npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
           cd ../..
 
@@ -230,6 +248,13 @@ jobs:
           cd packages/e3-api-server
           npm pkg set "dependencies.@elaraai/e3-core=^${E3_CORE_VERSION}"
           npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
+
+          # e3-api-tests depends on e3-api-client, e3-cli and e3
+          cd ../../packages/e3-api-tests
+          npm pkg set "dependencies.@elaraai/e3-api-client=^${E3_API_CLIENT_VERSION}"
+          npm pkg set "dependencies.@elaraai/e3-cli=^${E3_CLI_VERSION}"
+          npm pkg set "dependencies.@elaraai/e3=^${E3_VERSION}"
+
           cd ../..
 
       # Commit all version bumps
@@ -246,14 +271,17 @@ jobs:
           if [[ "${{ inputs.publish_e3 }}" == "true" ]]; then
             PACKAGES="${PACKAGES} e3@${{ steps.version_e3.outputs.new_version }}"
           fi
-          if [[ "${{ inputs.publish_e3_cli }}" == "true" ]]; then
-            PACKAGES="${PACKAGES} e3-cli@${{ steps.version_cli.outputs.new_version }}"
-          fi
           if [[ "${{ inputs.publish_e3_api_client }}" == "true" ]]; then
             PACKAGES="${PACKAGES} e3-api-client@${{ steps.version_api_client.outputs.new_version }}"
           fi
+          if [[ "${{ inputs.publish_e3_cli }}" == "true" ]]; then
+            PACKAGES="${PACKAGES} e3-cli@${{ steps.version_cli.outputs.new_version }}"
+          fi
           if [[ "${{ inputs.publish_e3_api_server }}" == "true" ]]; then
             PACKAGES="${PACKAGES} e3-api-server@${{ steps.version_api_server.outputs.new_version }}"
+          fi
+          if [[ "${{ inputs.publish_e3_api_tests }}" == "true" ]]; then
+            PACKAGES="${PACKAGES} e3-api-tests@${{ steps.version_api_tests.outputs.new_version }}"
           fi
           git commit -m "chore: bump versions -${PACKAGES}" || echo "No changes to commit"
 
@@ -277,6 +305,9 @@ jobs:
           fi
           if [[ "${{ inputs.publish_e3_api_server }}" == "true" ]]; then
             git tag "e3-api-server-${{ steps.version_api_server.outputs.new_version }}"
+          fi
+          if [[ "${{ inputs.publish_e3_api_tests }}" == "true" ]]; then
+            git tag "e3-api-tests-${{ steps.version_api_tests.outputs.new_version }}"
           fi
 
       - name: Push changes and tags
@@ -312,6 +343,11 @@ jobs:
         if: ${{ inputs.publish_e3_api_server }}
         run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
         working-directory: packages/e3-api-server
+
+      - name: Publish @elaraai/e3-api-tests
+        if: ${{ inputs.publish_e3_api_tests }}
+        run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
+        working-directory: packages/e3-api-tests
 
       # Create GitHub releases
       - name: Create GitHub Release for e3-types
@@ -356,6 +392,15 @@ jobs:
         with:
           tag_name: e3-api-client-${{ steps.version_api_client.outputs.new_version }}
           name: "@elaraai/e3-api-client ${{ steps.version_api_client.outputs.new_version }}"
+          generate_release_notes: true
+          prerelease: ${{ steps.npm_tag.outputs.prerelease == 'true' }}
+
+      - name: Create GitHub Release for e3-api-tests
+        if: ${{ inputs.publish_e3_api_tests }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: e3-api-tests-${{ steps.version_api_tests.outputs.new_version }}
+          name: "@elaraai/e3-api-tests ${{ steps.version_api_tests.outputs.new_version }}"
           generate_release_notes: true
           prerelease: ${{ steps.npm_tag.outputs.prerelease == 'true' }}
 

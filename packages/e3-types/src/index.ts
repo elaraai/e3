@@ -81,3 +81,13 @@ export {
   ExecutionStatusType,
   type ExecutionStatus,
 } from './execution.js';
+
+// Lock state
+export {
+  LockOperationType,
+  type LockOperation,
+  ProcessHolderType,
+  type ProcessHolder,
+  LockStateType,
+  type LockState,
+} from './lock.js';
