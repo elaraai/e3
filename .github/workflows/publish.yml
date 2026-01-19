@@ -219,6 +219,8 @@ jobs:
           E3_TYPES_VERSION=$(node -p "require('./packages/e3-types/package.json').version")
           E3_VERSION=$(node -p "require('./packages/e3/package.json').version")
           E3_CORE_VERSION=$(node -p "require('./packages/e3-core/package.json').version")
+          E3_API_CLIENT_VERSION=$(node -p "require('./packages/e3-api-client/package.json').version")
+          E3_CLI_VERSION=$(node -p "require('./packages/e3-cli/package.json').version")
 
           # e3 depends on e3-types
           cd packages/e3
@@ -248,13 +250,13 @@ jobs:
           cd packages/e3-api-server
           npm pkg set "dependencies.@elaraai/e3-core=^${E3_CORE_VERSION}"
           npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
+          cd ../..
 
           # e3-api-tests depends on e3-api-client, e3-cli and e3
-          cd ../../packages/e3-api-tests
+          cd packages/e3-api-tests
           npm pkg set "dependencies.@elaraai/e3-api-client=^${E3_API_CLIENT_VERSION}"
           npm pkg set "dependencies.@elaraai/e3-cli=^${E3_CLI_VERSION}"
           npm pkg set "dependencies.@elaraai/e3=^${E3_VERSION}"
-
           cd ../..
 
       # Commit all version bumps
@@ -313,31 +315,38 @@ jobs:
       - name: Push changes and tags
         run: git push origin HEAD --tags
 
-      # Publish npm packages in dependency order
+      # Publish npm packages in dependency order:
+      # 1. e3-types (no deps)
+      # 2. e3 (needs e3-types)
+      # 3. e3-api-client (needs e3-types)
+      # 4. e3-core (needs e3, e3-types)
+      # 5. e3-cli (needs e3, e3-api-client, e3-core)
+      # 6. e3-api-server (needs e3-core)
+      # 7. e3-api-tests (needs e3, e3-api-client, e3-cli)
       - name: Publish @elaraai/e3-types
         if: ${{ inputs.publish_e3_types }}
         run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
         working-directory: packages/e3-types
-
-      - name: Publish @elaraai/e3-core
-        if: ${{ inputs.publish_e3_core }}
-        run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
-        working-directory: packages/e3-core
 
       - name: Publish @elaraai/e3
         if: ${{ inputs.publish_e3 }}
         run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
         working-directory: packages/e3
 
-      - name: Publish @elaraai/e3-cli
-        if: ${{ inputs.publish_e3_cli }}
-        run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
-        working-directory: packages/e3-cli
-
       - name: Publish @elaraai/e3-api-client
         if: ${{ inputs.publish_e3_api_client }}
         run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
         working-directory: packages/e3-api-client
+
+      - name: Publish @elaraai/e3-core
+        if: ${{ inputs.publish_e3_core }}
+        run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
+        working-directory: packages/e3-core
+
+      - name: Publish @elaraai/e3-cli
+        if: ${{ inputs.publish_e3_cli }}
+        run: npm publish --access public --provenance --tag ${{ steps.npm_tag.outputs.tag }}
+        working-directory: packages/e3-cli
 
       - name: Publish @elaraai/e3-api-server
         if: ${{ inputs.publish_e3_api_server }}
