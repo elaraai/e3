@@ -33,9 +33,10 @@ build:
 	npm run build --workspace=packages/e3-types
 	npm run build --workspace=packages/e3
 	npm run build --workspace=packages/e3-core
-	npm run build --workspace=packages/e3-cli
 	npm run build --workspace=packages/e3-api-client
+	npm run build --workspace=packages/e3-cli
 	npm run build --workspace=packages/e3-api-server
+	npm run build --workspace=packages/e3-api-tests
 	npm run build --workspace=test/integration
 	npm run build --workspace=test/fuzz
 

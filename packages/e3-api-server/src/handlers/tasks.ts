@@ -109,27 +109,49 @@ export async function listExecutions(
       const status = await executionGet(storage, repoPath, taskHash, inputsHash);
       if (!status) continue;
 
-      // Extract common fields from the status
-      const item: ExecutionListItem = {
-        inputsHash,
-        inputHashes: status.value.inputHashes,
-        status: statusToApiStatus(status),
-        startedAt: status.value.startedAt.toISOString(),
-        completedAt: none,
-        duration: none,
-        exitCode: none,
-      };
-
-      // Add completion-specific fields
+      // Build the complete item based on status type
+      let item: ExecutionListItem;
       if (status.type === 'success') {
-        item.completedAt = some(status.value.completedAt.toISOString());
-        item.duration = some(calculateDuration(status.value.startedAt, status.value.completedAt));
+        item = {
+          inputsHash,
+          inputHashes: status.value.inputHashes,
+          status: statusToApiStatus(status),
+          startedAt: status.value.startedAt.toISOString(),
+          completedAt: some(status.value.completedAt.toISOString()),
+          duration: some(calculateDuration(status.value.startedAt, status.value.completedAt)),
+          exitCode: none,
+        };
       } else if (status.type === 'failed') {
-        item.completedAt = some(status.value.completedAt.toISOString());
-        item.duration = some(calculateDuration(status.value.startedAt, status.value.completedAt));
-        item.exitCode = some(status.value.exitCode);
+        item = {
+          inputsHash,
+          inputHashes: status.value.inputHashes,
+          status: statusToApiStatus(status),
+          startedAt: status.value.startedAt.toISOString(),
+          completedAt: some(status.value.completedAt.toISOString()),
+          duration: some(calculateDuration(status.value.startedAt, status.value.completedAt)),
+          exitCode: some(status.value.exitCode),
+        };
       } else if (status.type === 'error') {
-        item.completedAt = some(status.value.completedAt.toISOString());
+        item = {
+          inputsHash,
+          inputHashes: status.value.inputHashes,
+          status: statusToApiStatus(status),
+          startedAt: status.value.startedAt.toISOString(),
+          completedAt: some(status.value.completedAt.toISOString()),
+          duration: none,
+          exitCode: none,
+        };
+      } else {
+        // running status
+        item = {
+          inputsHash,
+          inputHashes: status.value.inputHashes,
+          status: statusToApiStatus(status),
+          startedAt: status.value.startedAt.toISOString(),
+          completedAt: none,
+          duration: none,
+          exitCode: none,
+        };
       }
 
       result.push(item);
