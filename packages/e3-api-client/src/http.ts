@@ -14,12 +14,11 @@ export type Response<T> =
 /**
  * Request options for authenticated API calls.
  *
- * The token is mandatory to ensure callers explicitly handle authentication.
- * This prevents accidental unauthenticated requests.
+ * The token is mandatory to ensure callers explicitly handle authentication (or not).
  */
 export interface RequestOptions {
-  /** Bearer token for authentication (required) */
-  token: string;
+  /** Bearer token for authentication (optional depending on server) */
+  token: string | null;
 }
 
 /**
@@ -35,7 +34,7 @@ export async function get<T extends EastType>(
     method: 'GET',
     headers: {
       'Accept': 'application/beast2',
-      'Authorization': `Bearer ${options.token}`,
+      ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
   });
 
@@ -59,7 +58,7 @@ export async function post<Req extends EastType, Res extends EastType>(
     headers: {
       'Content-Type': 'application/beast2',
       'Accept': 'application/beast2',
-      'Authorization': `Bearer ${options.token}`,
+      ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
     body: encode(body),
   });
@@ -84,7 +83,7 @@ export async function put<Req extends EastType, Res extends EastType>(
     headers: {
       'Content-Type': 'application/beast2',
       'Accept': 'application/beast2',
-      'Authorization': `Bearer ${options.token}`,
+      ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
     body: encode(body),
   });
@@ -105,7 +104,7 @@ export async function del<T extends EastType>(
     method: 'DELETE',
     headers: {
       'Accept': 'application/beast2',
-      'Authorization': `Bearer ${options.token}`,
+      ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
   });
 
@@ -125,7 +124,7 @@ export async function putEmpty<T extends EastType>(
     method: 'PUT',
     headers: {
       'Accept': 'application/beast2',
-      'Authorization': `Bearer ${options.token}`,
+      ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
   });
 

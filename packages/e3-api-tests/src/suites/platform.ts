@@ -61,7 +61,7 @@ export function platformTests(getContext: () => TestContext): void {
       const compiled = East.compileAsync(getStatus, PlatformImpl);
 
       // Run the compiled function with token from context
-      const status = await compiled(ctx.config.baseUrl, ctx.repoName, (await ctx.opts()).token);
+      const status = await compiled(ctx.config.baseUrl, ctx.repoName, (await ctx.opts()).token!);
 
       // Verify results
       assert.ok(typeof status.path === 'string' && status.path.length > 0, 'path should be a non-empty string');
@@ -90,7 +90,7 @@ export function platformTests(getContext: () => TestContext): void {
       const compiled = East.compileAsync(listWorkspaces, PlatformImpl);
 
       // Run the compiled function
-      const workspaces = await compiled(ctx.config.baseUrl, ctx.repoName, (await ctx.opts()).token);
+      const workspaces = await compiled(ctx.config.baseUrl, ctx.repoName, (await ctx.opts()).token!);
 
       // Verify results
       assert.strictEqual(workspaces.length, 1);
@@ -120,7 +120,7 @@ export function platformTests(getContext: () => TestContext): void {
       const compiled = East.compileAsync(createAndList, PlatformImpl);
 
       // Run the compiled function
-      const workspaces = await compiled(ctx.config.baseUrl, ctx.repoName, 'east-created-ws', (await ctx.opts()).token);
+      const workspaces = await compiled(ctx.config.baseUrl, ctx.repoName, 'east-created-ws', (await ctx.opts()).token!);
 
       // Verify workspace was created
       assert.strictEqual(workspaces.length, 1);
@@ -136,7 +136,7 @@ export function platformTests(getContext: () => TestContext): void {
         }
       );
       const compiledRemove = East.compileAsync(removeWs, PlatformImpl);
-      await compiledRemove(ctx.config.baseUrl, ctx.repoName, 'east-created-ws', (await ctx.opts()).token);
+      await compiledRemove(ctx.config.baseUrl, ctx.repoName, 'east-created-ws', (await ctx.opts()).token!);
 
       // Verify removed
       const finalList = await workspaceList(ctx.config.baseUrl, ctx.repoName, opts);
@@ -162,7 +162,7 @@ export function platformTests(getContext: () => TestContext): void {
       const compiled = East.compileAsync(listAndCount, PlatformImpl);
 
       // Run the compiled function
-      const count = await compiled(ctx.config.baseUrl, ctx.repoName, (await ctx.opts()).token);
+      const count = await compiled(ctx.config.baseUrl, ctx.repoName, (await ctx.opts()).token!);
 
       // Should have 1 package (imported in beforeEach)
       assert.strictEqual(count, 1n);
