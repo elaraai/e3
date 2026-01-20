@@ -3,13 +3,12 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import { NullType, none, some } from '@elaraai/east';
-import type { LogChunk, DataflowGraph, DataflowResult, DataflowExecutionState } from './types.js';
+import { NullType, none, some, variant } from '@elaraai/east';
+import type { LogChunk, DataflowGraph, DataflowResult, DataflowExecutionState, TaskExecutionResult } from './types.js';
 import {
   LogChunkType,
   DataflowRequestType,
   DataflowGraphType,
-  DataflowResultType,
   DataflowExecutionStateType,
 } from './types.js';
 import { get, post, unwrap, type RequestOptions } from './http.js';
@@ -27,10 +26,20 @@ export interface DataflowOptions {
 }
 
 /**
+ * Options for polling during dataflow execution.
+ */
+export interface DataflowPollOptions {
+  /** Interval between polls in milliseconds (default: 500) */
+  pollInterval?: number;
+  /** Maximum time to wait for completion in milliseconds (default: 300000 = 5 minutes) */
+  timeout?: number;
+}
+
+/**
  * Start dataflow execution on a workspace (non-blocking).
  *
  * Returns immediately after spawning execution in background.
- * Use workspaceStatus() to poll for progress.
+ * Use dataflowExecutePoll() to poll for progress.
  *
  * @param url - Base URL of the e3 API server
  * @param repo - Repository name
@@ -38,7 +47,7 @@ export interface DataflowOptions {
  * @param dataflowOptions - Execution options
  * @param options - Request options including auth token
  */
-export async function dataflowStart(
+export async function dataflowExecuteLaunch(
   url: string,
   repo: string,
   workspace: string,
@@ -61,15 +70,92 @@ export async function dataflowStart(
 }
 
 /**
- * Execute dataflow on a workspace (blocking).
+ * Build DataflowResult from DataflowExecutionState.
  *
- * Waits for execution to complete and returns the result.
+ * Converts events into task execution results.
+ */
+function buildDataflowResult(state: DataflowExecutionState): DataflowResult {
+  const tasks: TaskExecutionResult[] = [];
+
+  // Process events to build task results
+  // Events are: start, complete, cached, failed, error, input_unavailable
+  for (const event of state.events) {
+    switch (event.type) {
+      case 'complete':
+        tasks.push({
+          name: event.value.task,
+          cached: false,
+          state: variant('success', null),
+          duration: event.value.duration,
+        });
+        break;
+      case 'cached':
+        tasks.push({
+          name: event.value.task,
+          cached: true,
+          state: variant('success', null),
+          duration: 0,
+        });
+        break;
+      case 'failed':
+        tasks.push({
+          name: event.value.task,
+          cached: false,
+          state: variant('failed', { exitCode: event.value.exitCode }),
+          duration: event.value.duration,
+        });
+        break;
+      case 'error':
+        tasks.push({
+          name: event.value.task,
+          cached: false,
+          state: variant('error', { message: event.value.message }),
+          duration: 0,
+        });
+        break;
+      case 'input_unavailable':
+        tasks.push({
+          name: event.value.task,
+          cached: false,
+          state: variant('skipped', null),
+          duration: 0,
+        });
+        break;
+      // 'start' events don't create task results - they're tracked separately
+    }
+  }
+
+  // Get summary from state or calculate from tasks
+  const summary = state.summary.type === 'some' ? state.summary.value : {
+    executed: BigInt(tasks.filter(t => !t.cached && t.state.type === 'success').length),
+    cached: BigInt(tasks.filter(t => t.cached).length),
+    failed: BigInt(tasks.filter(t => t.state.type === 'failed' || t.state.type === 'error').length),
+    skipped: BigInt(tasks.filter(t => t.state.type === 'skipped').length),
+    duration: 0,
+  };
+
+  return {
+    success: state.status.type === 'completed',
+    executed: summary.executed,
+    cached: summary.cached,
+    failed: summary.failed,
+    skipped: summary.skipped,
+    tasks,
+    duration: summary.duration,
+  };
+}
+
+/**
+ * Execute dataflow on a workspace with client-side polling.
+ *
+ * Starts execution, polls until complete, and returns the result.
  *
  * @param url - Base URL of the e3 API server
  * @param repo - Repository name
  * @param workspace - Workspace name
  * @param dataflowOptions - Execution options
  * @param options - Request options including auth token
+ * @param pollOptions - Polling configuration
  * @returns Dataflow execution result
  */
 export async function dataflowExecute(
@@ -77,22 +163,31 @@ export async function dataflowExecute(
   repo: string,
   workspace: string,
   dataflowOptions: DataflowOptions = {},
-  options: RequestOptions
+  options: RequestOptions,
+  pollOptions: DataflowPollOptions = {}
 ): Promise<DataflowResult> {
-  const response = await post(
-    url,
-    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/execute`,
-    {
-      concurrency: dataflowOptions.concurrency != null ? some(BigInt(dataflowOptions.concurrency)) : none,
-      force: dataflowOptions.force ?? false,
-      filter: dataflowOptions.filter != null ? some(dataflowOptions.filter) : none,
-    },
-    DataflowRequestType,
-    DataflowResultType,
-    options
-  );
-  return unwrap(response);
+  const { pollInterval = 500, timeout = 300000 } = pollOptions;
+
+  // Start execution
+  await dataflowExecuteLaunch(url, repo, workspace, dataflowOptions, options);
+
+  // Poll until complete
+  const startTime = Date.now();
+  while (Date.now() - startTime < timeout) {
+    const state = await dataflowExecutePoll(url, repo, workspace, {}, options);
+
+    if (state.status.type === 'completed' || state.status.type === 'failed' || state.status.type === 'aborted') {
+      return buildDataflowResult(state);
+    }
+
+    await new Promise(r => setTimeout(r, pollInterval));
+  }
+
+  throw new Error('Dataflow execution timed out');
 }
+
+// Backward compatibility alias
+export { dataflowExecuteLaunch as dataflowStart };
 
 /**
  * Get the dependency graph for a workspace.
@@ -184,7 +279,7 @@ export interface ExecutionStateOptions {
  * @param options - Request options including auth token
  * @returns Execution state with events and summary
  */
-export async function dataflowExecution(
+export async function dataflowExecutePoll(
   url: string,
   repo: string,
   workspace: string,
@@ -201,3 +296,6 @@ export async function dataflowExecution(
   const response = await get(url, path, DataflowExecutionStateType, options);
   return unwrap(response);
 }
+
+// Backward compatibility alias
+export { dataflowExecutePoll as dataflowExecution };

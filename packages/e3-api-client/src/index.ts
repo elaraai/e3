@@ -96,12 +96,16 @@ export { taskList, taskGet, taskExecutionList } from './tasks.js';
 
 // Executions
 export {
-  dataflowStart,
   dataflowExecute,
-  dataflowExecution,
+  dataflowExecuteLaunch,
+  dataflowExecutePoll,
   dataflowGraph,
   taskLogs,
+  // Backward compatibility aliases
+  dataflowStart,
+  dataflowExecution,
   type DataflowOptions,
+  type DataflowPollOptions,
   type LogOptions,
   type ExecutionStateOptions,
 } from './executions.js';

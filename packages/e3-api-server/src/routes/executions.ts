@@ -7,7 +7,6 @@ import { Hono } from 'hono';
 import type { StorageBackend } from '@elaraai/e3-core';
 import {
   startDataflow,
-  executeDataflow,
   getDataflowStatus,
   getDataflowGraph,
   getTaskLogs,
@@ -45,23 +44,6 @@ export function createExecutionRoutes(
     const repoPath = getRepoPath(repo);
     const ws = c.req.param('ws')!;
     return getDataflowStatus(storage, repoPath, ws);
-  });
-
-  // POST /api/repos/:repo/workspaces/:ws/dataflow/execute - Execute dataflow (blocking)
-  app.post('/execute', async (c) => {
-    const repo = c.req.param('repo')!;
-    const repoPath = getRepoPath(repo);
-    const ws = c.req.param('ws')!;
-
-    const body = await decodeBody(c, DataflowRequestType);
-    const concurrency = body.concurrency.type === 'some' ? Number(body.concurrency.value) : 4;
-    const filter = body.filter.type === 'some' ? body.filter.value : undefined;
-
-    return executeDataflow(storage, repoPath, ws, {
-      concurrency,
-      force: body.force,
-      filter,
-    });
   });
 
   // GET /api/repos/:repo/workspaces/:ws/dataflow/graph - Get dependency graph
