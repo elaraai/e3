@@ -38,7 +38,6 @@ export {
 
 export {
   startDataflow,
-  executeDataflow,
   getDataflowStatus,
   getDataflowGraph,
   getTaskLogs,

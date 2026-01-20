@@ -6,7 +6,6 @@
 import { NullType, some, none, variant } from '@elaraai/east';
 import {
   dataflowStart,
-  dataflowExecute,
   dataflowGetGraph,
   workspaceStatus,
   executionFindCurrent,
@@ -16,7 +15,6 @@ import {
   type WorkspaceStatusResult as CoreWorkspaceStatusResult,
   type DatasetStatusInfo as CoreDatasetStatusInfo,
   type TaskStatusInfo as CoreTaskStatusInfo,
-  type DataflowResult as CoreDataflowResult,
   type TaskExecutionResult as CoreTaskExecutionResult,
 } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
@@ -26,13 +24,10 @@ import {
   WorkspaceStatusResultType,
   DataflowGraphType,
   LogChunkType,
-  DataflowResultType,
   DataflowExecutionStateType,
   type WorkspaceStatusResult,
   type DatasetStatusInfo,
   type TaskStatusInfo,
-  type DataflowResult,
-  type TaskExecutionResult,
   type DataflowEvent,
 } from '../types.js';
 import {
@@ -117,49 +112,6 @@ function convertTaskStatus(info: CoreTaskStatusInfo): TaskStatusInfo {
     inputs: info.inputs,
     output: info.output,
     dependsOn: info.dependsOn,
-  };
-}
-
-/**
- * Convert core TaskExecutionResult to API type.
- */
-function convertTaskExecutionResult(result: CoreTaskExecutionResult): TaskExecutionResult {
-  let state: TaskExecutionResult['state'];
-  switch (result.state) {
-    case 'success':
-      state = variant('success', null);
-      break;
-    case 'failed':
-      state = variant('failed', { exitCode: BigInt(result.exitCode ?? -1) });
-      break;
-    case 'error':
-      state = variant('error', { message: result.error ?? 'Unknown error' });
-      break;
-    case 'skipped':
-      state = variant('skipped', null);
-      break;
-  }
-
-  return {
-    name: result.name,
-    cached: result.cached,
-    state,
-    duration: result.duration,
-  };
-}
-
-/**
- * Convert core DataflowResult to API type.
- */
-function convertDataflowResult(result: CoreDataflowResult): DataflowResult {
-  return {
-    success: result.success,
-    executed: BigInt(result.executed),
-    cached: BigInt(result.cached),
-    failed: BigInt(result.failed),
-    skipped: BigInt(result.skipped),
-    tasks: result.tasks.map(convertTaskExecutionResult),
-    duration: result.duration,
   };
 }
 
@@ -332,25 +284,6 @@ export async function startDataflow(
     return sendSuccessWithStatus(NullType, null, 202);
   } catch (err) {
     return sendError(NullType, errorToVariant(err));
-  }
-}
-
-/**
- * Execute dataflow (blocking).
- *
- * Blocks until execution completes and returns the result.
- */
-export async function executeDataflow(
-  storage: StorageBackend,
-  repoPath: string,
-  workspace: string,
-  options: { concurrency: number; force: boolean; filter?: string }
-): Promise<Response> {
-  try {
-    const result = await dataflowExecute(storage, repoPath, workspace, options);
-    return sendSuccess(DataflowResultType, convertDataflowResult(result));
-  } catch (err) {
-    return sendError(DataflowResultType, errorToVariant(err));
   }
 }
 
