@@ -10,7 +10,6 @@ import {
   workspaceGetDatasetHash,
   workspaceSetDataset,
   workspaceGetTree,
-  objectRead,
   type TreeNode,
 } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
@@ -60,7 +59,7 @@ export async function getDataset(
     }
 
     // Return raw BEAST2 bytes directly from object store
-    const data = await objectRead(repoPath, hash);
+    const data = await storage.objects.read(repoPath, hash);
     return new Response(data, {
       status: 200,
       headers: { 'Content-Type': 'application/beast2' },
