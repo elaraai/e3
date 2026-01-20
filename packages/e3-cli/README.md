@@ -66,9 +66,18 @@ e3 convert [input] --to <format>  # Convert between .east/.json/.beast2
 ### Authentication (for remote servers)
 
 ```bash
-e3 login <url>                    # Authenticate with remote server
-e3 logout <url>                   # Clear stored credentials
-e3 auth status                    # Show authentication status
+e3 login <server>                 # Log in using OAuth2 Device Flow
+e3 logout <server>                # Log out and clear credentials
+e3 auth status                    # List all saved credentials
+e3 auth token <server>            # Print access token (for curl/debugging)
+e3 auth whoami [server]           # Show current identity
+```
+
+The `e3 auth token` command is useful for debugging API calls:
+
+```bash
+curl -H "Authorization: Bearer $(e3 auth token https://example.com)" \
+  https://example.com/api/repos/my-repo/status
 ```
 
 ## Example

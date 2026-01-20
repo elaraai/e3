@@ -184,9 +184,11 @@ e3 convert [input] [--from <fmt>] [--to <fmt>] [-o <output>]
 ### Authentication (for remote servers)
 
 ```bash
-e3 login <url>                    # Authenticate with remote server
-e3 logout <url>                   # Clear stored credentials
-e3 auth status                    # Show authentication status
+e3 login <server>                 # Log in using OAuth2 Device Flow
+e3 logout <server>                # Log out and clear credentials
+e3 auth status                    # List all saved credentials
+e3 auth token <server>            # Print access token (for curl/debugging)
+e3 auth whoami [server]           # Show current identity
 ```
 
 ### Remote URLs

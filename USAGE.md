@@ -289,6 +289,26 @@ e3 logs <repo> <path> [--follow]
 e3 convert [input] [--from <fmt>] [--to <fmt>] [-o <output>] [--type <spec>]
 ```
 
+### Authentication Commands
+
+For remote servers that require authentication:
+
+```bash
+e3 login <server>                 # Log in using OAuth2 Device Flow
+e3 logout <server>                # Log out and clear credentials
+e3 auth status                    # List all saved credentials
+e3 auth token <server>            # Print access token (for curl/debugging)
+e3 auth whoami [server]           # Show current identity
+```
+
+The `e3 auth token` command is useful for debugging API calls with curl:
+
+```bash
+# Use token with curl
+curl -H "Authorization: Bearer $(e3 auth token http://localhost:3000)" \
+  http://localhost:3000/api/repos/my-repo/status
+```
+
 ### Remote URLs
 
 All commands that take a `<repo>` argument also accept HTTP URLs. Start a server with `e3-api-server`, then use the same CLI commands:

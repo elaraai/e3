@@ -16,6 +16,7 @@ import {
   removeCredential,
   listCredentials,
   getCredential,
+  getValidToken,
   isExpired,
   decodeJwtPayload,
   normalizeServerUrl,
@@ -73,6 +74,25 @@ export function createAuthCommand(): Command {
         const status = expired ? '(expired)' : '(valid)';
         console.log(`  ${server} ${status}`);
         console.log(`    Token expires: ${expiresAt}`);
+      }
+    });
+
+  // e3 auth token <server> - Print access token for use with curl
+  auth
+    .command('token')
+    .description('Print access token for a server (for curl/debugging)')
+    .argument('<server>', 'Server URL')
+    .action(async (server: string) => {
+      const serverUrl = normalizeServerUrl(server);
+      try {
+        // getValidToken handles refresh automatically if token is expired
+        const token = await getValidToken(serverUrl);
+        // Print just the token, suitable for: curl -H "Authorization: Bearer $(e3 auth token <server>)"
+        console.log(token);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'unknown error';
+        console.error(message);
+        process.exit(1);
       }
     });
 
