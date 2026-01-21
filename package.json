@@ -26,7 +26,7 @@
   ],
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
-    "@elaraai/east": "^0.0.1-beta.30"
+    "@elaraai/east": "^0.0.1-beta.31"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
