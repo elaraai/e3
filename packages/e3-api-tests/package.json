@@ -38,7 +38,7 @@
     "@elaraai/e3": "^0.0.2-beta.16",
     "@elaraai/e3-api-client": "^0.0.2-beta.16",
     "@elaraai/e3-cli": "^0.0.2-beta.16",
-    "@elaraai/east": "^0.0.1-beta.30"
+    "@elaraai/east": "^0.0.1-beta.31"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
