@@ -62,6 +62,9 @@ export {
   repoRemoveStatus,
 } from './repository.js';
 
+// Repos (multi-repo operations)
+export { repoList } from './repos.js';
+
 // Packages
 export {
   packageList,

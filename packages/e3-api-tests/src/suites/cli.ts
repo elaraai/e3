@@ -66,6 +66,17 @@ export function cliTests(
         assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
         assert.match(result.stdout, /Dry run/);
       });
+
+      it('repo list via server URL', async () => {
+        const ctx = getContext();
+        // repo list takes server URL, not repo URL
+        const result = await runE3Command(['repo', 'list', ctx.config.baseUrl], workDir, { env: getCredentialsEnv() });
+
+        assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
+        assert.match(result.stdout, /Repositories:/);
+        // Our test repo should be in the list
+        assert.match(result.stdout, new RegExp(ctx.repoName));
+      });
     });
 
     describe('workspace commands', () => {

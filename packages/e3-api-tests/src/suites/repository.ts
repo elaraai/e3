@@ -6,7 +6,7 @@
 /**
  * Repository operations test suite.
  *
- * Tests: status, gc, create, remove
+ * Tests: status, gc, create, remove, list
  */
 
 import { describe, it } from 'node:test';
@@ -18,6 +18,7 @@ import {
   repoGc,
   repoCreate,
   repoRemove,
+  repoList,
   packageRemove,
 } from '@elaraai/e3-api-client';
 
@@ -125,6 +126,45 @@ export function repositoryTests(getContext: () => TestContext): void {
       // Verify removal worked by trying to create it again (should succeed if it was removed)
       await repoCreate(ctx.config.baseUrl, tempRepoName, opts);
       await repoRemove(ctx.config.baseUrl, tempRepoName, opts); // Clean up
+    });
+
+    it('repoList returns array containing test repository', async () => {
+      const ctx = getContext();
+      const opts = await ctx.opts();
+
+      const repos = await repoList(ctx.config.baseUrl, opts);
+
+      // Verify response structure
+      assert.ok(Array.isArray(repos), 'repoList should return an array');
+      repos.forEach(repo => {
+        assert.ok(typeof repo === 'string' && repo.length > 0, 'each repo should be a non-empty string');
+      });
+
+      // Our test repo should be in the list
+      // Note: Other repos may exist (shared server, parallel tests) - only check ours is present
+      assert.ok(repos.includes(ctx.repoName), `test repo '${ctx.repoName}' should be in the list`);
+    });
+
+    it('repoList includes newly created repository', async () => {
+      const ctx = getContext();
+      const opts = await ctx.opts();
+      const newRepoName = `list-test-${Date.now()}`;
+
+      try {
+        // Create a new repo
+        await repoCreate(ctx.config.baseUrl, newRepoName, opts);
+
+        // List should now include it
+        const repos = await repoList(ctx.config.baseUrl, opts);
+        assert.ok(repos.includes(newRepoName), `newly created repo '${newRepoName}' should appear in list`);
+      } finally {
+        // Clean up
+        try {
+          await repoRemove(ctx.config.baseUrl, newRepoName, opts);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
     });
   });
 }
