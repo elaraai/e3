@@ -66,6 +66,12 @@ program
       .option('--dry-run', 'Report what would be deleted without deleting')
       .option('--min-age <ms>', 'Minimum file age in ms before deletion', '60000')
       .action(repoCommand.gc)
+  )
+  .addCommand(
+    new Command('list')
+      .description('List repositories on a server')
+      .argument('<server>', 'Server URL (e.g., http://localhost:3000)')
+      .action(repoCommand.list)
   );
 
 // Package commands

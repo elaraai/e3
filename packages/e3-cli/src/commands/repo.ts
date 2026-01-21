@@ -24,6 +24,7 @@ import {
   repoCreate as repoCreateRemote,
   repoRemoveStart as repoRemoveStartRemote,
   repoRemoveStatus as repoRemoveStatusRemote,
+  repoList as repoListRemote,
 } from '@elaraai/e3-api-client';
 import { some, none } from '@elaraai/east';
 import { parseRepoLocation, formatError, exitError } from '../utils.js';
@@ -268,6 +269,37 @@ export const repoCommand = {
           // Still running, wait and poll again
           await new Promise(resolve => setTimeout(resolve, pollInterval));
         }
+      }
+    } catch (err) {
+      exitError(formatError(err));
+    }
+  },
+
+  /**
+   * List repositories on a server.
+   *
+   * Remote only: e3 repo list <server-url>
+   */
+  async list(serverUrl: string): Promise<void> {
+    try {
+      if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
+        exitError('Server URL must start with http:// or https://');
+      }
+
+      const url = new URL(serverUrl);
+      const baseUrl = url.origin;
+      const token = await getValidToken(baseUrl);
+
+      const repos = await repoListRemote(baseUrl, { token });
+
+      if (repos.length === 0) {
+        console.log('No repositories');
+        return;
+      }
+
+      console.log('Repositories:');
+      for (const repo of repos) {
+        console.log(`  ${repo}`);
       }
     } catch (err) {
       exitError(formatError(err));
