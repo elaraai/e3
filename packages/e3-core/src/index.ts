@@ -150,6 +150,7 @@ export {
   dataflowCheckCache,
   dataflowGetDependentsToSkip,
   dataflowResolveInputHashes,
+  parsePathString,
   type DataflowGraph,
   type DataflowOptions,
   type DataflowResult,

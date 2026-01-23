@@ -66,7 +66,7 @@ import type { StorageBackend, LockHandle } from './storage/interfaces.js';
  * @param pathStr - The path string in keypath format
  * @returns TreePath array of path segments
  */
-function parsePathString(pathStr: string): TreePath {
+export function parsePathString(pathStr: string): TreePath {
   if (!pathStr.startsWith('.')) {
     throw new Error(`Invalid path string: expected '.' prefix, got '${pathStr}'`);
   }
