@@ -173,25 +173,6 @@ export const GcStatusResultType = StructType({
   error: OptionType(StringType),
 });
 
-/**
- * Result of starting an async repo deletion.
- *
- * @property executionId - Unique identifier for this deletion execution
- */
-export const RepoDeleteStartResultType = StructType({
-  executionId: StringType,
-});
-
-/**
- * Status of an async repo deletion.
- *
- * @property status - Current execution status
- * @property error - Error message (available when failed)
- */
-export const RepoDeleteStatusResultType = StructType({
-  status: AsyncOperationStatusType,
-  error: OptionType(StringType),
-});
 
 // =============================================================================
 // Package Types
@@ -688,8 +669,6 @@ export type GcResult = ValueTypeOf<typeof GcResultType>;
 export type AsyncOperationStatus = ValueTypeOf<typeof AsyncOperationStatusType>;
 export type GcStartResult = ValueTypeOf<typeof GcStartResultType>;
 export type GcStatusResult = ValueTypeOf<typeof GcStatusResultType>;
-export type RepoDeleteStartResult = ValueTypeOf<typeof RepoDeleteStartResultType>;
-export type RepoDeleteStatusResult = ValueTypeOf<typeof RepoDeleteStatusResultType>;
 export type PackageListItem = ValueTypeOf<typeof PackageListItemType>;
 export type PackageImportResult = ValueTypeOf<typeof PackageImportResultType>;
 export type PackageInfo = ValueTypeOf<typeof PackageInfoType>;
@@ -754,8 +733,6 @@ export const ApiTypes = {
   AsyncOperationStatusType,
   GcStartResultType,
   GcStatusResultType,
-  RepoDeleteStartResultType,
-  RepoDeleteStatusResultType,
 
   // Packages
   PackageListItemType,

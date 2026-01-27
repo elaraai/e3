@@ -28,6 +28,13 @@ export {
   // Logging
   type LogChunk,
   type LogStore,
+  // Repository lifecycle
+  type RepoStore,
+  type RepoStatus,
+  type RepoMetadata,
+  type BatchResult,
+  type GcMarkResult,
+  type GcSweepResult,
   // Combined backend
   type StorageBackend,
 } from './interfaces.js';
@@ -40,4 +47,13 @@ export {
   LocalRefStore,
   LocalLockService,
   LocalLogStore,
+  LocalRepoStore,
+  collectRoots,
+  sweep,
 } from './local/index.js';
+
+// In-memory implementation (for testing)
+export {
+  InMemoryStorage,
+  InMemoryRepoStore,
+} from './in-memory/index.js';

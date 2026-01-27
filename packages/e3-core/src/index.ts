@@ -185,6 +185,9 @@ export {
   E3Error,
   // Repository
   RepositoryNotFoundError,
+  RepoNotFoundError,
+  RepoAlreadyExistsError,
+  RepoStatusConflictError,
   // Workspace
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,

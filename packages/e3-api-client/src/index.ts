@@ -18,8 +18,6 @@ export type {
   GcResult,
   GcStartResult,
   GcStatusResult,
-  RepoDeleteStartResult,
-  RepoDeleteStatusResult,
   AsyncOperationStatus,
   PackageListItem,
   PackageImportResult,
@@ -58,8 +56,6 @@ export {
   repoGcStatus,
   repoCreate,
   repoRemove,
-  repoRemoveStart,
-  repoRemoveStatus,
 } from './repository.js';
 
 // Repos (multi-repo operations)

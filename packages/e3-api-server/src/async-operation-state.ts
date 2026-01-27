@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'crypto';
 import { variant, some, none } from '@elaraai/east';
-import type { GcResult, GcStatusResult, RepoDeleteStatusResult } from './types.js';
+import type { GcResult, GcStatusResult } from './types.js';
 
 // =============================================================================
 // GC Operation State
@@ -138,100 +138,6 @@ export function clearGcOperation(executionId: string): void {
 }
 
 // =============================================================================
-// Repo Delete Operation State
-// =============================================================================
-
-interface RepoDeleteOperationInternal {
-  status: 'running' | 'succeeded' | 'failed';
-  startedAt: Date;
-  completedAt?: Date;
-  error?: string;
-}
-
-// Key: executionId (UUID)
-const repoDeleteOperations = new Map<string, RepoDeleteOperationInternal>();
-
-/**
- * Create a new repo delete operation and return its execution ID.
- */
-export function createRepoDeleteOperation(): string {
-  const executionId = randomUUID();
-  repoDeleteOperations.set(executionId, {
-    status: 'running',
-    startedAt: new Date(),
-  });
-  return executionId;
-}
-
-/**
- * Mark a repo delete operation as succeeded.
- */
-export function completeRepoDeleteOperation(executionId: string): void {
-  const op = repoDeleteOperations.get(executionId);
-  if (op) {
-    op.status = 'succeeded';
-    op.completedAt = new Date();
-  }
-}
-
-/**
- * Mark a repo delete operation as failed with error message.
- */
-export function failRepoDeleteOperation(executionId: string, error: string): void {
-  const op = repoDeleteOperations.get(executionId);
-  if (op) {
-    op.status = 'failed';
-    op.completedAt = new Date();
-    op.error = error;
-  }
-}
-
-/**
- * Get the status of a repo delete operation.
- * Returns null if operation doesn't exist.
- */
-export function getRepoDeleteOperationStatus(executionId: string): RepoDeleteStatusResult | null {
-  const op = repoDeleteOperations.get(executionId);
-  if (!op) {
-    return null;
-  }
-
-  // Convert status to East variant
-  let status: RepoDeleteStatusResult['status'];
-  switch (op.status) {
-    case 'running':
-      status = variant('running', null);
-      break;
-    case 'succeeded':
-      status = variant('succeeded', null);
-      break;
-    case 'failed':
-      status = variant('failed', null);
-      break;
-  }
-
-  return {
-    status,
-    error: op.error ? some(op.error) : none,
-  };
-}
-
-/**
- * Check if a repo delete operation exists.
- */
-export function hasRepoDeleteOperation(executionId: string): boolean {
-  return repoDeleteOperations.has(executionId);
-}
-
-/**
- * Clear a repo delete operation.
- * Useful for cleanup in tests.
- */
-export function clearRepoDeleteOperation(executionId: string): void {
-  repoDeleteOperations.delete(executionId);
-}
-
-// =============================================================================
 // Test Utilities
 // =============================================================================
 
@@ -241,5 +147,4 @@ export function clearRepoDeleteOperation(executionId: string): void {
  */
 export function clearAllAsyncOperations(): void {
   gcOperations.clear();
-  repoDeleteOperations.clear();
 }

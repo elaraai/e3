@@ -22,8 +22,7 @@ import {
   repoGcStart as repoGcStartRemote,
   repoGcStatus as repoGcStatusRemote,
   repoCreate as repoCreateRemote,
-  repoRemoveStart as repoRemoveStartRemote,
-  repoRemoveStatus as repoRemoveStatusRemote,
+  repoRemove as repoRemoveRemote,
   repoList as repoListRemote,
 } from '@elaraai/e3-api-client';
 import { some, none } from '@elaraai/east';
@@ -98,38 +97,9 @@ export const repoCommand = {
         rmSync(location.path, { recursive: true, force: true });
         console.log(`Removed repository at ${location.path}`);
       } else {
-        // Start async deletion
-        const { executionId } = await repoRemoveStartRemote(
-          location.baseUrl,
-          location.repo,
-          { token: location.token }
-        );
-
-        console.log('Removing repository...');
-
-        // Poll for completion
-        const pollInterval = 500;
-        while (true) {
-          const status = await repoRemoveStatusRemote(
-            location.baseUrl,
-            location.repo,
-            executionId,
-            { token: location.token }
-          );
-
-          if (status.status.type === 'succeeded') {
-            console.log(`Removed repository: ${location.repo}`);
-            break;
-          }
-
-          if (status.status.type === 'failed') {
-            const errorMsg = status.error.type === 'some' ? status.error.value : 'Unknown error';
-            exitError(`Repo deletion failed: ${errorMsg}`);
-          }
-
-          // Still running, wait and poll again
-          await new Promise(resolve => setTimeout(resolve, pollInterval));
-        }
+        // Remove repository via API (synchronous operation)
+        await repoRemoveRemote(location.baseUrl, location.repo, { token: location.token });
+        console.log(`Removed repository: ${location.repo}`);
       }
     } catch (err) {
       exitError(formatError(err));

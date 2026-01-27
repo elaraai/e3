@@ -3,23 +3,19 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import { StringType } from '@elaraai/east';
+import { StringType, NullType } from '@elaraai/east';
 import type {
   RepositoryStatus,
   GcRequest,
   GcResult,
   GcStartResult,
   GcStatusResult,
-  RepoDeleteStartResult,
-  RepoDeleteStatusResult,
 } from './types.js';
 import {
   RepositoryStatusType,
   GcRequestType,
   GcStartResultType,
   GcStatusResultType,
-  RepoDeleteStartResultType,
-  RepoDeleteStatusResultType,
 } from './types.js';
 import { get, post, del, putEmpty, unwrap, type RequestOptions } from './http.js';
 
@@ -130,74 +126,17 @@ export async function repoCreate(url: string, name: string, options: RequestOpti
 }
 
 /**
- * Start repository deletion (async).
+ * Remove a repository.
  *
- * Returns immediately with an executionId. Use repoRemoveStatus() to poll for completion.
- *
- * @param url - Base URL of the e3 API server
- * @param name - Repository name to remove
- * @param options - Request options including auth token
- * @returns Delete start result with executionId
- */
-export async function repoRemoveStart(url: string, name: string, options: RequestOptions): Promise<RepoDeleteStartResult> {
-  const response = await del(url, `/repos/${encodeURIComponent(name)}`, RepoDeleteStartResultType, options);
-  return unwrap(response);
-}
-
-/**
- * Get repository deletion status.
- *
- * @param url - Base URL of the e3 API server
- * @param name - Repository name being deleted
- * @param executionId - Execution ID from repoRemoveStart()
- * @param options - Request options including auth token
- * @returns Delete status
- */
-export async function repoRemoveStatus(url: string, name: string, executionId: string, options: RequestOptions): Promise<RepoDeleteStatusResult> {
-  const response = await get(
-    url,
-    `/repos/${encodeURIComponent(name)}/delete/${encodeURIComponent(executionId)}`,
-    RepoDeleteStatusResultType,
-    options
-  );
-  return unwrap(response);
-}
-
-/**
- * Remove a repository and wait for completion (convenience wrapper).
- *
- * Starts deletion and polls until complete. Throws on error.
+ * Deletion is synchronous - refs are deleted immediately and orphaned objects
+ * are cleaned up by GC later.
  *
  * @param url - Base URL of the e3 API server
  * @param name - Repository name to remove
  * @param options - Request options including auth token
- * @param pollOptions - Polling options (interval in ms, default 500)
  */
-export async function repoRemove(
-  url: string,
-  name: string,
-  options: RequestOptions,
-  pollOptions: { pollInterval?: number } = {}
-): Promise<void> {
-  const pollInterval = pollOptions.pollInterval ?? 500;
-
-  // Start deletion
-  const { executionId } = await repoRemoveStart(url, name, options);
-
-  // Poll until complete
-  while (true) {
-    const status = await repoRemoveStatus(url, name, executionId, options);
-
-    if (status.status.type === 'succeeded') {
-      return;
-    }
-
-    if (status.status.type === 'failed') {
-      const errorMsg = status.error.type === 'some' ? status.error.value : 'Unknown error';
-      throw new Error(`Repo deletion failed: ${errorMsg}`);
-    }
-
-    // Still running, wait and poll again
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
-  }
+export async function repoRemove(url: string, name: string, options: RequestOptions): Promise<void> {
+  const response = await del(url, `/repos/${encodeURIComponent(name)}`, NullType, options);
+  unwrap(response);
 }
+
