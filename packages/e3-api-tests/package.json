@@ -1,6 +1,6 @@
 {
   "name": "@elaraai/e3-api-tests",
-  "version": "0.0.2-beta.19",
+  "version": "0.0.2-beta.20",
   "type": "module",
   "description": "East Execution Engine API Compliance Tests - shared test suites for e3 API implementations",
   "main": "dist/src/index.js",
@@ -35,9 +35,9 @@
     "directory": "packages/e3-api-tests"
   },
   "dependencies": {
-    "@elaraai/e3": "^0.0.2-beta.19",
-    "@elaraai/e3-api-client": "^0.0.2-beta.19",
-    "@elaraai/e3-cli": "^0.0.2-beta.19",
+    "@elaraai/e3": "^0.0.2-beta.20",
+    "@elaraai/e3-api-client": "^0.0.2-beta.20",
+    "@elaraai/e3-cli": "^0.0.2-beta.20",
     "@elaraai/east": "^0.0.1-beta.31"
   },
   "devDependencies": {
