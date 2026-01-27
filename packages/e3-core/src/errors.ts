@@ -34,6 +34,39 @@ export class RepositoryNotFoundError extends E3Error {
   }
 }
 
+/**
+ * Thrown when a repository is not found by name.
+ * Used by RepoStore operations (as opposed to RepositoryNotFoundError which uses path).
+ */
+export class RepoNotFoundError extends E3Error {
+  constructor(public readonly repo: string) {
+    super(`Repository '${repo}' not found`);
+  }
+}
+
+/**
+ * Thrown when attempting to create a repository that already exists.
+ */
+export class RepoAlreadyExistsError extends E3Error {
+  constructor(public readonly repo: string) {
+    super(`Repository '${repo}' already exists`);
+  }
+}
+
+/**
+ * Thrown when a repository status doesn't match the expected value.
+ * Used for CAS (compare-and-swap) operations.
+ */
+export class RepoStatusConflictError extends E3Error {
+  constructor(
+    public readonly repo: string,
+    public readonly expected: string | string[],
+    public readonly actual: string | 'not_found'
+  ) {
+    super(`Repository '${repo}' status: expected ${JSON.stringify(expected)}, got '${actual}'`);
+  }
+}
+
 // =============================================================================
 // Workspace Errors
 // =============================================================================

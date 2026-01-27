@@ -22,6 +22,77 @@ import type { LockHolderInfo } from '../errors.js';
 export type { LockState, LockOperation, LockHolderInfo };
 
 // =============================================================================
+// Repository Lifecycle Types
+// =============================================================================
+
+/**
+ * Repository status for lifecycle tracking.
+ *
+ * - 'creating': Repository is being initialized
+ * - 'active': Repository is ready for use
+ * - 'gc': Garbage collection is in progress
+ * - 'deleting': Repository is being deleted
+ */
+export type RepoStatus = 'creating' | 'active' | 'gc' | 'deleting';
+
+/**
+ * Repository metadata.
+ */
+export interface RepoMetadata {
+  /** Repository name */
+  name: string;
+  /** Current status */
+  status: RepoStatus;
+  /** When the repository was created (ISO 8601) */
+  createdAt: string;
+  /** When the status last changed (ISO 8601) */
+  statusChangedAt: string;
+}
+
+/**
+ * Result from batch operations (resumable pattern).
+ *
+ * Operations return { status: 'continue', cursor } if more work remains,
+ * or { status: 'done' } when complete. This enables Step Functions orchestration.
+ */
+export interface BatchResult {
+  /** 'continue' if more batches remain, 'done' if complete */
+  status: 'continue' | 'done';
+  /** Opaque cursor for next batch (only present if status='continue') */
+  cursor?: string;
+  /** Number of items deleted in this batch */
+  deleted: number;
+}
+
+/**
+ * Result from GC mark phase.
+ */
+export interface GcMarkResult {
+  /** Number of reachable objects found */
+  reachableCount: number;
+  /** Number of root references traced */
+  rootCount: number;
+  /** Opaque reference to the reachable set (memory ID for local, S3 key for cloud) */
+  reachableSetRef: string;
+}
+
+/**
+ * Result from GC sweep phase.
+ */
+export interface GcSweepResult {
+  /** 'continue' if more batches remain, 'done' if complete */
+  status: 'continue' | 'done';
+  /** Opaque cursor for next batch (only present if status='continue') */
+  cursor?: string;
+  /** Number of objects deleted in this batch */
+  deleted: number;
+  /** Total bytes freed in this batch */
+  bytesFreed: number;
+  /** Number of objects skipped due to being too young */
+  skippedYoung: number;
+}
+
+// =============================================================================
 // Object Store
 // =============================================================================
 
@@ -342,6 +413,125 @@ export interface LogStore {
 }
 
 // =============================================================================
+// Repository Store
+// =============================================================================
+
+/**
+ * Repository lifecycle management.
+ *
+ * Handles repo creation, deletion, status tracking, and GC.
+ * Follows the sub-interface pattern (storage.repos.*) like other stores.
+ */
+export interface RepoStore {
+  // -------------------------------------------------------------------------
+  // Queries
+  // -------------------------------------------------------------------------
+
+  /**
+   * List all repository names.
+   * @returns Array of repository names
+   */
+  list(): Promise<string[]>;
+
+  /**
+   * Check if a repository exists.
+   * @param repo - Repository name
+   * @returns true if repository exists
+   */
+  exists(repo: string): Promise<boolean>;
+
+  /**
+   * Get repository metadata.
+   * @param repo - Repository name
+   * @returns Metadata or null if not found
+   */
+  getMetadata(repo: string): Promise<RepoMetadata | null>;
+
+  // -------------------------------------------------------------------------
+  // Lifecycle
+  // -------------------------------------------------------------------------
+
+  /**
+   * Create a new repository.
+   * Sets status to 'active' after initialization.
+   * @param repo - Repository name
+   * @throws {RepoAlreadyExistsError} If repository already exists
+   */
+  create(repo: string): Promise<void>;
+
+  /**
+   * Atomically set repository status.
+   * Used for CAS (compare-and-swap) operations.
+   * @param repo - Repository name
+   * @param status - New status
+   * @param expected - Optional expected current status (single or array) for CAS
+   * @throws {RepoNotFoundError} If repository doesn't exist
+   * @throws {RepoStatusConflictError} If expected status doesn't match
+   */
+  setStatus(repo: string, status: RepoStatus, expected?: RepoStatus | RepoStatus[]): Promise<void>;
+
+  /**
+   * Remove repository metadata/tombstone.
+   * Called after GC completes for 'deleting' repos.
+   * @param repo - Repository name
+   */
+  remove(repo: string): Promise<void>;
+
+  // -------------------------------------------------------------------------
+  // Batched Deletion (Resumable)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Delete all refs for a repo in batches.
+   * Loop until status='done'.
+   * @param repo - Repository name
+   * @param cursor - Cursor from previous call (undefined for first call)
+   * @returns Batch result with status and optional cursor
+   */
+  deleteRefsBatch(repo: string, cursor?: string): Promise<BatchResult>;
+
+  /**
+   * Delete all objects for a repo in batches.
+   * Loop until status='done'.
+   * @param repo - Repository name
+   * @param cursor - Cursor from previous call (undefined for first call)
+   * @returns Batch result with status and optional cursor
+   */
+  deleteObjectsBatch(repo: string, cursor?: string): Promise<BatchResult>;
+
+  // -------------------------------------------------------------------------
+  // GC Phases (Resumable)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Mark phase: Collect roots, trace reachable objects.
+   * @param repo - Repository name
+   * @returns Mark result with reachable set reference
+   */
+  gcMark(repo: string): Promise<GcMarkResult>;
+
+  /**
+   * Sweep phase: Delete unreachable objects in batches.
+   * @param repo - Repository name
+   * @param reachableSetRef - Reference from gcMark
+   * @param options - Sweep options (minAge to skip young objects, cursor for pagination)
+   * @returns Sweep result with status and optional cursor
+   */
+  gcSweep(
+    repo: string,
+    reachableSetRef: string,
+    options?: { minAge?: number; cursor?: string }
+  ): Promise<GcSweepResult>;
+
+  /**
+   * Cleanup phase: Remove temporary files (reachable set, etc.).
+   * @param repo - Repository name
+   * @param reachableSetRef - Reference from gcMark
+   */
+  gcCleanup(repo: string, reachableSetRef: string): Promise<void>;
+}
+
+// =============================================================================
 // Combined Storage Backend
 // =============================================================================
 
@@ -364,6 +554,9 @@ export interface StorageBackend {
 
   /** Execution log storage */
   readonly logs: LogStore;
+
+  /** Repository lifecycle management */
+  readonly repos: RepoStore;
 
   /**
    * Validate that a repository exists and is properly structured.

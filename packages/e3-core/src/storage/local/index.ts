@@ -15,3 +15,4 @@ export { LocalObjectStore } from './LocalObjectStore.js';
 export { LocalRefStore } from './LocalRefStore.js';
 export { LocalLockService } from './LocalLockService.js';
 export { LocalLogStore } from './LocalLogStore.js';
+export { LocalRepoStore, collectRoots, sweep } from './LocalRepoStore.js';
