@@ -33,11 +33,11 @@ import {
   type TreePath,
 } from '@elaraai/e3-types';
 import {
-  taskExecute,
   executionGetOutput,
   inputsHash,
-  type ExecuteOptions,
 } from './executions.js';
+import type { TaskRunner, TaskExecuteOptions } from './execution/interfaces.js';
+import { taskExecute } from './execution/LocalTaskRunner.js';
 import {
   workspaceGetDatasetHash,
   workspaceSetDatasetByHash,
@@ -241,6 +241,14 @@ export interface DataflowOptions {
    * - DataflowAbortedError will be thrown with partial results
    */
   signal?: AbortSignal;
+  /**
+   * Task runner to use for executing individual tasks.
+   * Defaults to using taskExecute() directly if not provided.
+   *
+   * Use MockTaskRunner for testing dataflow orchestration logic
+   * without spawning real processes.
+   */
+  runner?: TaskRunner;
   /** Callback when a task starts */
   onTaskStart?: (name: string) => void;
   /** Callback when a task completes */
@@ -598,15 +606,18 @@ async function dataflowExecuteWithLock(
       inputHashes.push(hash);
     }
 
-    // Execute the task
-    const execOptions: ExecuteOptions = {
+    // Execute the task using either the provided runner or direct taskExecute()
+    const execOptions: TaskExecuteOptions = {
       force: options.force,
       signal: options.signal,
       onStdout: options.onStdout ? (data) => options.onStdout!(taskName, data) : undefined,
       onStderr: options.onStderr ? (data) => options.onStderr!(taskName, data) : undefined,
     };
 
-    const result = await taskExecute(storage, repo, node.hash, inputHashes, execOptions);
+    // Use provided runner if available, otherwise call taskExecute directly
+    const result = options.runner
+      ? await options.runner.execute(storage, node.hash, inputHashes, execOptions)
+      : await taskExecute(storage, repo, node.hash, inputHashes, execOptions);
 
     // Build task result (NOTE: workspace update happens later, in mutex-protected section)
     const taskResult: InternalTaskResult = {
@@ -620,7 +631,6 @@ async function dataflowExecuteWithLock(
       taskResult.error = result.error ?? undefined;
     } else if (result.state === 'failed') {
       taskResult.exitCode = result.exitCode ?? undefined;
-      taskResult.error = result.error ?? undefined;
     }
 
     // Pass output hash to caller for workspace update (if successful)
@@ -762,8 +772,10 @@ async function dataflowExecuteWithLock(
       // Wait for at least one task to complete if we can't launch more
       if (runningPromises.size > 0) {
         await Promise.race(runningPromises.values());
-      } else if (readyQueue.length === 0) {
-        // No running tasks and no ready tasks - we might have unresolvable dependencies
+      } else if (readyQueue.length === 0 || aborted) {
+        // No running tasks and either:
+        // - no ready tasks (unresolvable dependencies)
+        // - aborted (stop processing)
         break;
       }
     }

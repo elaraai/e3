@@ -27,7 +27,7 @@ import {
   dataflowGetDependentsToSkip,
   type DataflowGraph,
 } from './dataflow.js';
-import { objectWrite } from './objects.js';
+import { objectWrite } from './storage/local/LocalObjectStore.js';
 import { workspaceDeploy } from './workspaces.js';
 import { workspaceGetDataset, workspaceSetDataset } from './trees.js';
 import { WorkspaceLockError, DataflowAbortedError } from './errors.js';

@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import yauzl from 'yauzl';
-import { repoInit } from './repository.js';
+import { repoInit } from './storage/local/repository.js';
 
 /**
  * Creates a temporary directory for testing

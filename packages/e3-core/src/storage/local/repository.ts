@@ -3,6 +3,13 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
+/**
+ * Local filesystem repository initialization and discovery.
+ *
+ * This module handles creating and finding e3 repositories on the local
+ * filesystem. It is used by the CLI and local development tools.
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
 

@@ -27,15 +27,15 @@ import {
 import {
   executionGet,
   inputsHash,
-  isProcessAlive,
 } from './executions.js';
+import { isProcessAlive } from './execution/processHelpers.js';
 import { workspaceGetDatasetHash } from './trees.js';
 import {
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
   type LockHolderInfo,
 } from './errors.js';
-import { lockStateToHolderInfo } from './workspaceLock.js';
+import { lockStateToHolderInfo } from './storage/local/LocalLockService.js';
 import type { StorageBackend } from './storage/interfaces.js';
 
 // =============================================================================
