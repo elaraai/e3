@@ -166,6 +166,59 @@ export {
   type TaskExecutionResult,
 } from './dataflow.js';
 
+// Resumable dataflow execution
+export {
+  // Types
+  type DataflowExecutionState,
+  type DataflowExecutionStatus,
+  type TaskState,
+  type TaskStatus as DataflowTaskStatus,
+  type ExecutionEvent,
+  type ExecutionStartedEvent,
+  type TaskReadyEvent,
+  type TaskStartedEvent,
+  type TaskCompletedEvent,
+  type TaskFailedEvent,
+  type TaskSkippedEvent,
+  type ExecutionCompletedEvent,
+  type ExecutionCancelledEvent,
+  type InitializeResult,
+  type PrepareTaskResult,
+  type TaskExecuteResult,
+  type TaskCompletedResult,
+  type TaskFailedResult,
+  type FinalizeResult,
+  type SerializedExecutionState,
+  serializeExecutionState,
+  deserializeExecutionState,
+  // Step functions
+  stepInitialize,
+  stepGetReady,
+  stepPrepareTask,
+  stepTaskStarted,
+  stepTaskCompleted,
+  stepTaskFailed,
+  stepTasksSkipped,
+  stepIsComplete,
+  stepFinalize,
+  stepCancel,
+  type StepInitializeOptions,
+  // State store
+  type ExecutionStateStore,
+  type TaskStatusDetails,
+  type ExecutionStatusDetails,
+  InMemoryStateStore,
+  FileStateStore,
+  // Orchestrator
+  type DataflowOrchestrator,
+  type ExecutionHandle,
+  type ExecutionStatus as OrchestratorExecutionStatus,
+  type OrchestratorStartOptions,
+  type TaskCompletedCallback,
+  LocalOrchestrator,
+  stateToStatus,
+} from './dataflow/index.js';
+
 // Workspace locking (in storage/local/)
 export {
   acquireWorkspaceLock,
