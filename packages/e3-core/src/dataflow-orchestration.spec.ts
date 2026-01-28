@@ -25,7 +25,7 @@ import {
   type DataRef,
 } from '@elaraai/e3-types';
 import { dataflowExecute } from './dataflow.js';
-import { objectWrite } from './objects.js';
+import { objectWrite } from './storage/local/LocalObjectStore.js';
 import { workspaceDeploy } from './workspaces.js';
 import { workspaceSetDataset } from './trees.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';

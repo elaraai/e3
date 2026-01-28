@@ -7,15 +7,14 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { computeHash } from './objects.js';
 import {
-  computeHash,
   objectWrite,
   objectWriteStream,
   objectRead,
   objectExists,
-  objectPath,
-  objectAbbrev,
-} from './objects.js';
+} from './storage/local/LocalObjectStore.js';
+import { objectPath, objectAbbrev } from './storage/local/localHelpers.js';
 import { ObjectNotFoundError } from './errors.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
 

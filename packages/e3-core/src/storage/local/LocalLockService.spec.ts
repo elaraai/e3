@@ -4,7 +4,7 @@
  */
 
 /**
- * Tests for workspaceLock.ts - workspace locking mechanism
+ * Tests for LocalLockService - workspace locking mechanism
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -18,10 +18,10 @@ import {
   acquireWorkspaceLock,
   getWorkspaceLockHolder,
   workspaceLockPath,
-} from './workspaceLock.js';
-import { WorkspaceLockError } from './errors.js';
+} from './LocalLockService.js';
+import { WorkspaceLockError } from '../../errors.js';
 
-describe('workspaceLock', () => {
+describe('LocalLockService', () => {
   let testDir: string;
   let repoPath: string;
 

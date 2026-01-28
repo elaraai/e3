@@ -33,11 +33,11 @@ import {
   type TreePath,
 } from '@elaraai/e3-types';
 import {
-  taskExecute,
   executionGetOutput,
   inputsHash,
 } from './executions.js';
 import type { TaskRunner, TaskExecuteOptions } from './execution/interfaces.js';
+import { taskExecute } from './execution/LocalTaskRunner.js';
 import {
   workspaceGetDatasetHash,
   workspaceSetDatasetByHash,

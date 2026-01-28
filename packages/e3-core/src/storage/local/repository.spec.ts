@@ -4,7 +4,7 @@
  */
 
 /**
- * Tests for repository.ts
+ * Tests for storage/local/repository.ts
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -16,7 +16,7 @@ import {
   repoFind,
   repoGet,
 } from './repository.js';
-import { createTempDir, removeTempDir } from './test-helpers.js';
+import { createTempDir, removeTempDir } from '../../test-helpers.js';
 
 describe('repository', () => {
   let testDir: string;

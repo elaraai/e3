@@ -4,17 +4,20 @@
  */
 
 /**
- * Garbage collection for e3 repositories.
+ * Garbage collection for local e3 repositories.
  *
  * Uses mark-and-sweep algorithm:
  * 1. Mark: Find all root refs (packages, executions, workspaces) and trace reachable objects
  * 2. Sweep: Delete unreachable objects and orphaned staging files
+ *
+ * Note: This is a local-only operation. Cloud backends would use different
+ * GC strategies (e.g., S3 lifecycle policies, TTL-based expiration).
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { StorageBackend } from './storage/interfaces.js';
-import { LocalStorage, collectRoots, sweep } from './storage/local/index.js';
+import type { StorageBackend } from '../interfaces.js';
+import { LocalStorage, collectRoots, sweep } from './index.js';
 
 /**
  * Options for garbage collection

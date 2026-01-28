@@ -29,7 +29,7 @@ import {
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
 } from './errors.js';
-import { objectWrite } from './objects.js';
+import { objectWrite } from './storage/local/LocalObjectStore.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
 import { LocalStorage } from './storage/local/index.js';
 import type { StorageBackend } from './storage/interfaces.js';

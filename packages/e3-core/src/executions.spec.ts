@@ -20,9 +20,9 @@ import {
   executionList,
   executionListForTask,
   executionReadLog,
-  taskExecute,
 } from './executions.js';
-import { objectWrite } from './objects.js';
+import { taskExecute } from './execution/LocalTaskRunner.js';
+import { objectWrite } from './storage/local/LocalObjectStore.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
 import { LocalStorage } from './storage/local/index.js';
 import type { StorageBackend } from './storage/interfaces.js';

@@ -21,7 +21,7 @@ import {
   packageResolve,
   packageRead,
 } from './packages.js';
-import { objectRead } from './objects.js';
+import { objectRead } from './storage/local/LocalObjectStore.js';
 import { PackageNotFoundError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir, zipEqual } from './test-helpers.js';
 import { LocalStorage } from './storage/local/index.js';

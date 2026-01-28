@@ -28,26 +28,29 @@ export * from './execution/index.js';
 // These functions use repoPath directly. Future versions will also accept
 // a StorageBackend for backend-agnostic operation.
 
-// Repository management
+// Repository management (local filesystem)
 export {
   repoInit,
   repoFind,
   repoGet,
   type InitRepositoryResult,
-} from './repository.js';
+} from './storage/local/repository.js';
 
-// Garbage collection
-export { repoGc, type GcOptions, type GcResult } from './gc.js';
+// Garbage collection (local filesystem)
+export { repoGc, type GcOptions, type GcResult } from './storage/local/gc.js';
 
 // Object storage
+export { computeHash } from './objects.js';
+
+// Local object storage functions (for backwards compatibility)
 export {
-  computeHash,
   objectWrite,
   objectWriteStream,
   objectRead,
   objectExists,
-  objectAbbrev,
-} from './objects.js';
+} from './storage/local/LocalObjectStore.js';
+
+export { objectPath, objectAbbrev } from './storage/local/localHelpers.js';
 
 // Package operations
 export {
@@ -131,15 +134,21 @@ export {
   // Note: LogChunk is exported from './storage/index.js' (aligned interface)
   // Command IR evaluation
   evaluateCommandIr,
-  // Process detection
-  getBootId,
-  getPidStartTime,
-  isProcessAlive,
-  // Execution
+} from './executions.js';
+
+// Local process execution (in execution/ directory)
+export {
   taskExecute,
   type ExecuteOptions,
   type ExecutionResult,
-} from './executions.js';
+} from './execution/LocalTaskRunner.js';
+
+// Process identification helpers (local execution support)
+export {
+  getBootId,
+  getPidStartTime,
+  isProcessAlive,
+} from './execution/processHelpers.js';
 
 // Dataflow execution
 export {
@@ -157,7 +166,7 @@ export {
   type TaskExecutionResult,
 } from './dataflow.js';
 
-// Workspace locking
+// Workspace locking (in storage/local/)
 export {
   acquireWorkspaceLock,
   getWorkspaceLockState,
@@ -167,7 +176,7 @@ export {
   workspaceLockPath,
   type WorkspaceLockHandle,
   type AcquireLockOptions,
-} from './workspaceLock.js';
+} from './storage/local/LocalLockService.js';
 
 // Workspace status
 export {
