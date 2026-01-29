@@ -11,6 +11,7 @@ import {
   getDataflowGraph,
   getTaskLogs,
   getDataflowExecution,
+  cancelDataflow,
 } from '../handlers/dataflow.js';
 import { decodeBody } from '../beast2.js';
 import { DataflowRequestType } from '../types.js';
@@ -80,6 +81,15 @@ export function createExecutionRoutes(
     const limit = c.req.query('limit') ? parseInt(c.req.query('limit')!, 10) : undefined;
 
     return getDataflowExecution(repoPath, ws, { offset, limit });
+  });
+
+  // POST /api/repos/:repo/workspaces/:ws/dataflow/cancel - Cancel running execution
+  app.post('/cancel', async (c) => {
+    const repo = c.req.param('repo')!;
+    const repoPath = getRepoPath(repo);
+    const ws = c.req.param('ws')!;
+
+    return cancelDataflow(repoPath, ws);
   });
 
   return app;

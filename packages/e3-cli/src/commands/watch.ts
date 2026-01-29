@@ -23,10 +23,11 @@ import {
   workspaceCreate,
   workspaceGetState,
   workspaceDeploy,
-  dataflowExecute,
   DataflowAbortedError,
   LocalStorage,
-  type TaskExecutionResult,
+  LocalOrchestrator,
+  InMemoryStateStore,
+  type TaskCompletedCallback,
 } from '@elaraai/e3-core';
 import { resolveRepo, formatError } from '../utils.js';
 
@@ -238,19 +239,22 @@ export async function watchCommand(
   const storage = new LocalStorage();
 
   /**
-   * Execute the dataflow in the workspace
+   * Execute the dataflow in the workspace using orchestrator
    */
   async function runDataflow(signal: AbortSignal): Promise<void> {
     console.log(`[${timestamp()}] Starting dataflow...`);
 
+    const stateStore = new InMemoryStateStore();
+    const orchestrator = new LocalOrchestrator(stateStore);
+
     try {
-      const result = await dataflowExecute(storage, repoPath, workspace, {
+      const handle = await orchestrator.start(storage, repoPath, workspace, {
         concurrency,
         signal,
         onTaskStart: (name) => {
           console.log(`  [START] ${name}`);
         },
-        onTaskComplete: (taskResult: TaskExecutionResult) => {
+        onTaskComplete: (taskResult: TaskCompletedCallback) => {
           const status = taskResult.state === 'success' ? 'DONE' :
                         taskResult.state === 'failed' ? 'FAIL' :
                         taskResult.state === 'skipped' ? 'SKIP' : 'ERR';
@@ -259,6 +263,8 @@ export async function watchCommand(
           console.log(`  [${status}] ${taskResult.name}${cached}${duration}`);
         },
       });
+
+      const result = await orchestrator.wait(handle);
 
       if (result.success) {
         console.log(`[${timestamp()}] Dataflow complete (${result.executed} executed, ${result.cached} cached)`);

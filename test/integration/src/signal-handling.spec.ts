@@ -12,13 +12,14 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTestDir, removeTestDir, runE3Command, spawnE3Command } from './helpers.js';
 
 // SDK imports
 import e3 from '@elaraai/e3';
-import { StringType, East } from '@elaraai/east';
+import { StringType, East, decodeBeast2For } from '@elaraai/east';
+import { DataflowExecutionStateType } from '@elaraai/e3-types';
 
 describe('signal handling', () => {
   let testDir: string;
@@ -144,6 +145,165 @@ describe('signal handling', () => {
         result.exitCode !== 0;
 
       assert.ok(indicatesAbort, `Output should indicate abort or exit non-zero. Got exitCode=${result.exitCode}, output: ${output}`);
+    });
+
+    it('persists cancelled status to disk after SIGINT', async () => {
+      // This test verifies that after SIGINT, the execution state file
+      // shows "cancelled" status - important for crash recovery.
+
+      const input = e3.input('input', StringType, 'hello');
+
+      const slowTask = e3.customTask(
+        'slow',
+        [input],
+        StringType,
+        ($, inputs, output) => East.str`sleep 30 && cp ${inputs.get(0n)} ${output}`
+      );
+
+      const pkg = e3.package('slow-test-persist', '1.0.0', slowTask);
+
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'slow-test-persist@1.0.0'], testDir);
+
+      const proc = spawnE3Command(['start', repoDir, 'ws'], testDir);
+
+      // Wait for task to start and state to be created
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Send SIGINT
+      proc.kill('SIGINT');
+
+      // Wait for CLI to exit
+      await proc.result;
+
+      // Give a moment for filesystem to flush
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Read the execution state file
+      const statePath = join(repoDir, 'workspaces', 'ws', 'execution.beast2');
+      assert.ok(existsSync(statePath), 'Execution state file should exist');
+
+      const stateData = readFileSync(statePath);
+      const decode = decodeBeast2For(DataflowExecutionStateType);
+      const state = decode(stateData);
+
+      // Verify the status is 'cancelled'
+      assert.strictEqual(state.status, 'cancelled', `Execution status should be 'cancelled', got '${state.status}'`);
+    });
+
+    it('persists cancelled status even with rapid SIGINT+SIGKILL', async () => {
+      // This test simulates an impatient user pressing Ctrl-C multiple times.
+      // The cancellation should be persisted immediately on first SIGINT,
+      // so even if SIGKILL follows shortly after, the status is preserved.
+
+      const input = e3.input('input', StringType, 'hello');
+
+      const slowTask = e3.customTask(
+        'slow',
+        [input],
+        StringType,
+        ($, inputs, output) => East.str`sleep 30 && cp ${inputs.get(0n)} ${output}`
+      );
+
+      const pkg = e3.package('slow-test-rapid', '1.0.0', slowTask);
+
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'slow-test-rapid@1.0.0'], testDir);
+
+      const proc = spawnE3Command(['start', repoDir, 'ws'], testDir);
+
+      // Wait for task to start and state to be created
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Send SIGINT (triggers immediate persistence)
+      proc.kill('SIGINT');
+
+      // Wait just long enough for the signal handler to fire and start persistence
+      // (50ms should be plenty for the async updateStatus to begin)
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Send SIGKILL to forcibly terminate (simulating impatient user)
+      proc.kill('SIGKILL');
+
+      // Wait for process to exit
+      await proc.result;
+
+      // Give filesystem time to flush
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Read the execution state file
+      const statePath = join(repoDir, 'workspaces', 'ws', 'execution.beast2');
+      assert.ok(existsSync(statePath), 'Execution state file should exist');
+
+      const stateData = readFileSync(statePath);
+      const decode = decodeBeast2For(DataflowExecutionStateType);
+      const state = decode(stateData);
+
+      // Verify the status is 'cancelled' - the immediate persistence should have completed
+      assert.strictEqual(state.status, 'cancelled', `Execution status should be 'cancelled', got '${state.status}'`);
+    });
+
+    it('can restart dataflow after SIGKILL without --force', async () => {
+      // This test verifies that after killing a dataflow execution,
+      // the user can restart it without any special flags.
+      // The stale lock should be automatically cleaned up.
+
+      const input = e3.input('input', StringType, 'hello');
+
+      const slowTask = e3.customTask(
+        'slow',
+        [input],
+        StringType,
+        ($, inputs, output) => East.str`sleep 30 && cp ${inputs.get(0n)} ${output}`
+      );
+
+      const pkg = e3.package('slow-test-restart', '1.0.0', slowTask);
+
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'slow-test-restart@1.0.0'], testDir);
+
+      // Start and kill the first execution
+      const proc1 = spawnE3Command(['start', repoDir, 'ws'], testDir);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      proc1.kill('SIGKILL');
+      await proc1.result;
+
+      // Give a moment for any cleanup
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Start a new execution - should work without --force
+      const proc2 = spawnE3Command(['start', repoDir, 'ws'], testDir);
+
+      // Wait for it to start
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Verify it's running (not blocked by stale lock)
+      // The execution state should show 'running'
+      const statePath = join(repoDir, 'workspaces', 'ws', 'execution.beast2');
+      assert.ok(existsSync(statePath), 'Execution state file should exist');
+
+      const stateData = readFileSync(statePath);
+      const decode = decodeBeast2For(DataflowExecutionStateType);
+      const state = decode(stateData);
+
+      // Should be running (not stuck on lock)
+      assert.strictEqual(state.status, 'running', `Second execution should be 'running', got '${state.status}'`);
+
+      // Clean up
+      proc2.kill('SIGINT');
+      await proc2.result;
     });
   });
 

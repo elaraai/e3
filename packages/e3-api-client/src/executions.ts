@@ -299,3 +299,29 @@ export async function dataflowExecutePoll(
 
 // Backward compatibility alias
 export { dataflowExecutePoll as dataflowExecution };
+
+/**
+ * Cancel a running dataflow execution.
+ *
+ * @param url - Base URL of the API server
+ * @param repo - Repository name
+ * @param workspace - Workspace name
+ * @param options - Request options (token, etc.)
+ * @throws {ApiError} If cancellation fails or no execution is running
+ */
+export async function dataflowCancel(
+  url: string,
+  repo: string,
+  workspace: string,
+  options: RequestOptions
+): Promise<void> {
+  const response = await post(
+    url,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/cancel`,
+    null,
+    NullType,
+    NullType,
+    options
+  );
+  unwrap(response);
+}

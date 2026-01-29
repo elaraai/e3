@@ -5,17 +5,17 @@
 
 import { NullType, some, none, variant } from '@elaraai/east';
 import {
-  dataflowStart,
   dataflowGetGraph,
   workspaceStatus,
   executionFindCurrent,
   executionReadLog,
   WorkspaceLockError,
-  DataflowAbortedError,
+  coreEventToApiEvent,
+  coreStatusToApiStatus,
   type WorkspaceStatusResult as CoreWorkspaceStatusResult,
   type DatasetStatusInfo as CoreDatasetStatusInfo,
   type TaskStatusInfo as CoreTaskStatusInfo,
-  type TaskExecutionResult as CoreTaskExecutionResult,
+  type DataflowExecutionStatus,
 } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError, sendSuccessWithStatus } from '../beast2.js';
@@ -28,15 +28,17 @@ import {
   type WorkspaceStatusResult,
   type DatasetStatusInfo,
   type TaskStatusInfo,
-  type DataflowEvent,
+  type DataflowExecutionState,
 } from '../types.js';
 import {
-  createExecutionState,
-  addExecutionEvent,
-  completeExecution,
-  abortExecution,
-  getExecutionState,
-} from '../execution-state.js';
+  getOrchestrator,
+  getStateStore,
+  setActiveExecution,
+  getActiveExecution,
+  getLatestExecution,
+  getExecutionStartTime,
+  clearActiveExecution,
+} from '../orchestrator-manager.js';
 
 /**
  * Convert core DatasetStatusInfo to API type.
@@ -153,49 +155,6 @@ function convertWorkspaceStatus(result: CoreWorkspaceStatusResult): WorkspaceSta
 }
 
 /**
- * Convert a core TaskExecutionResult to a DataflowEvent.
- */
-function taskResultToEvent(result: CoreTaskExecutionResult): DataflowEvent {
-  const timestamp = new Date().toISOString();
-
-  if (result.cached) {
-    // Cached - no execution happened, just cache retrieval
-    return variant('cached', {
-      task: result.name,
-      timestamp,
-    });
-  }
-
-  switch (result.state) {
-    case 'success':
-      return variant('complete', {
-        task: result.name,
-        timestamp,
-        duration: result.duration,
-      });
-    case 'failed':
-      return variant('failed', {
-        task: result.name,
-        timestamp,
-        duration: result.duration,
-        exitCode: BigInt(result.exitCode ?? -1),
-      });
-    case 'error':
-      return variant('error', {
-        task: result.name,
-        timestamp,
-        message: result.error ?? 'Unknown error',
-      });
-    case 'skipped':
-      return variant('input_unavailable', {
-        task: result.name,
-        timestamp,
-        reason: 'Upstream task failed or inputs not available',
-      });
-  }
-}
-
-/**
  * Start dataflow execution (non-blocking).
  *
  * Returns 202 Accepted immediately and runs execution in background.
@@ -208,81 +167,31 @@ export async function startDataflow(
   options: { concurrency: number; force: boolean; filter?: string }
 ): Promise<Response> {
   try {
-    // Acquire lock first - returns null if already locked
-    const lock = await storage.locks.acquire(repoPath, workspace, variant('dataflow', null));
-    if (!lock) {
-      throw new WorkspaceLockError(workspace);
-    }
+    const orchestrator = getOrchestrator(repoPath);
 
-    // Create execution state for polling
-    createExecutionState(repoPath, workspace);
-
-    // Track execution summary
-    let executed = 0;
-    let cached = 0;
-    let failed = 0;
-    let skipped = 0;
-    const startTime = Date.now();
-
-    // Start execution without awaiting - it runs in background
-    dataflowStart(storage, repoPath, workspace, {
+    // Start execution via orchestrator (acquires lock internally)
+    const handle = await orchestrator.start(storage, repoPath, workspace, {
       concurrency: options.concurrency,
       force: options.force,
       filter: options.filter,
-      lock,
-      onTaskStart: (name) => {
-        // Record start event
-        addExecutionEvent(repoPath, workspace, variant('start', {
-          task: name,
-          timestamp: new Date().toISOString(),
-        }));
-      },
-      onTaskComplete: (result) => {
-        // Track summary counts
-        if (result.cached) {
-          cached++;
-        } else if (result.state === 'success') {
-          executed++;
-        } else if (result.state === 'failed' || result.state === 'error') {
-          failed++;
-        } else if (result.state === 'skipped') {
-          skipped++;
-        }
+    });
 
-        // Record completion event
-        addExecutionEvent(repoPath, workspace, taskResultToEvent(result));
-      },
-    }).then((result) => {
-      // Execution completed
-      const duration = Date.now() - startTime;
-      completeExecution(repoPath, workspace, {
-        executed,
-        cached,
-        failed,
-        skipped,
-        duration,
-      }, result.success);
-    }).catch((err) => {
-      // Handle abort or error
-      if (err instanceof DataflowAbortedError) {
-        abortExecution(repoPath, workspace);
-      } else {
-        // Mark as failed on unexpected error
-        const duration = Date.now() - startTime;
-        completeExecution(repoPath, workspace, {
-          executed,
-          cached,
-          failed,
-          skipped,
-          duration,
-        }, false);
-        console.error(`Dataflow execution error for workspace ${workspace}:`, err);
-      }
+    // Track as active execution for this workspace
+    setActiveExecution(repoPath, workspace, handle);
+
+    // Set up completion handler to clear active execution
+    orchestrator.wait(handle).then(() => {
+      clearActiveExecution(repoPath, workspace);
+    }).catch(() => {
+      clearActiveExecution(repoPath, workspace);
     });
 
     // Return immediately with 202 Accepted
     return sendSuccessWithStatus(NullType, null, 202);
   } catch (err) {
+    if (err instanceof WorkspaceLockError) {
+      return sendError(NullType, errorToVariant(err));
+    }
     return sendError(NullType, errorToVariant(err));
   }
 }
@@ -367,18 +276,166 @@ export async function getTaskLogs(
  * Returns the current execution state including events for progress tracking.
  * Supports offset/limit for paginating events.
  */
-export function getDataflowExecution(
+export async function getDataflowExecution(
   repoPath: string,
   workspace: string,
   options: { offset?: number; limit?: number } = {}
-): Response {
-  const state = getExecutionState(repoPath, workspace, options);
+): Promise<Response> {
+  const stateStore = getStateStore(repoPath);
 
-  if (!state) {
+  // Find the latest execution for this workspace
+  const handle = await getLatestExecution(repoPath, workspace);
+  if (!handle) {
     return sendError(DataflowExecutionStateType, variant('internal', {
       message: 'No execution found for this workspace',
     }));
   }
 
+  // Read execution state
+  const coreState = await stateStore.read(repoPath, workspace, handle.id);
+  if (!coreState) {
+    return sendError(DataflowExecutionStateType, variant('internal', {
+      message: 'No execution found for this workspace',
+    }));
+  }
+
+  // Get events with offset/limit from inline events array
+  const offset = options.offset ?? 0;
+  const allEvents = coreState.events;
+  const totalEvents = allEvents.length;
+
+  // Apply offset and limit
+  let events = allEvents.slice(offset);
+  if (options.limit !== undefined) {
+    events = events.slice(0, options.limit);
+  }
+
+  // Convert events to API format
+  const apiEvents: DataflowExecutionState['events'] = [];
+  for (const event of events) {
+    const apiEvent = coreEventToApiEvent(event);
+    if (apiEvent !== null) {
+      // Convert to East variant format
+      switch (apiEvent.type) {
+        case 'start':
+          apiEvents.push(variant('start', {
+            task: apiEvent.task,
+            timestamp: apiEvent.timestamp,
+          }));
+          break;
+        case 'complete':
+          apiEvents.push(variant('complete', {
+            task: apiEvent.task,
+            timestamp: apiEvent.timestamp,
+            duration: apiEvent.duration ?? 0,
+          }));
+          break;
+        case 'cached':
+          apiEvents.push(variant('cached', {
+            task: apiEvent.task,
+            timestamp: apiEvent.timestamp,
+          }));
+          break;
+        case 'failed':
+          apiEvents.push(variant('failed', {
+            task: apiEvent.task,
+            timestamp: apiEvent.timestamp,
+            duration: apiEvent.duration ?? 0,
+            exitCode: apiEvent.exitCode ?? BigInt(-1),
+          }));
+          break;
+        case 'error':
+          apiEvents.push(variant('error', {
+            task: apiEvent.task,
+            timestamp: apiEvent.timestamp,
+            message: apiEvent.message ?? 'Unknown error',
+          }));
+          break;
+        case 'input_unavailable':
+          apiEvents.push(variant('input_unavailable', {
+            task: apiEvent.task,
+            timestamp: apiEvent.timestamp,
+            reason: apiEvent.reason ?? 'Upstream task failed',
+          }));
+          break;
+      }
+    }
+  }
+
+  // Convert status to API format
+  const apiStatus = coreStatusToApiStatus(coreState.status as DataflowExecutionStatus);
+  let status: DataflowExecutionState['status'];
+  switch (apiStatus) {
+    case 'running':
+      status = variant('running', null);
+      break;
+    case 'completed':
+      status = variant('completed', null);
+      break;
+    case 'failed':
+      status = variant('failed', null);
+      break;
+    case 'aborted':
+      status = variant('aborted', null);
+      break;
+  }
+
+  // Calculate duration
+  const startTime = getExecutionStartTime(repoPath, workspace, handle.id);
+  const duration = startTime ? Date.now() - startTime : 0;
+
+  // Build summary if not running
+  let summary: DataflowExecutionState['summary'];
+  if (coreState.status !== 'running') {
+    summary = some({
+      executed: coreState.executed,
+      cached: coreState.cached,
+      failed: coreState.failed,
+      skipped: coreState.skipped,
+      duration,
+    });
+  } else {
+    summary = none;
+  }
+
+  // Get completedAt value (handle Option type)
+  const completedAtValue = coreState.completedAt.type === 'some'
+    ? some(coreState.completedAt.value.toISOString())
+    : none;
+
+  const state: DataflowExecutionState = {
+    status,
+    startedAt: coreState.startedAt.toISOString(),
+    completedAt: completedAtValue,
+    summary,
+    events: apiEvents,
+    totalEvents: BigInt(totalEvents),
+  };
+
   return sendSuccess(DataflowExecutionStateType, state);
+}
+
+/**
+ * Cancel a running dataflow execution.
+ */
+export async function cancelDataflow(
+  repoPath: string,
+  workspace: string
+): Promise<Response> {
+  try {
+    const orchestrator = getOrchestrator(repoPath);
+    const execution = getActiveExecution(repoPath, workspace);
+
+    if (!execution) {
+      return sendError(NullType, variant('internal', {
+        message: 'No active execution for this workspace',
+      }));
+    }
+
+    await orchestrator.cancel(execution);
+
+    return sendSuccess(NullType, null);
+  } catch (err) {
+    return sendError(NullType, errorToVariant(err));
+  }
 }

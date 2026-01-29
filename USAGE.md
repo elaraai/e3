@@ -282,6 +282,8 @@ e3 watch <repo> <ws> <source.ts> [--start] [--abort-on-change]
 e3 logs <repo> <path> [--follow]
 ```
 
+**Cancellation:** Running executions can be cancelled via the API using `dataflowCancel()` from `@elaraai/e3-api-client`, or by pressing Ctrl-C when using the CLI. In watch mode, use `--abort-on-change` to automatically cancel when files change.
+
 ### Utility Commands
 
 ```bash

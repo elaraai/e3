@@ -406,6 +406,7 @@ const TaskListItemType = StructType({
 | e3-core Function | Method | Path | Request | Response |
 |------------------|--------|------|---------|----------|
 | `dataflowExecute()` | POST | `/api/workspaces/:ws/start` | `DataflowRequestType` | `NullType` (202 Accepted) |
+| `dataflowCancel()` | POST | `/api/workspaces/:ws/dataflow/cancel` | - | `NullType` |
 | `dataflowGetGraph()` | GET | `/api/workspaces/:ws/graph` | - | `DataflowGraphType` |
 | `executionReadLog()` | GET | `/api/workspaces/:ws/logs/:task` | Query: stream, offset, limit | `LogChunkType` |
 
@@ -421,10 +422,17 @@ Client polls `GET /status` to track progress:
 - `tasks[].status` shows each task's state (`in-progress`, `up-to-date`, `failed`, etc.)
 - `datasets[].status` shows which outputs are complete
 
-When execution finishes:
+**Cancellation:**
+
+`POST /dataflow/cancel` cancels a running execution:
+- Returns 200 OK on success
+- Returns error if no active execution for the workspace
+- Execution state changes to `aborted`
+
+When execution finishes (or is cancelled):
 - Lock is released (`lock` becomes null)
 - All task statuses reflect final state
-- Dataset statuses are `up-to-date` or `stale` (if failed)
+- Dataset statuses are `up-to-date` or `stale` (if failed/aborted)
 
 This is stateless - all execution state is persisted to filesystem by `dataflowExecute()`:
 - Lock file: `workspaces/<ws>.lock`
@@ -485,4 +493,4 @@ const LogChunkType = StructType({
 - [x] Workspaces: `workspaceList`, `workspaceCreate`, `workspaceGet`, `workspaceRemove`, `workspaceDeploy`, `workspaceExport`, `workspaceStatus`
 - [x] Datasets: `datasetList`, `datasetListAt`, `datasetGet`, `datasetSet`
 - [x] Tasks: `taskList`, `taskGet`
-- [x] Execution: `dataflowStart`, `dataflowGraph`, `taskLogs`
+- [x] Execution: `dataflowStart`, `dataflowCancel`, `dataflowGraph`, `taskLogs`
