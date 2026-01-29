@@ -21,11 +21,12 @@ import {
   dataflowStart,
   dataflowExecute,
   dataflowExecution,
+  dataflowCancel,
   taskLogs,
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
-import { createPackageZip, createDiamondPackageZip } from '../fixtures.js';
+import { createPackageZip, createDiamondPackageZip, createFailingPackageZip, createSlowPackageZip } from '../fixtures.js';
 
 /**
  * Register dataflow execution tests.
@@ -222,6 +223,179 @@ export function dataflowTests(getContext: () => TestContext): void {
           typeof e === 'object' && e !== null && 'type' in e && (e as { type: string }).type === 'complete'
         );
         assert.ok(completeEvents.length >= 3, `Expected at least 3 complete events, got ${completeEvents.length}`);
+      });
+    });
+
+    describe('failed execution', () => {
+      beforeEach(async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Create and import a package with a failing task
+        const zipPath = await createFailingPackageZip(ctx.tempDir, 'fail-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'fail-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'fail-ws', 'fail-pkg@1.0.0', opts);
+      });
+
+      it('dataflowExecute returns failure result when task fails', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'fail-ws', { force: true }, opts);
+
+        // Execution should report failure
+        assert.strictEqual(result.success, false);
+        assert.strictEqual(result.failed, 1n);
+        assert.strictEqual(result.executed, 0n);
+        assert.strictEqual(result.tasks.length, 1);
+        assert.strictEqual(result.tasks[0].name, 'failing');
+        assert.strictEqual(result.tasks[0].state.type, 'failed');
+      });
+
+      it('dataflowExecution shows failed status after task failure', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Start execution
+        await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'fail-ws', { force: true }, opts);
+
+        // Poll until execution completes
+        const maxWait = 10000;
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < maxWait) {
+          const state = await dataflowExecution(ctx.config.baseUrl, ctx.repoName, 'fail-ws', {}, opts);
+
+          if (state.status.type === 'failed') {
+            // Verify we have summary with failure count
+            assert.strictEqual(state.summary.type, 'some');
+            if (state.summary.type === 'some') {
+              assert.strictEqual(state.summary.value.failed, 1n);
+            }
+            return; // Test passed
+          }
+
+          if (state.status.type === 'completed') {
+            assert.fail('Execution should have failed, not completed');
+          }
+
+          await new Promise(r => setTimeout(r, 100));
+        }
+
+        assert.fail('Execution did not complete in time');
+      });
+
+      it('can restart execution after failure', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // First execution - should fail
+        const result1 = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'fail-ws', { force: true }, opts);
+        assert.strictEqual(result1.success, false);
+
+        // Second execution - should also run (not blocked by previous failure)
+        const result2 = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'fail-ws', { force: true }, opts);
+        assert.strictEqual(result2.success, false);
+        assert.strictEqual(result2.failed, 1n);
+      });
+    });
+
+    describe('concurrent execution', () => {
+      beforeEach(async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Create and import a slow package
+        const zipPath = await createSlowPackageZip(ctx.tempDir, 'slow-pkg', '1.0.0', 30);
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'slow-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'slow-ws', 'slow-pkg@1.0.0', opts);
+      });
+
+      it('rejects second dataflowStart while execution is running', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Start first execution (non-blocking)
+        await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'slow-ws', { force: true }, opts);
+
+        // Wait a moment for execution to start
+        await new Promise(r => setTimeout(r, 500));
+
+        // Try to start second execution - should fail with lock error
+        try {
+          await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'slow-ws', { force: true }, opts);
+          assert.fail('Second dataflowStart should have thrown an error');
+        } catch (err) {
+          // Should get a lock error
+          assert.ok(err instanceof Error);
+          const message = err.message.toLowerCase();
+          assert.ok(
+            message.includes('lock') || message.includes('running') || message.includes('busy'),
+            `Expected lock-related error, got: ${err.message}`
+          );
+        }
+      });
+
+      it('rejects dataflowExecute while execution is running', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Start first execution (non-blocking)
+        await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'slow-ws', { force: true }, opts);
+
+        // Wait a moment for execution to start
+        await new Promise(r => setTimeout(r, 500));
+
+        // Try blocking execute - should fail with lock error
+        try {
+          await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'slow-ws', { force: true }, opts);
+          assert.fail('dataflowExecute should have thrown an error');
+        } catch (err) {
+          assert.ok(err instanceof Error);
+          const message = err.message.toLowerCase();
+          assert.ok(
+            message.includes('lock') || message.includes('running') || message.includes('busy'),
+            `Expected lock-related error, got: ${err.message}`
+          );
+        }
+      });
+
+      it('dataflowCancel stops a running execution', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Start slow execution
+        await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'slow-ws', { force: true }, opts);
+
+        // Wait for it to start
+        await new Promise(r => setTimeout(r, 500));
+
+        // Cancel it
+        await dataflowCancel(ctx.config.baseUrl, ctx.repoName, 'slow-ws', opts);
+
+        // Verify execution state is aborted
+        const state = await dataflowExecution(ctx.config.baseUrl, ctx.repoName, 'slow-ws', {}, opts);
+        assert.strictEqual(state.status.type, 'aborted');
+      });
+
+      it('dataflowCancel returns error when no execution is running', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Try to cancel when nothing is running
+        try {
+          await dataflowCancel(ctx.config.baseUrl, ctx.repoName, 'slow-ws', opts);
+          assert.fail('Should have thrown an error');
+        } catch (err) {
+          assert.ok(err instanceof Error);
+          // Expect error about no active execution
+        }
       });
     });
   });

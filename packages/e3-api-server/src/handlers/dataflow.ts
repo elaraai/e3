@@ -34,6 +34,7 @@ import {
   getOrchestrator,
   getStateStore,
   setActiveExecution,
+  getActiveExecution,
   getLatestExecution,
   getExecutionStartTime,
   clearActiveExecution,
@@ -412,4 +413,29 @@ export async function getDataflowExecution(
   };
 
   return sendSuccess(DataflowExecutionStateType, state);
+}
+
+/**
+ * Cancel a running dataflow execution.
+ */
+export async function cancelDataflow(
+  repoPath: string,
+  workspace: string
+): Promise<Response> {
+  try {
+    const orchestrator = getOrchestrator(repoPath);
+    const execution = getActiveExecution(repoPath, workspace);
+
+    if (!execution) {
+      return sendError(NullType, variant('internal', {
+        message: 'No active execution for this workspace',
+      }));
+    }
+
+    await orchestrator.cancel(execution);
+
+    return sendSuccess(NullType, null);
+  } catch (err) {
+    return sendError(NullType, errorToVariant(err));
+  }
 }

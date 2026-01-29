@@ -99,6 +99,7 @@ export {
   dataflowExecuteLaunch,
   dataflowExecutePoll,
   dataflowGraph,
+  dataflowCancel,
   taskLogs,
   // Backward compatibility aliases
   dataflowStart,

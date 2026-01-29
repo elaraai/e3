@@ -167,3 +167,73 @@ export async function createDiamondPackageZip(
 
   return zipPath;
 }
+
+/**
+ * Create a package with a task that always fails.
+ *
+ * Creates a package with:
+ * - Input: "value" (String, default "test")
+ * - Task: "failing" - exits with code 1
+ *
+ * @param tempDir - Directory to write the zip file
+ * @param name - Package name
+ * @param version - Package version
+ * @returns Path to the created zip file
+ */
+export async function createFailingPackageZip(
+  tempDir: string,
+  name: string,
+  version: string
+): Promise<string> {
+  mkdirSync(tempDir, { recursive: true });
+
+  const input = e3.input('value', StringType, 'test');
+  const task = e3.customTask(
+    'failing',
+    [input],
+    StringType,
+    ($, _inputs, _output) => East.str`exit 1`
+  );
+  const pkg = e3.package(name, version, task);
+
+  const zipPath = join(tempDir, `${name}-${version}.zip`);
+  await e3.export(pkg, zipPath);
+
+  return zipPath;
+}
+
+/**
+ * Create a package with a slow task for testing concurrency/cancellation.
+ *
+ * Creates a package with:
+ * - Input: "value" (String, default "test")
+ * - Task: "slow" - sleeps for specified seconds then copies input to output
+ *
+ * @param tempDir - Directory to write the zip file
+ * @param name - Package name
+ * @param version - Package version
+ * @param sleepSeconds - How long the task should sleep (default: 10)
+ * @returns Path to the created zip file
+ */
+export async function createSlowPackageZip(
+  tempDir: string,
+  name: string,
+  version: string,
+  sleepSeconds: number = 10
+): Promise<string> {
+  mkdirSync(tempDir, { recursive: true });
+
+  const input = e3.input('value', StringType, 'test');
+  const task = e3.customTask(
+    'slow',
+    [input],
+    StringType,
+    ($, inputs, output) => East.str`sleep ${sleepSeconds.toString()} && cp ${inputs.get(0n)} ${output}`
+  );
+  const pkg = e3.package(name, version, task);
+
+  const zipPath = join(tempDir, `${name}-${version}.zip`);
+  await e3.export(pkg, zipPath);
+
+  return zipPath;
+}
