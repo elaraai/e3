@@ -166,7 +166,7 @@ export async function startDataflow(
   options: { concurrency: number; force: boolean; filter?: string }
 ): Promise<Response> {
   try {
-    const orchestrator = getOrchestrator();
+    const orchestrator = getOrchestrator(repoPath);
 
     // Start execution via orchestrator (acquires lock internally)
     const handle = await orchestrator.start(storage, repoPath, workspace, {
@@ -280,7 +280,7 @@ export async function getDataflowExecution(
   workspace: string,
   options: { offset?: number; limit?: number } = {}
 ): Promise<Response> {
-  const stateStore = getStateStore();
+  const stateStore = getStateStore(repoPath);
 
   // Find the latest execution for this workspace
   const handle = await getLatestExecution(repoPath, workspace);

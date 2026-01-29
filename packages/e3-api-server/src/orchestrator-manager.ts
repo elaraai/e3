@@ -6,26 +6,53 @@
 /**
  * Orchestrator manager for e3-api-server.
  *
- * Provides a singleton LocalOrchestrator with InMemoryStateStore
- * and manages active executions per workspace.
+ * Manages LocalOrchestrator instances per repository, each with its own
+ * FileStateStore for durable execution state persistence.
  */
 
+import { join } from 'node:path';
 import {
   LocalOrchestrator,
-  InMemoryStateStore,
+  FileStateStore,
   type ExecutionHandle,
   type ExecutionStateStore,
 } from '@elaraai/e3-core';
 
 /**
- * Singleton state store shared across all executions.
+ * Map of state stores per repository path.
  */
-const stateStore = new InMemoryStateStore();
+const stateStores = new Map<string, FileStateStore>();
 
 /**
- * Singleton orchestrator for the API server.
+ * Map of orchestrators per repository path.
  */
-const orchestrator = new LocalOrchestrator(stateStore);
+const orchestrators = new Map<string, LocalOrchestrator>();
+
+/**
+ * Get or create a FileStateStore for a repository.
+ */
+function getOrCreateStateStore(repoPath: string): FileStateStore {
+  let store = stateStores.get(repoPath);
+  if (!store) {
+    const workspacesDir = join(repoPath, 'workspaces');
+    store = new FileStateStore(workspacesDir);
+    stateStores.set(repoPath, store);
+  }
+  return store;
+}
+
+/**
+ * Get or create a LocalOrchestrator for a repository.
+ */
+function getOrCreateOrchestrator(repoPath: string): LocalOrchestrator {
+  let orch = orchestrators.get(repoPath);
+  if (!orch) {
+    const stateStore = getOrCreateStateStore(repoPath);
+    orch = new LocalOrchestrator(stateStore);
+    orchestrators.set(repoPath, orch);
+  }
+  return orch;
+}
 
 /**
  * Map of active execution handles by workspace key.
@@ -54,17 +81,17 @@ function makeExecutionKey(repoPath: string, workspace: string, executionId: stri
 }
 
 /**
- * Get the singleton orchestrator instance.
+ * Get the orchestrator for a repository.
  */
-export function getOrchestrator(): LocalOrchestrator {
-  return orchestrator;
+export function getOrchestrator(repoPath: string): LocalOrchestrator {
+  return getOrCreateOrchestrator(repoPath);
 }
 
 /**
- * Get the singleton state store instance.
+ * Get the state store for a repository.
  */
-export function getStateStore(): ExecutionStateStore {
-  return stateStore;
+export function getStateStore(repoPath: string): ExecutionStateStore {
+  return getOrCreateStateStore(repoPath);
 }
 
 /**
@@ -128,6 +155,7 @@ export async function getLatestExecution(repoPath: string, workspace: string): P
   }
 
   // Otherwise check state store for latest
+  const stateStore = getOrCreateStateStore(repoPath);
   const state = await stateStore.readLatest(repoPath, workspace);
   if (state) {
     return { id: state.id, repo: repoPath, workspace };
@@ -137,10 +165,12 @@ export async function getLatestExecution(repoPath: string, workspace: string): P
 }
 
 /**
- * Clear all state (for testing).
+ * Clear all in-memory state (for testing).
+ * Note: This does not clear persisted file-based state.
  */
 export function clearAll(): void {
   activeExecutions.clear();
   executionStartTimes.clear();
-  stateStore.clear();
+  stateStores.clear();
+  orchestrators.clear();
 }

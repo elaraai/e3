@@ -188,6 +188,26 @@ export class LocalOrchestrator implements DataflowOrchestrator {
       const key = this.executionKey(repo, workspace, executionId);
       this.executions.set(key, execution);
 
+      // Listen for abort signal to persist cancellation immediately.
+      // This ensures the "cancelled" status survives even if the process
+      // is killed (e.g., repeated Ctrl-C) before the loop can persist.
+      if (options.signal) {
+        const onAbort = () => {
+          execution.aborted = true;
+          if (this.stateStore) {
+            // Fire-and-forget: best-effort immediate persistence
+            void this.stateStore.updateStatus(
+              repo,
+              workspace,
+              executionId,
+              'cancelled',
+              { error: 'Execution was cancelled' }
+            ).catch(() => { /* ignore errors during shutdown */ });
+          }
+        };
+        options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+
       // Start the execution loop (non-blocking)
       this.runExecutionLoop(storage, repo, execution).catch(err => {
         rejectCompletion(err);
@@ -232,7 +252,6 @@ export class LocalOrchestrator implements DataflowOrchestrator {
     return stateToStatus(execution.state);
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async cancel(handle: ExecutionHandle): Promise<void> {
     const key = this.executionKey(handle.repo, handle.workspace, handle.id);
     const execution = this.executions.get(key);
@@ -243,7 +262,17 @@ export class LocalOrchestrator implements DataflowOrchestrator {
 
     execution.aborted = true;
 
-    // The execution loop will detect the abort and handle cleanup
+    // Persist cancellation immediately so it survives process crashes.
+    // The execution loop will also detect the abort and clean up gracefully.
+    if (this.stateStore) {
+      await this.stateStore.updateStatus(
+        handle.repo,
+        handle.workspace,
+        handle.id,
+        'cancelled',
+        { error: 'Execution was cancelled' }
+      );
+    }
   }
 
   async getEvents(handle: ExecutionHandle, sinceSeq: number): Promise<ExecutionEvent[]> {

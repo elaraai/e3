@@ -13,11 +13,12 @@
  *   e3 start https://server/repos/myrepo my-workspace
  */
 
+import { join } from 'node:path';
 import {
   DataflowAbortedError,
   LocalStorage,
   LocalOrchestrator,
-  InMemoryStateStore,
+  FileStateStore,
   WorkspaceLockError,
   type TaskCompletedCallback,
 } from '@elaraai/e3-core';
@@ -125,7 +126,8 @@ async function executeLocal(
   options: LocalExecuteOptions
 ): Promise<void> {
   const storage = new LocalStorage();
-  const stateStore = new InMemoryStateStore();
+  const workspacesDir = join(repoPath, 'workspaces');
+  const stateStore = new FileStateStore(workspacesDir);
   const orchestrator = new LocalOrchestrator(stateStore);
 
   const handle = await orchestrator.start(storage, repoPath, ws, {
