@@ -16,6 +16,7 @@
  * - Idempotent for retries
  */
 
+import { variant, some, none } from '@elaraai/east';
 import type { StorageBackend } from '../storage/interfaces.js';
 import {
   dataflowGetGraph,
@@ -26,7 +27,9 @@ import {
 } from '../dataflow.js';
 import {
   workspaceGetDatasetHash,
+  workspaceSetDatasetByHash,
 } from '../trees.js';
+import type { DataflowGraph } from '../dataflow.js';
 import type {
   DataflowExecutionState,
   TaskState,
@@ -35,8 +38,12 @@ import type {
   TaskCompletedResult,
   TaskFailedResult,
   FinalizeResult,
+  TreeUpdateResult,
   ExecutionEvent,
 } from './types.js';
+
+// Type helper for mutable state (removes readonly)
+type Mutable<T> = { -readonly [P in keyof T]: T[P] extends object ? Mutable<T[P]> : T[P] };
 
 // =============================================================================
 // Initialization
@@ -75,7 +82,7 @@ export async function stepInitialize(
   storage: StorageBackend,
   repo: string,
   workspace: string,
-  executionId: number,
+  executionId: string,
   options: StepInitializeOptions = {}
 ): Promise<InitializeResult> {
   const concurrency = options.concurrency ?? 4;
@@ -101,40 +108,70 @@ export async function stepInitialize(
     tasks.set(task.name, {
       name: task.name,
       status: 'pending',
-    });
+      cached: none,
+      outputHash: none,
+      error: none,
+      exitCode: none,
+      startedAt: none,
+      completedAt: none,
+      duration: none,
+    } as TaskState);
   }
 
   // Create initial state
-  const state: DataflowExecutionState = {
+  const state = {
     id: executionId,
     repo,
     workspace,
-    startedAt: new Date().toISOString(),
-    concurrency,
+    startedAt: new Date(),
+    concurrency: BigInt(concurrency),
     force,
-    filter,
-    graph,
+    filter: filter !== null ? some(filter) : none,
+    graph: some(graph),
+    graphHash: none,
     tasks,
-    executed: 0,
-    cached: 0,
-    failed: 0,
-    skipped: 0,
-    status: 'running',
-    completedAt: null,
-    error: null,
-    eventSeq: 0,
-  };
+    executed: 0n,
+    cached: 0n,
+    failed: 0n,
+    skipped: 0n,
+    status: 'running' as const,
+    completedAt: none,
+    error: none,
+    events: [] as ExecutionEvent[],
+    eventSeq: 0n,
+  } as DataflowExecutionState;
 
   // Find initially ready tasks
   const readyTasks = stepGetReady(state);
 
-  // Update task states to 'ready'
+  // Update task states to 'ready' (cast to mutable)
   for (const taskName of readyTasks) {
-    const taskState = tasks.get(taskName)!;
-    taskState.status = 'ready';
+    const taskState = tasks.get(taskName) as Mutable<TaskState>;
+    if (taskState) {
+      taskState.status = 'ready';
+    }
   }
 
   return { state, readyTasks };
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/**
+ * Get the graph from state, throwing if not available.
+ *
+ * For cloud execution, the graph may be stored separately and loaded
+ * via graphHash. This helper ensures the graph is present before use.
+ */
+function getGraph(state: DataflowExecutionState): DataflowGraph {
+  if (state.graph.type !== 'some') {
+    throw new Error(
+      'Execution state has no graph. For cloud execution, load the graph using graphHash before calling step functions.'
+    );
+  }
+  return state.graph.value;
 }
 
 // =============================================================================
@@ -163,7 +200,10 @@ export function stepGetReady(state: DataflowExecutionState): string[] {
   }
 
   // Get ready tasks from graph
-  const graphReady = dataflowGetReadyTasks(state.graph, completedTasks);
+  const graphReady = dataflowGetReadyTasks(getGraph(state), completedTasks);
+
+  // Get filter value (handle Option type)
+  const filterValue = state.filter.type === 'some' ? state.filter.value : null;
 
   // Filter by state and filter option
   return graphReady.filter(taskName => {
@@ -176,7 +216,7 @@ export function stepGetReady(state: DataflowExecutionState): string[] {
     }
 
     // Apply task filter
-    if (state.filter !== null && taskName !== state.filter) {
+    if (filterValue !== null && taskName !== filterValue) {
       return false;
     }
 
@@ -197,6 +237,8 @@ export function stepGetReady(state: DataflowExecutionState): string[] {
  * @returns True if execution is complete
  */
 export function stepIsComplete(state: DataflowExecutionState): boolean {
+  const filterValue = state.filter.type === 'some' ? state.filter.value : null;
+
   for (const taskState of state.tasks.values()) {
     // Check if any task is still in a non-terminal state
     if (
@@ -211,7 +253,7 @@ export function stepIsComplete(state: DataflowExecutionState): boolean {
 
       // If pending or ready, check if it can ever become ready
       // A task is stuck if it has unmet dependencies that failed/skipped
-      const task = state.graph.tasks.find(t => t.name === taskState.name);
+      const task = getGraph(state).tasks.find(t => t.name === taskState.name);
       if (task) {
         const hasUnmetDeps = task.dependsOn.some(dep => {
           const depState = state.tasks.get(dep);
@@ -221,7 +263,7 @@ export function stepIsComplete(state: DataflowExecutionState): boolean {
         // If not stuck, we're not complete
         if (!hasUnmetDeps) {
           // Check if it passes the filter
-          if (state.filter !== null && taskState.name !== state.filter) {
+          if (filterValue !== null && taskState.name !== filterValue) {
             continue; // Filtered out, doesn't affect completion
           }
           return false;
@@ -254,7 +296,8 @@ export async function stepPrepareTask(
   state: DataflowExecutionState,
   taskName: string
 ): Promise<PrepareTaskResult> {
-  const task = state.graph.tasks.find(t => t.name === taskName);
+  const graph = getGraph(state);
+  const task = graph.tasks.find(t => t.name === taskName);
   if (!task) {
     throw new Error(`Task '${taskName}' not found in graph`);
   }
@@ -329,21 +372,24 @@ export function stepTaskStarted(
   state: DataflowExecutionState,
   taskName: string
 ): ExecutionEvent {
-  const taskState = state.tasks.get(taskName);
+  const taskState = state.tasks.get(taskName) as Mutable<TaskState> | undefined;
   if (!taskState) {
     throw new Error(`Task '${taskName}' not found in state`);
   }
 
+  const now = new Date();
   taskState.status = 'in_progress';
-  taskState.startedAt = new Date().toISOString();
+  taskState.startedAt = some(now);
 
-  state.eventSeq++;
-  return {
-    type: 'task_started',
-    seq: state.eventSeq,
-    timestamp: taskState.startedAt,
+  const mutableState = state as Mutable<DataflowExecutionState>;
+  mutableState.eventSeq = state.eventSeq + 1n;
+  const event: ExecutionEvent = variant('task_started', {
+    seq: mutableState.eventSeq,
+    timestamp: now,
     task: taskName,
-  };
+  });
+  (mutableState.events as ExecutionEvent[]).push(event);
+  return event;
 }
 
 /**
@@ -365,45 +411,46 @@ export function stepTaskCompleted(
   cached: boolean,
   duration: number
 ): { result: TaskCompletedResult; event: ExecutionEvent } {
-  const taskState = state.tasks.get(taskName);
+  const taskState = state.tasks.get(taskName) as Mutable<TaskState> | undefined;
   if (!taskState) {
     throw new Error(`Task '${taskName}' not found in state`);
   }
 
-  const now = new Date().toISOString();
+  const now = new Date();
+  const mutableState = state as Mutable<DataflowExecutionState>;
 
   taskState.status = 'completed';
-  taskState.cached = cached;
-  taskState.outputHash = outputHash;
-  taskState.completedAt = now;
-  taskState.duration = duration;
+  taskState.cached = some(cached);
+  taskState.outputHash = some(outputHash);
+  taskState.completedAt = some(now);
+  taskState.duration = some(BigInt(duration));
 
   // Update counters
   if (cached) {
-    state.cached++;
+    mutableState.cached = state.cached + 1n;
   } else {
-    state.executed++;
+    mutableState.executed = state.executed + 1n;
   }
 
   // Find newly ready tasks
   const newlyReady = stepGetReady(state);
   for (const name of newlyReady) {
-    const ts = state.tasks.get(name);
+    const ts = state.tasks.get(name) as Mutable<TaskState> | undefined;
     if (ts && ts.status === 'pending') {
       ts.status = 'ready';
     }
   }
 
-  state.eventSeq++;
-  const event: ExecutionEvent = {
-    type: 'task_completed',
-    seq: state.eventSeq,
+  mutableState.eventSeq = state.eventSeq + 1n;
+  const event: ExecutionEvent = variant('task_completed', {
+    seq: mutableState.eventSeq,
     timestamp: now,
     task: taskName,
     cached,
     outputHash,
-    duration,
-  };
+    duration: BigInt(duration),
+  });
+  (mutableState.events as ExecutionEvent[]).push(event);
 
   return { result: { newlyReady }, event };
 }
@@ -427,21 +474,25 @@ export function stepTaskFailed(
   exitCode: number | undefined,
   duration: number
 ): { result: TaskFailedResult; event: ExecutionEvent } {
-  const taskState = state.tasks.get(taskName);
+  const taskState = state.tasks.get(taskName) as Mutable<TaskState> | undefined;
   if (!taskState) {
     throw new Error(`Task '${taskName}' not found in state`);
   }
 
-  const now = new Date().toISOString();
+  const now = new Date();
+  const mutableState = state as Mutable<DataflowExecutionState>;
 
   taskState.status = 'failed';
-  taskState.error = error;
-  taskState.exitCode = exitCode;
-  taskState.completedAt = now;
-  taskState.duration = duration;
+  taskState.error = error !== undefined ? some(error) : none;
+  taskState.exitCode = exitCode !== undefined ? some(BigInt(exitCode)) : none;
+  taskState.completedAt = some(now);
+  taskState.duration = some(BigInt(duration));
 
   // Update counters
-  state.failed++;
+  mutableState.failed = state.failed + 1n;
+
+  // Get filter value (handle Option type)
+  const filterValue = state.filter.type === 'some' ? state.filter.value : null;
 
   // Find tasks to skip (transitive dependents)
   const completedSet = new Set<string>();
@@ -452,7 +503,7 @@ export function stepTaskFailed(
   }
 
   const toSkip = dataflowGetDependentsToSkip(
-    state.graph,
+    getGraph(state),
     taskName,
     completedSet,
     skippedSet
@@ -460,20 +511,20 @@ export function stepTaskFailed(
     // Also exclude in-progress tasks and apply filter
     const ts = state.tasks.get(name);
     if (!ts || ts.status === 'in_progress') return false;
-    if (state.filter !== null && name !== state.filter) return false;
+    if (filterValue !== null && name !== filterValue) return false;
     return true;
   });
 
-  state.eventSeq++;
-  const event: ExecutionEvent = {
-    type: 'task_failed',
-    seq: state.eventSeq,
+  mutableState.eventSeq = state.eventSeq + 1n;
+  const event: ExecutionEvent = variant('task_failed', {
+    seq: mutableState.eventSeq,
     timestamp: now,
     task: taskName,
-    error,
-    exitCode,
-    duration,
-  };
+    error: error !== undefined ? some(error) : none,
+    exitCode: exitCode !== undefined ? some(BigInt(exitCode)) : none,
+    duration: BigInt(duration),
+  });
+  (mutableState.events as ExecutionEvent[]).push(event);
 
   return { result: { toSkip }, event };
 }
@@ -492,26 +543,28 @@ export function stepTasksSkipped(
   cause: string
 ): ExecutionEvent[] {
   const events: ExecutionEvent[] = [];
-  const now = new Date().toISOString();
+  const now = new Date();
+  const mutableState = state as Mutable<DataflowExecutionState>;
 
   for (const taskName of taskNames) {
-    const taskState = state.tasks.get(taskName);
+    const taskState = state.tasks.get(taskName) as Mutable<TaskState> | undefined;
     if (!taskState) continue;
 
     taskState.status = 'skipped';
-    taskState.completedAt = now;
-    taskState.duration = 0;
+    taskState.completedAt = some(now);
+    taskState.duration = some(0n);
 
-    state.skipped++;
+    mutableState.skipped = mutableState.skipped + 1n;
 
-    state.eventSeq++;
-    events.push({
-      type: 'task_skipped',
-      seq: state.eventSeq,
+    mutableState.eventSeq = mutableState.eventSeq + 1n;
+    const event: ExecutionEvent = variant('task_skipped', {
+      seq: mutableState.eventSeq,
       timestamp: now,
       task: taskName,
       cause,
     });
+    (mutableState.events as ExecutionEvent[]).push(event);
+    events.push(event);
   }
 
   return events;
@@ -529,38 +582,37 @@ export function stepFinalize(state: DataflowExecutionState): {
   result: FinalizeResult;
   event: ExecutionEvent;
 } {
-  const now = new Date().toISOString();
-  const startTime = new Date(state.startedAt).getTime();
+  const now = new Date();
+  const startTime = state.startedAt.getTime();
   const duration = Date.now() - startTime;
+  const mutableState = state as Mutable<DataflowExecutionState>;
 
   // Determine success
-  const success = state.failed === 0;
+  const success = state.failed === 0n;
 
   // Update state
-  state.status = success ? 'completed' : 'failed';
-  state.completedAt = now;
+  mutableState.status = success ? 'completed' : 'failed';
+  mutableState.completedAt = some(now);
 
-  state.eventSeq++;
-  const event: ExecutionEvent = {
-    type: 'execution_completed',
-    seq: state.eventSeq,
+  mutableState.eventSeq = state.eventSeq + 1n;
+  const event: ExecutionEvent = variant('execution_completed', {
+    seq: mutableState.eventSeq,
     timestamp: now,
-    success,
-    summary: {
-      executed: state.executed,
-      cached: state.cached,
-      failed: state.failed,
-      skipped: state.skipped,
-    },
-    duration,
-  };
-
-  const result: FinalizeResult = {
     success,
     executed: state.executed,
     cached: state.cached,
     failed: state.failed,
     skipped: state.skipped,
+    duration: BigInt(duration),
+  });
+  (mutableState.events as ExecutionEvent[]).push(event);
+
+  const result: FinalizeResult = {
+    success,
+    executed: Number(state.executed),
+    cached: Number(state.cached),
+    failed: Number(state.failed),
+    skipped: Number(state.skipped),
     duration,
   };
 
@@ -578,17 +630,73 @@ export function stepCancel(
   state: DataflowExecutionState,
   reason?: string
 ): ExecutionEvent {
-  const now = new Date().toISOString();
+  const now = new Date();
+  const mutableState = state as Mutable<DataflowExecutionState>;
 
-  state.status = 'cancelled';
-  state.completedAt = now;
-  state.error = reason ?? 'Execution was cancelled';
+  mutableState.status = 'cancelled';
+  mutableState.completedAt = some(now);
+  mutableState.error = some(reason ?? 'Execution was cancelled');
 
-  state.eventSeq++;
-  return {
-    type: 'execution_cancelled',
-    seq: state.eventSeq,
+  mutableState.eventSeq = state.eventSeq + 1n;
+  const event: ExecutionEvent = variant('execution_cancelled', {
+    seq: mutableState.eventSeq,
     timestamp: now,
-    reason,
-  };
+    reason: reason !== undefined ? some(reason) : none,
+  });
+  (mutableState.events as ExecutionEvent[]).push(event);
+  return event;
+}
+
+// =============================================================================
+// Tree Update Step Function
+// =============================================================================
+
+/**
+ * Apply a task's output to the workspace tree.
+ *
+ * This step function handles workspace tree updates, which must be serialized
+ * to prevent lost-update race conditions when multiple tasks complete
+ * concurrently.
+ *
+ * For local execution, the LocalOrchestrator handles this internally with
+ * an AsyncMutex. For cloud execution (e.g., AWS Step Functions), this should
+ * be called in a dedicated "ApplyTreeUpdates" state that processes updates
+ * serially.
+ *
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
+ * @param workspace - Workspace name
+ * @param outputPathStr - Output path as a keypath string (e.g., ".results.data")
+ * @param outputHash - Hash of the output dataset to write
+ * @returns Result with the new workspace root hash
+ *
+ * @remarks
+ * Tree updates must be serialized to prevent race conditions:
+ * - Two tasks complete concurrently, both read the same workspace root
+ * - Both compute new roots with their outputs
+ * - One write overwrites the other, losing the first task's output
+ *
+ * Cloud implementations should use a dedicated serialization mechanism
+ * (e.g., a single Lambda invocation per update, or DynamoDB transactions).
+ */
+export async function stepApplyTreeUpdate(
+  storage: StorageBackend,
+  repo: string,
+  workspace: string,
+  outputPathStr: string,
+  outputHash: string
+): Promise<TreeUpdateResult> {
+  const { parsePathString } = await import('../dataflow.js');
+  const outputPath = parsePathString(outputPathStr);
+
+  // Write the output to the workspace tree
+  const newRootHash = await workspaceSetDatasetByHash(
+    storage,
+    repo,
+    workspace,
+    outputPath,
+    outputHash
+  );
+
+  return { newRootHash };
 }

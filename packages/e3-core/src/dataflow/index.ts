@@ -23,3 +23,6 @@ export * from './state-store/index.js';
 
 // Orchestrator
 export * from './orchestrator/index.js';
+
+// API compatibility layer
+export * from './api-compat.js';

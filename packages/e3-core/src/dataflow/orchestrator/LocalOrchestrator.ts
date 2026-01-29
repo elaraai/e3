@@ -142,8 +142,8 @@ export class LocalOrchestrator implements DataflowOrchestrator {
     try {
       // Get next execution ID from state store if available
       const executionId = this.stateStore
-        ? await this.stateStore.nextExecutionId(workspace)
-        : Date.now(); // Fallback to timestamp if no state store
+        ? await this.stateStore.nextExecutionId(repo, workspace)
+        : String(Date.now()); // Fallback to timestamp if no state store
 
       // Initialize execution state
       const { state, readyTasks: _ } = await stepInitialize(
@@ -185,7 +185,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         rejectCompletion,
       };
 
-      const key = this.executionKey(workspace, executionId);
+      const key = this.executionKey(repo, workspace, executionId);
       this.executions.set(key, execution);
 
       // Start the execution loop (non-blocking)
@@ -193,7 +193,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         rejectCompletion(err);
       });
 
-      return { id: executionId, workspace };
+      return { id: executionId, repo, workspace };
     } catch (err) {
       // Release lock on initialization failure (if we acquired it)
       if (!externalLock) {
@@ -204,7 +204,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
   }
 
   async wait(handle: ExecutionHandle): Promise<FinalizeResult> {
-    const key = this.executionKey(handle.workspace, handle.id);
+    const key = this.executionKey(handle.repo, handle.workspace, handle.id);
     const execution = this.executions.get(key);
 
     if (!execution) {
@@ -215,13 +215,13 @@ export class LocalOrchestrator implements DataflowOrchestrator {
   }
 
   async getStatus(handle: ExecutionHandle): Promise<ExecutionStatus> {
-    const key = this.executionKey(handle.workspace, handle.id);
+    const key = this.executionKey(handle.repo, handle.workspace, handle.id);
     const execution = this.executions.get(key);
 
     if (!execution) {
       // Try to read from state store
       if (this.stateStore) {
-        const state = await this.stateStore.read(handle.workspace, handle.id);
+        const state = await this.stateStore.read(handle.repo, handle.workspace, handle.id);
         if (state) {
           return stateToStatus(state);
         }
@@ -234,7 +234,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async cancel(handle: ExecutionHandle): Promise<void> {
-    const key = this.executionKey(handle.workspace, handle.id);
+    const key = this.executionKey(handle.repo, handle.workspace, handle.id);
     const execution = this.executions.get(key);
 
     if (!execution) {
@@ -250,7 +250,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
     if (!this.stateStore) {
       return [];
     }
-    return this.stateStore.getEventsSince(handle.workspace, handle.id, sinceSeq);
+    return this.stateStore.getEventsSince(handle.repo, handle.workspace, handle.id, sinceSeq);
   }
 
   /**
@@ -287,11 +287,12 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         const readyTasks = stepGetReady(state);
 
         // Launch tasks up to concurrency limit if no failure and not aborted
+        const concurrencyLimit = Number(state.concurrency);
         while (
           !hasFailure &&
           !checkAborted() &&
           readyTasks.length > 0 &&
-          execution.runningTasks.size < state.concurrency
+          execution.runningTasks.size < concurrencyLimit
         ) {
           const taskName = readyTasks.shift()!;
           const taskState = state.tasks.get(taskName);
@@ -307,18 +308,13 @@ export class LocalOrchestrator implements DataflowOrchestrator {
           if (prepared.cachedOutputHash !== null) {
             // Cache hit - handle synchronously within mutex
             await mutex.runExclusive(async () => {
-              const { event } = stepTaskCompleted(
+              stepTaskCompleted(
                 state,
                 taskName,
                 prepared.cachedOutputHash!,
                 true,
                 0
               );
-
-              // Record event
-              if (this.stateStore) {
-                await this.stateStore.recordEvent(state.workspace, state.id, event);
-              }
 
               // Notify callback
               options.onTaskComplete?.({
@@ -328,7 +324,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
                 duration: 0,
               });
 
-              // Update state store
+              // Update state store (events are added by step function)
               if (this.stateStore) {
                 await this.stateStore.update(state);
               }
@@ -336,10 +332,10 @@ export class LocalOrchestrator implements DataflowOrchestrator {
             continue;
           }
 
-          // Mark as started
-          const startEvent = stepTaskStarted(state, taskName);
+          // Mark as started (event added by step function)
+          stepTaskStarted(state, taskName);
           if (this.stateStore) {
-            await this.stateStore.recordEvent(state.workspace, state.id, startEvent);
+            await this.stateStore.update(state);
           }
           options.onTaskStart?.(taskName);
 
@@ -365,17 +361,13 @@ export class LocalOrchestrator implements DataflowOrchestrator {
                   );
                 }
 
-                const { event } = stepTaskCompleted(
+                stepTaskCompleted(
                   state,
                   taskName,
                   result.outputHash ?? '',
                   result.cached,
                   result.duration
                 );
-
-                if (this.stateStore) {
-                  await this.stateStore.recordEvent(state.workspace, state.id, event);
-                }
 
                 options.onTaskComplete?.({
                   name: taskName,
@@ -386,17 +378,13 @@ export class LocalOrchestrator implements DataflowOrchestrator {
               } else {
                 hasFailure = true;
 
-                const { result: failedResult, event } = stepTaskFailed(
+                const { result: failedResult } = stepTaskFailed(
                   state,
                   taskName,
                   result.error,
                   result.exitCode,
                   result.duration
                 );
-
-                if (this.stateStore) {
-                  await this.stateStore.recordEvent(state.workspace, state.id, event);
-                }
 
                 options.onTaskComplete?.({
                   name: taskName,
@@ -407,18 +395,18 @@ export class LocalOrchestrator implements DataflowOrchestrator {
                   duration: result.duration,
                 });
 
-                // Skip dependents
+                // Skip dependents (events added by step function)
                 const skipEvents = stepTasksSkipped(state, failedResult.toSkip, taskName);
                 for (const skipEvent of skipEvents) {
-                  if (this.stateStore) {
-                    await this.stateStore.recordEvent(state.workspace, state.id, skipEvent);
+                  // skipEvents are always task_skipped events
+                  if (skipEvent.type === 'task_skipped') {
+                    options.onTaskComplete?.({
+                      name: skipEvent.value.task,
+                      cached: false,
+                      state: 'skipped',
+                      duration: 0,
+                    });
                   }
-                  options.onTaskComplete?.({
-                    name: (skipEvent as { task: string }).task,
-                    cached: false,
-                    state: 'skipped',
-                    duration: 0,
-                  });
                 }
               }
 
@@ -449,9 +437,8 @@ export class LocalOrchestrator implements DataflowOrchestrator {
 
       // Check for abort one final time
       if (checkAborted()) {
-        const cancelEvent = stepCancel(state, 'Execution was aborted');
+        stepCancel(state, 'Execution was aborted');
         if (this.stateStore) {
-          await this.stateStore.recordEvent(state.workspace, state.id, cancelEvent);
           await this.stateStore.update(state);
         }
 
@@ -460,10 +447,9 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         throw new DataflowAbortedError(partialResults);
       }
 
-      // Finalize
-      const { result, event } = stepFinalize(state);
+      // Finalize (event added by step function)
+      const { result } = stepFinalize(state);
       if (this.stateStore) {
-        await this.stateStore.recordEvent(state.workspace, state.id, event);
         await this.stateStore.update(state);
       }
 
@@ -475,7 +461,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
       }
 
       // Clean up execution state
-      const key = this.executionKey(state.workspace, state.id);
+      const key = this.executionKey(repo, state.workspace, state.id);
       this.executions.delete(key);
     }
   }
@@ -539,13 +525,19 @@ export class LocalOrchestrator implements DataflowOrchestrator {
 
     for (const [name, taskState] of state.tasks) {
       if (taskState.status === 'completed' || taskState.status === 'failed' || taskState.status === 'skipped') {
+        // Extract values from Option types
+        const cached = taskState.cached.type === 'some' ? taskState.cached.value : false;
+        const error = taskState.error.type === 'some' ? taskState.error.value : undefined;
+        const exitCode = taskState.exitCode.type === 'some' ? Number(taskState.exitCode.value) : undefined;
+        const duration = taskState.duration.type === 'some' ? Number(taskState.duration.value) : 0;
+
         results.push({
           name,
-          cached: taskState.cached ?? false,
+          cached,
           state: taskState.status === 'completed' ? 'success' : taskState.status,
-          error: taskState.error,
-          exitCode: taskState.exitCode,
-          duration: taskState.duration ?? 0,
+          error,
+          exitCode,
+          duration,
         });
       }
     }
@@ -556,7 +548,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
   /**
    * Generate unique key for an execution.
    */
-  private executionKey(workspace: string, id: number): string {
-    return `${workspace}:${id}`;
+  private executionKey(repo: string, workspace: string, id: string): string {
+    return `${repo}::${workspace}:${id}`;
   }
 }

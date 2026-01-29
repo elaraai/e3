@@ -168,29 +168,21 @@ export {
 
 // Resumable dataflow execution
 export {
-  // Types
+  // Types (re-exported from e3-types)
   type DataflowExecutionState,
   type DataflowExecutionStatus,
   type TaskState,
   type TaskStatus as DataflowTaskStatus,
   type ExecutionEvent,
-  type ExecutionStartedEvent,
-  type TaskReadyEvent,
-  type TaskStartedEvent,
-  type TaskCompletedEvent,
-  type TaskFailedEvent,
-  type TaskSkippedEvent,
-  type ExecutionCompletedEvent,
-  type ExecutionCancelledEvent,
+  type DataflowGraph as DataflowGraphType,
+  type DataflowGraphTask as DataflowGraphTaskType,
+  // Result types (TypeScript-only)
   type InitializeResult,
   type PrepareTaskResult,
   type TaskExecuteResult,
   type TaskCompletedResult,
   type TaskFailedResult,
   type FinalizeResult,
-  type SerializedExecutionState,
-  serializeExecutionState,
-  deserializeExecutionState,
   // Step functions
   stepInitialize,
   stepGetReady,
@@ -217,6 +209,15 @@ export {
   type TaskCompletedCallback,
   LocalOrchestrator,
   stateToStatus,
+  // API compatibility layer
+  type ApiDataflowEventType,
+  type ApiDataflowEvent,
+  type ApiExecutionStatus,
+  type ApiExecutionSummary,
+  type ApiExecutionState,
+  coreEventToApiEvent,
+  coreStatusToApiStatus,
+  coreStateToApiState,
 } from './dataflow/index.js';
 
 // Workspace locking (in storage/local/)

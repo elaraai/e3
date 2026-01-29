@@ -13,7 +13,14 @@
  *   e3 start https://server/repos/myrepo my-workspace
  */
 
-import { dataflowExecute, DataflowAbortedError, LocalStorage, type TaskExecutionResult, WorkspaceLockError } from '@elaraai/e3-core';
+import {
+  DataflowAbortedError,
+  LocalStorage,
+  LocalOrchestrator,
+  InMemoryStateStore,
+  WorkspaceLockError,
+  type TaskCompletedCallback,
+} from '@elaraai/e3-core';
 import {
   dataflowStart as dataflowStartRemote,
   dataflowExecution as dataflowExecutionRemote,
@@ -118,8 +125,10 @@ async function executeLocal(
   options: LocalExecuteOptions
 ): Promise<void> {
   const storage = new LocalStorage();
+  const stateStore = new InMemoryStateStore();
+  const orchestrator = new LocalOrchestrator(stateStore);
 
-  const result = await dataflowExecute(storage, repoPath, ws, {
+  const handle = await orchestrator.start(storage, repoPath, ws, {
     concurrency: options.concurrency,
     force: options.force,
     filter: options.filter,
@@ -127,10 +136,12 @@ async function executeLocal(
     onTaskStart: (name) => {
       console.log(`  [START] ${name}`);
     },
-    onTaskComplete: (taskResult: TaskExecutionResult) => {
+    onTaskComplete: (taskResult: TaskCompletedCallback) => {
       printTaskResult(taskResult);
     },
   });
+
+  const result = await orchestrator.wait(handle);
 
   printSummary({
     executed: result.executed,
@@ -141,7 +152,24 @@ async function executeLocal(
   });
 
   if (!result.success) {
-    printFailedTasks(result.tasks);
+    // Get failed task details from state store
+    const state = await stateStore.read(repoPath, ws, handle.id);
+    if (state) {
+      const failedTasks: TaskCompletedCallback[] = [];
+      for (const [name, taskState] of state.tasks) {
+        if (taskState.status === 'failed') {
+          failedTasks.push({
+            name,
+            cached: false,
+            state: 'failed',
+            error: taskState.error.type === 'some' ? taskState.error.value : undefined,
+            exitCode: taskState.exitCode.type === 'some' ? Number(taskState.exitCode.value) : undefined,
+            duration: taskState.duration.type === 'some' ? Number(taskState.duration.value) : 0,
+          });
+        }
+      }
+      printFailedTasks(failedTasks);
+    }
     process.exit(1);
   }
 }
@@ -251,7 +279,7 @@ function printEvent(event: DataflowEvent): void {
   }
 }
 
-function printTaskResult(result: TaskExecutionResult): void {
+function printTaskResult(result: TaskCompletedCallback): void {
   if (result.cached) {
     console.log(`  [CACHED] ${result.name}`);
     return;
@@ -293,7 +321,7 @@ function printSummary(summary: Summary): void {
   console.log(`  Duration: ${Math.round(summary.duration)}ms`);
 }
 
-function printFailedTasks(tasks: TaskExecutionResult[]): void {
+function printFailedTasks(tasks: TaskCompletedCallback[]): void {
   console.log('');
   console.log('Failed tasks:');
   for (const task of tasks) {

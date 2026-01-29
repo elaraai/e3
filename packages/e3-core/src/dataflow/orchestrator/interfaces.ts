@@ -19,8 +19,10 @@ import type { DataflowExecutionState, ExecutionEvent, FinalizeResult } from '../
  * Handle to a running dataflow execution.
  */
 export interface ExecutionHandle {
-  /** Unique execution ID */
-  readonly id: number;
+  /** Unique execution ID (string for UUID support) */
+  readonly id: string;
+  /** Repository identifier */
+  readonly repo: string;
   /** Workspace name */
   readonly workspace: string;
 }
@@ -29,8 +31,8 @@ export interface ExecutionHandle {
  * Status of a dataflow execution (summary view).
  */
 export interface ExecutionStatus {
-  /** Execution ID */
-  id: number;
+  /** Execution ID (string for UUID support) */
+  id: string;
   /** Current state */
   state: 'running' | 'completed' | 'failed' | 'cancelled';
   /** Tasks that have completed successfully */
@@ -45,10 +47,10 @@ export interface ExecutionStatus {
   skipped: string[];
   /** Error message if state is 'failed' */
   error?: string;
-  /** Start time (ISO 8601) */
-  startedAt: string;
-  /** Completion time (ISO 8601) */
-  completedAt?: string;
+  /** Start time */
+  startedAt: Date;
+  /** Completion time */
+  completedAt?: Date;
 }
 
 /**
@@ -196,16 +198,22 @@ export function stateToStatus(state: DataflowExecutionState): ExecutionStatus {
     }
   }
 
+  // Get error value (handle Option type)
+  const errorValue = state.error.type === 'some' ? state.error.value : undefined;
+
+  // Get completedAt value (handle Option type)
+  const completedAtValue = state.completedAt.type === 'some' ? state.completedAt.value : undefined;
+
   return {
     id: state.id,
-    state: state.status,
+    state: state.status as 'running' | 'completed' | 'failed' | 'cancelled',
     completed,
     running,
     pending,
     failed,
     skipped,
-    error: state.error ?? undefined,
+    error: errorValue,
     startedAt: state.startedAt,
-    completedAt: state.completedAt ?? undefined,
+    completedAt: completedAtValue,
   };
 }
