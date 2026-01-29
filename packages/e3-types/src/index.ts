@@ -91,3 +91,19 @@ export {
   LockStateType,
   type LockState,
 } from './lock.js';
+
+// Dataflow execution state
+export {
+  type DataflowExecutionStatus,
+  type TaskStatus,
+  TaskStateType,
+  type TaskState,
+  DataflowGraphTaskType,
+  type DataflowGraphTask,
+  DataflowGraphType,
+  type DataflowGraph,
+  ExecutionEventType,
+  type ExecutionEvent,
+  DataflowExecutionStateType,
+  type DataflowExecutionState,
+} from './dataflow.js';

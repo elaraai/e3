@@ -756,6 +756,7 @@ export async function workspaceGetDatasetHash(
  * @param ws - Workspace name
  * @param treePath - Path to the dataset
  * @param valueHash - Hash of the dataset value already in the object store
+ * @returns The new root hash after updating the tree
  * @throws If workspace not deployed, path invalid, or path points to a tree
  */
 export async function workspaceSetDatasetByHash(
@@ -764,7 +765,7 @@ export async function workspaceSetDatasetByHash(
   ws: string,
   treePath: TreePath,
   valueHash: string
-): Promise<void> {
+): Promise<string> {
   if (treePath.length === 0) {
     throw new Error('Cannot set dataset at root path - root is always a tree');
   }
@@ -871,6 +872,8 @@ export async function workspaceSetDatasetByHash(
     rootHash: newRootHash,
     rootUpdatedAt: new Date(),
   });
+
+  return newRootHash;
 }
 
 // =============================================================================
