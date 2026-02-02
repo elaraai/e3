@@ -42,7 +42,7 @@
     "@elaraai/east": "^0.0.1-beta.31"
   },
   "devDependencies": {
-    "@elaraai/east-node-std": "^0.0.1-beta.22",
+    "@elaraai/east-node-std": "^0.0.1-beta.23",
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.47.0",
     "@typescript-eslint/parser": "^8.47.0",
