@@ -4,7 +4,7 @@
  */
 
 import { ArrayType, StringType } from '@elaraai/east';
-import { get, unwrap, type RequestOptions } from './http.js';
+import { get, type RequestOptions } from './http.js';
 
 /**
  * List all repositories on the server.
@@ -12,8 +12,9 @@ import { get, unwrap, type RequestOptions } from './http.js';
  * @param url - Base URL of the e3 API server
  * @param options - Request options including auth token
  * @returns Array of repository names
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function repoList(url: string, options: RequestOptions): Promise<string[]> {
-  const response = await get(url, `/repos`, ArrayType(StringType), options);
-  return unwrap(response);
+  return get(url, `/repos`, ArrayType(StringType), options);
 }

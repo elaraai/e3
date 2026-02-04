@@ -150,7 +150,7 @@ describe('single-repo mode', () => {
       const result = await runE3Command(['repo', 'status', wrongUrl], tempDir, { env: authEnv() });
 
       assert.notStrictEqual(result.exitCode, 0, 'Should fail for non-default repo');
-      assert.match(result.stderr + result.stdout, /not found|404/i);
+      assert.match(result.stderr + result.stdout, /not.?found|404/i);
     });
   });
 
@@ -161,7 +161,7 @@ describe('single-repo mode', () => {
 
       assert.notStrictEqual(result.exitCode, 0, 'Repo creation should fail');
       // The error message should indicate the operation is not allowed
-      assert.match(result.stderr + result.stdout, /disabled|not allowed|405/i);
+      assert.match(result.stderr + result.stdout, /disabled|not.?allowed|method.?not.?allowed|405/i);
     });
 
     it('returns 405 for repo deletion', async () => {
@@ -170,7 +170,7 @@ describe('single-repo mode', () => {
 
       assert.notStrictEqual(result.exitCode, 0, 'Repo deletion should fail');
       // The error message should indicate the operation is not allowed
-      assert.match(result.stderr + result.stdout, /disabled|not allowed|405/i);
+      assert.match(result.stderr + result.stdout, /disabled|not.?allowed|method.?not.?allowed|405/i);
     });
   });
 

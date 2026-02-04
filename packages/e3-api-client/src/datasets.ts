@@ -5,7 +5,7 @@
 
 import { ArrayType, StringType } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
-import { get, unwrap, type RequestOptions } from './http.js';
+import { get, type RequestOptions } from './http.js';
 import { DatasetListItemType, type DatasetListItem } from './types.js';
 
 /**
@@ -16,15 +16,16 @@ import { DatasetListItemType, type DatasetListItem } from './types.js';
  * @param workspace - Workspace name
  * @param options - Request options including auth token
  * @returns Array of field names at root
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function datasetList(url: string, repo: string, workspace: string, options: RequestOptions): Promise<string[]> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`,
     ArrayType(StringType),
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -36,6 +37,8 @@ export async function datasetList(url: string, repo: string, workspace: string, 
  * @param path - Path to the dataset (e.g., ['inputs', 'config'])
  * @param options - Request options including auth token
  * @returns Array of field names at path
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function datasetListAt(
   url: string,
@@ -45,13 +48,12 @@ export async function datasetListAt(
   options: RequestOptions
 ): Promise<string[]> {
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}?list=true`,
     ArrayType(StringType),
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -147,6 +149,8 @@ export async function datasetSet(
  * @param path - Starting path (empty for root)
  * @param options - Request options including auth token
  * @returns Array of dataset items with path, type, hash, and size
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function datasetListRecursive(
   url: string,
@@ -162,6 +166,5 @@ export async function datasetListRecursive(
   }
   endpoint = `${endpoint}?recursive=true`;
 
-  const response = await get(url, endpoint, ArrayType(DatasetListItemType), options);
-  return unwrap(response);
+  return get(url, endpoint, ArrayType(DatasetListItemType), options);
 }

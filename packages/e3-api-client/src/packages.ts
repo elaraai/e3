@@ -7,7 +7,7 @@ import { ArrayType, BlobType, NullType } from '@elaraai/east';
 import { PackageObjectType, type PackageObject } from '@elaraai/e3-types';
 import type { PackageListItem, PackageImportResult } from './types.js';
 import { PackageListItemType, PackageImportResultType } from './types.js';
-import { get, post, del, unwrap, type RequestOptions } from './http.js';
+import { get, post, del, type RequestOptions } from './http.js';
 
 /**
  * List all packages in the repository.
@@ -16,10 +16,11 @@ import { get, post, del, unwrap, type RequestOptions } from './http.js';
  * @param repo - Repository name
  * @param options - Request options including auth token
  * @returns Array of package info (name, version)
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function packageList(url: string, repo: string, options: RequestOptions): Promise<PackageListItem[]> {
-  const response = await get(url, `/repos/${encodeURIComponent(repo)}/packages`, ArrayType(PackageListItemType), options);
-  return unwrap(response);
+  return get(url, `/repos/${encodeURIComponent(repo)}/packages`, ArrayType(PackageListItemType), options);
 }
 
 /**
@@ -31,6 +32,8 @@ export async function packageList(url: string, repo: string, options: RequestOpt
  * @param version - Package version
  * @param options - Request options including auth token
  * @returns Package object
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function packageGet(
   url: string,
@@ -39,13 +42,12 @@ export async function packageGet(
   version: string,
   options: RequestOptions
 ): Promise<PackageObject> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
     PackageObjectType,
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -56,6 +58,8 @@ export async function packageGet(
  * @param archive - Zip archive as bytes
  * @param options - Request options including auth token
  * @returns Imported package info
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function packageImport(
   url: string,
@@ -63,8 +67,7 @@ export async function packageImport(
   archive: Uint8Array,
   options: RequestOptions
 ): Promise<PackageImportResult> {
-  const response = await post(url, `/repos/${encodeURIComponent(repo)}/packages`, archive, BlobType, PackageImportResultType, options);
-  return unwrap(response);
+  return post(url, `/repos/${encodeURIComponent(repo)}/packages`, archive, BlobType, PackageImportResultType, options);
 }
 
 /**
@@ -76,6 +79,8 @@ export async function packageImport(
  * @param version - Package version
  * @param options - Request options including auth token
  * @returns Zip archive as bytes
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function packageExport(
   url: string,
@@ -84,13 +89,12 @@ export async function packageExport(
   version: string,
   options: RequestOptions
 ): Promise<Uint8Array> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}/export`,
     BlobType,
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -101,6 +105,8 @@ export async function packageExport(
  * @param name - Package name
  * @param version - Package version
  * @param options - Request options including auth token
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function packageRemove(
   url: string,
@@ -109,11 +115,10 @@ export async function packageRemove(
   version: string,
   options: RequestOptions
 ): Promise<void> {
-  const response = await del(
+  await del(
     url,
     `/repos/${encodeURIComponent(repo)}/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
     NullType,
     options
   );
-  unwrap(response);
 }
