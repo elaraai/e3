@@ -45,7 +45,7 @@ export type {
 } from './types.js';
 
 // HTTP utilities and auth
-export { ApiError, AuthError } from './http.js';
+export { ApiError, AuthError, get, post, put, del, putEmpty, unwrap } from './http.js';
 export type { RequestOptions, Response } from './http.js';
 
 // Repository

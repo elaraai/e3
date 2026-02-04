@@ -6,7 +6,7 @@
 import { ArrayType } from '@elaraai/east';
 import type { TaskListItem, TaskDetails, ExecutionListItem } from './types.js';
 import { TaskListItemType, TaskDetailsType, ExecutionListItemType } from './types.js';
-import { get, unwrap, type RequestOptions } from './http.js';
+import { get, type RequestOptions } from './http.js';
 
 /**
  * List tasks in a workspace.
@@ -16,15 +16,16 @@ import { get, unwrap, type RequestOptions } from './http.js';
  * @param workspace - Workspace name
  * @param options - Request options including auth token
  * @returns Array of task info (name, hash)
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function taskList(url: string, repo: string, workspace: string, options: RequestOptions): Promise<TaskListItem[]> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/tasks`,
     ArrayType(TaskListItemType),
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -36,6 +37,8 @@ export async function taskList(url: string, repo: string, workspace: string, opt
  * @param name - Task name
  * @param options - Request options including auth token
  * @returns Task details
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function taskGet(
   url: string,
@@ -44,13 +47,12 @@ export async function taskGet(
   name: string,
   options: RequestOptions
 ): Promise<TaskDetails> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/tasks/${encodeURIComponent(name)}`,
     TaskDetailsType,
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -62,6 +64,8 @@ export async function taskGet(
  * @param taskName - Task name
  * @param options - Request options including auth token
  * @returns Array of execution history items
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function taskExecutionList(
   url: string,
@@ -70,11 +74,10 @@ export async function taskExecutionList(
   taskName: string,
   options: RequestOptions
 ): Promise<ExecutionListItem[]> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/tasks/${encodeURIComponent(taskName)}/executions`,
     ArrayType(ExecutionListItemType),
     options
   );
-  return unwrap(response);
 }

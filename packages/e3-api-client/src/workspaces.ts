@@ -12,7 +12,7 @@ import {
   WorkspaceDeployRequestType,
   WorkspaceStatusResultType,
 } from './types.js';
-import { get, post, del, unwrap, type RequestOptions } from './http.js';
+import { get, post, del, type RequestOptions } from './http.js';
 
 /**
  * List all workspaces in the repository.
@@ -21,10 +21,11 @@ import { get, post, del, unwrap, type RequestOptions } from './http.js';
  * @param repo - Repository name
  * @param options - Request options including auth token
  * @returns Array of workspace info
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function workspaceList(url: string, repo: string, options: RequestOptions): Promise<WorkspaceInfo[]> {
-  const response = await get(url, `/repos/${encodeURIComponent(repo)}/workspaces`, ArrayType(WorkspaceInfoType), options);
-  return unwrap(response);
+  return get(url, `/repos/${encodeURIComponent(repo)}/workspaces`, ArrayType(WorkspaceInfoType), options);
 }
 
 /**
@@ -35,9 +36,11 @@ export async function workspaceList(url: string, repo: string, options: RequestO
  * @param name - Workspace name
  * @param options - Request options including auth token
  * @returns Created workspace info
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function workspaceCreate(url: string, repo: string, name: string, options: RequestOptions): Promise<WorkspaceInfo> {
-  const response = await post(
+  return post(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces`,
     { name },
@@ -45,7 +48,6 @@ export async function workspaceCreate(url: string, repo: string, name: string, o
     WorkspaceInfoType,
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -56,15 +58,16 @@ export async function workspaceCreate(url: string, repo: string, name: string, o
  * @param name - Workspace name
  * @param options - Request options including auth token
  * @returns Workspace state
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function workspaceGet(url: string, repo: string, name: string, options: RequestOptions): Promise<WorkspaceState> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}`,
     WorkspaceStateType,
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -77,15 +80,16 @@ export async function workspaceGet(url: string, repo: string, name: string, opti
  * @param name - Workspace name
  * @param options - Request options including auth token
  * @returns Workspace status with datasets, tasks, and summary
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function workspaceStatus(url: string, repo: string, name: string, options: RequestOptions): Promise<WorkspaceStatusResult> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}/status`,
     WorkspaceStatusResultType,
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -95,15 +99,16 @@ export async function workspaceStatus(url: string, repo: string, name: string, o
  * @param repo - Repository name
  * @param name - Workspace name
  * @param options - Request options including auth token
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function workspaceRemove(url: string, repo: string, name: string, options: RequestOptions): Promise<void> {
-  const response = await del(
+  await del(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}`,
     NullType,
     options
   );
-  unwrap(response);
 }
 
 /**
@@ -114,6 +119,8 @@ export async function workspaceRemove(url: string, repo: string, name: string, o
  * @param name - Workspace name
  * @param packageRef - Package reference (name or name@version)
  * @param options - Request options including auth token
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function workspaceDeploy(
   url: string,
@@ -122,7 +129,7 @@ export async function workspaceDeploy(
   packageRef: string,
   options: RequestOptions
 ): Promise<void> {
-  const response = await post(
+  await post(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}/deploy`,
     { packageRef },
@@ -130,7 +137,6 @@ export async function workspaceDeploy(
     NullType,
     options
   );
-  unwrap(response);
 }
 
 /**
@@ -141,13 +147,14 @@ export async function workspaceDeploy(
  * @param name - Workspace name
  * @param options - Request options including auth token
  * @returns Zip archive as bytes
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function workspaceExport(url: string, repo: string, name: string, options: RequestOptions): Promise<Uint8Array> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(name)}/export`,
     BlobType,
     options
   );
-  return unwrap(response);
 }

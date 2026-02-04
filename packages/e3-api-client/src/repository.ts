@@ -17,7 +17,7 @@ import {
   GcStartResultType,
   GcStatusResultType,
 } from './types.js';
-import { get, post, del, putEmpty, unwrap, type RequestOptions } from './http.js';
+import { get, post, del, putEmpty, type RequestOptions } from './http.js';
 
 /**
  * Get repository status.
@@ -26,10 +26,11 @@ import { get, post, del, putEmpty, unwrap, type RequestOptions } from './http.js
  * @param repo - Repository name
  * @param options - Request options including auth token
  * @returns Repository status including object, package, and workspace counts
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function repoStatus(url: string, repo: string, options: RequestOptions): Promise<RepositoryStatus> {
-  const response = await get(url, `/repos/${encodeURIComponent(repo)}/status`, RepositoryStatusType, options);
-  return unwrap(response);
+  return get(url, `/repos/${encodeURIComponent(repo)}/status`, RepositoryStatusType, options);
 }
 
 /**
@@ -42,10 +43,11 @@ export async function repoStatus(url: string, repo: string, options: RequestOpti
  * @param gcOptions - GC options (dryRun to preview without deleting)
  * @param options - Request options including auth token
  * @returns GC start result with executionId
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function repoGcStart(url: string, repo: string, gcOptions: GcRequest, options: RequestOptions): Promise<GcStartResult> {
-  const response = await post(url, `/repos/${encodeURIComponent(repo)}/gc`, gcOptions, GcRequestType, GcStartResultType, options);
-  return unwrap(response);
+  return post(url, `/repos/${encodeURIComponent(repo)}/gc`, gcOptions, GcRequestType, GcStartResultType, options);
 }
 
 /**
@@ -56,15 +58,16 @@ export async function repoGcStart(url: string, repo: string, gcOptions: GcReques
  * @param executionId - Execution ID from repoGcStart()
  * @param options - Request options including auth token
  * @returns GC status with stats when complete
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function repoGcStatus(url: string, repo: string, executionId: string, options: RequestOptions): Promise<GcStatusResult> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/gc/${encodeURIComponent(executionId)}`,
     GcStatusResultType,
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -119,10 +122,11 @@ export async function repoGc(
  * @param name - Name for the new repository
  * @param options - Request options including auth token
  * @returns The created repository name
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function repoCreate(url: string, name: string, options: RequestOptions): Promise<string> {
-  const response = await putEmpty(url, `/repos/${encodeURIComponent(name)}`, StringType, options);
-  return unwrap(response);
+  return putEmpty(url, `/repos/${encodeURIComponent(name)}`, StringType, options);
 }
 
 /**
@@ -134,9 +138,10 @@ export async function repoCreate(url: string, name: string, options: RequestOpti
  * @param url - Base URL of the e3 API server
  * @param name - Repository name to remove
  * @param options - Request options including auth token
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function repoRemove(url: string, name: string, options: RequestOptions): Promise<void> {
-  const response = await del(url, `/repos/${encodeURIComponent(name)}`, NullType, options);
-  unwrap(response);
+  await del(url, `/repos/${encodeURIComponent(name)}`, NullType, options);
 }
 

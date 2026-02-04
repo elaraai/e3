@@ -11,7 +11,7 @@ import {
   DataflowGraphType,
   DataflowExecutionStateType,
 } from './types.js';
-import { get, post, unwrap, type RequestOptions } from './http.js';
+import { get, post, type RequestOptions } from './http.js';
 
 /**
  * Options for starting dataflow execution.
@@ -46,6 +46,8 @@ export interface DataflowPollOptions {
  * @param workspace - Workspace name
  * @param dataflowOptions - Execution options
  * @param options - Request options including auth token
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function dataflowExecuteLaunch(
   url: string,
@@ -54,7 +56,7 @@ export async function dataflowExecuteLaunch(
   dataflowOptions: DataflowOptions = {},
   options: RequestOptions
 ): Promise<void> {
-  const response = await post(
+  await post(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow`,
     {
@@ -66,7 +68,6 @@ export async function dataflowExecuteLaunch(
     NullType,
     options
   );
-  unwrap(response);
 }
 
 /**
@@ -197,6 +198,8 @@ export { dataflowExecuteLaunch as dataflowStart };
  * @param workspace - Workspace name
  * @param options - Request options including auth token
  * @returns Dataflow graph with tasks and dependencies
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function dataflowGraph(
   url: string,
@@ -204,13 +207,12 @@ export async function dataflowGraph(
   workspace: string,
   options: RequestOptions
 ): Promise<DataflowGraph> {
-  const response = await get(
+  return get(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/graph`,
     DataflowGraphType,
     options
   );
-  return unwrap(response);
 }
 
 /**
@@ -235,6 +237,8 @@ export interface LogOptions {
  * @param logOptions - Log reading options
  * @param options - Request options including auth token
  * @returns Log chunk with data and metadata
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function taskLogs(
   url: string,
@@ -252,8 +256,7 @@ export async function taskLogs(
   const query = params.toString();
   const path = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/logs/${encodeURIComponent(task)}${query ? `?${query}` : ''}`;
 
-  const response = await get(url, path, LogChunkType, options);
-  return unwrap(response);
+  return get(url, path, LogChunkType, options);
 }
 
 /**
@@ -278,6 +281,8 @@ export interface ExecutionStateOptions {
  * @param stateOptions - Pagination options for events
  * @param options - Request options including auth token
  * @returns Execution state with events and summary
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function dataflowExecutePoll(
   url: string,
@@ -293,8 +298,7 @@ export async function dataflowExecutePoll(
   const query = params.toString();
   const path = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/execution${query ? `?${query}` : ''}`;
 
-  const response = await get(url, path, DataflowExecutionStateType, options);
-  return unwrap(response);
+  return get(url, path, DataflowExecutionStateType, options);
 }
 
 // Backward compatibility alias
@@ -308,6 +312,7 @@ export { dataflowExecutePoll as dataflowExecution };
  * @param workspace - Workspace name
  * @param options - Request options (token, etc.)
  * @throws {ApiError} If cancellation fails or no execution is running
+ * @throws {AuthError} On 401 Unauthorized
  */
 export async function dataflowCancel(
   url: string,
@@ -315,7 +320,7 @@ export async function dataflowCancel(
   workspace: string,
   options: RequestOptions
 ): Promise<void> {
-  const response = await post(
+  await post(
     url,
     `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow/cancel`,
     null,
@@ -323,5 +328,4 @@ export async function dataflowCancel(
     NullType,
     options
   );
-  unwrap(response);
 }
