@@ -15,8 +15,8 @@ import { createWriteStream } from 'fs';
 import yauzl from 'yauzl';
 import yazl from 'yazl';
 import { decodeBeast2For } from '@elaraai/east';
-import { PackageObjectType } from '@elaraai/e3-types';
-import type { PackageObject } from '@elaraai/e3-types';
+import { PackageObjectType, TaskObjectType } from '@elaraai/e3-types';
+import type { PackageObject, TaskObject } from '@elaraai/e3-types';
 import {
   PackageNotFoundError,
   PackageInvalidError,
@@ -315,11 +315,18 @@ export async function packageExport(
   const decoder = decodeBeast2For(PackageObjectType);
   const packageObject: PackageObject = decoder(Buffer.from(packageData));
 
-  // Collect all task objects
+  // Collect all task objects and their commandIr references
+  const taskDecoder = decodeBeast2For(TaskObjectType);
   for (const taskHash of packageObject.tasks.values()) {
     await addObject(taskHash);
-    // Note: Task objects reference datasets by path, not by hash,
-    // so we don't need to recursively collect from them
+    // Task objects contain commandIr hashes that must also be exported
+    const taskData = await storage.objects.read(repo, taskHash);
+    const taskObject: TaskObject = taskDecoder(Buffer.from(taskData));
+    // The commandIr is a hash reference to an IR object
+    await addObject(taskObject.commandIr);
+    // Recursively collect any objects referenced by the IR
+    const irData = await storage.objects.read(repo, taskObject.commandIr);
+    await collectTreeChildren(irData);
   }
 
   // Collect the root tree and all its children

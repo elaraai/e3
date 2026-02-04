@@ -19,8 +19,8 @@ import { createWriteStream } from 'fs';
 import * as fs from 'fs/promises';
 import yazl from 'yazl';
 import { decodeBeast2For, encodeBeast2For, variant } from '@elaraai/east';
-import { PackageObjectType, WorkspaceStateType } from '@elaraai/e3-types';
-import type { PackageObject, WorkspaceState } from '@elaraai/e3-types';
+import { PackageObjectType, WorkspaceStateType, TaskObjectType } from '@elaraai/e3-types';
+import type { PackageObject, WorkspaceState, TaskObject } from '@elaraai/e3-types';
 import { packageResolve, packageRead } from './packages.js';
 import {
   WorkspaceNotFoundError,
@@ -458,9 +458,18 @@ export async function workspaceExport(
   // Add the package object
   await addObject(packageHash);
 
-  // Collect all task objects
+  // Collect all task objects and their commandIr references
+  const taskDecoder = decodeBeast2For(TaskObjectType);
   for (const taskHash of newPkgObject.tasks.values()) {
     await addObject(taskHash);
+    // Task objects contain commandIr hashes that must also be exported
+    const taskData = await storage.objects.read(repo, taskHash);
+    const taskObject: TaskObject = taskDecoder(Buffer.from(taskData));
+    // The commandIr is a hash reference to an IR object
+    await addObject(taskObject.commandIr);
+    // Recursively collect any objects referenced by the IR
+    const irData = await storage.objects.read(repo, taskObject.commandIr);
+    await collectTreeChildren(irData);
   }
 
   // Collect the root tree and all its children

@@ -19,6 +19,7 @@ import {
   createTestContext,
   allApiTests,
   cliTests,
+  transferTests,
   type TestContext,
 } from '@elaraai/e3-api-tests';
 
@@ -89,6 +90,15 @@ describe('API compliance', () => {
 
   // Run CLI test suite with credentials env
   cliTests(
+    () => context,
+    () => ({
+      E3_CREDENTIALS_PATH: credentialsPath,
+      E3_AUTH_AUTO_APPROVE: 'true',
+    })
+  );
+
+  // Run cross-repository transfer tests
+  transferTests(
     () => context,
     () => ({
       E3_CREDENTIALS_PATH: credentialsPath,
