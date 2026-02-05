@@ -44,12 +44,13 @@ export function inputsHash(inputHashes: string[]): string {
 // ============================================================================
 
 /**
- * Get execution status.
+ * Get execution status for a specific execution.
  *
  * @param storage - Storage backend
  * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
+ * @param executionId - Execution ID (UUIDv7)
  * @returns ExecutionStatus or null if execution doesn't exist
  * @throws {ExecutionCorruptError} If status file exists but cannot be decoded
  */
@@ -57,19 +58,39 @@ export async function executionGet(
   storage: StorageBackend,
   repo: string,
   taskHash: string,
-  inHash: string
+  inHash: string,
+  executionId: string
 ): Promise<ExecutionStatus | null> {
-  return storage.refs.executionGet(repo, taskHash, inHash);
+  return storage.refs.executionGet(repo, taskHash, inHash, executionId);
 }
 
 /**
- * Get output hash for a completed execution.
+ * Get the latest execution status (lexicographically greatest executionId).
  *
  * @param storage - Storage backend
  * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
- * @returns Output hash or null if not complete or failed
+ * @returns ExecutionStatus or null if no executions exist
+ */
+export async function executionGetLatest(
+  storage: StorageBackend,
+  repo: string,
+  taskHash: string,
+  inHash: string
+): Promise<ExecutionStatus | null> {
+  return storage.refs.executionGetLatest(repo, taskHash, inHash);
+}
+
+/**
+ * Get the latest successful output hash for a completed execution.
+ * This is the primary cache lookup function.
+ *
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
+ * @param taskHash - Hash of the task object
+ * @param inHash - Combined hash of input hashes
+ * @returns Output hash or null if no successful execution exists
  */
 export async function executionGetOutput(
   storage: StorageBackend,
@@ -77,7 +98,25 @@ export async function executionGetOutput(
   taskHash: string,
   inHash: string
 ): Promise<string | null> {
-  return storage.refs.executionGetOutput(repo, taskHash, inHash);
+  return storage.refs.executionGetLatestOutput(repo, taskHash, inHash);
+}
+
+/**
+ * List all execution IDs for a (taskHash, inputsHash) pair.
+ *
+ * @param storage - Storage backend
+ * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
+ * @param taskHash - Hash of the task object
+ * @param inHash - Combined hash of input hashes
+ * @returns Array of execution IDs (sorted lexicographically ascending)
+ */
+export async function executionListIds(
+  storage: StorageBackend,
+  repo: string,
+  taskHash: string,
+  inHash: string
+): Promise<string[]> {
+  return storage.refs.executionListIds(repo, taskHash, inHash);
 }
 
 /**
@@ -118,6 +157,8 @@ export interface CurrentExecutionRef {
   taskHash: string;
   /** Combined hash of input hashes */
   inputsHash: string;
+  /** Execution ID (UUIDv7) */
+  executionId: string;
   /** True if this matches the current workspace input state */
   isCurrent: boolean;
 }
@@ -166,13 +207,24 @@ export async function executionFindCurrent(
   if (allInputsAssigned) {
     const inHash = inputsHash(currentInputHashes);
     if (executions.includes(inHash)) {
-      return { taskHash, inputsHash: inHash, isCurrent: true };
+      // Get the latest execution status to get the executionId
+      const status = await storage.refs.executionGetLatest(repo, taskHash, inHash);
+      if (status) {
+        // Extract executionId from the status (all variants have it)
+        const executionId = status.value.executionId;
+        return { taskHash, inputsHash: inHash, executionId, isCurrent: true };
+      }
     }
   }
 
   // Fall back to most recent execution
   if (executions.length > 0) {
-    return { taskHash, inputsHash: executions[0]!, isCurrent: false };
+    const inHash = executions[0]!;
+    const status = await storage.refs.executionGetLatest(repo, taskHash, inHash);
+    if (status) {
+      const executionId = status.value.executionId;
+      return { taskHash, inputsHash: inHash, executionId, isCurrent: false };
+    }
   }
 
   return null;
@@ -202,6 +254,7 @@ export type { LogChunk };
  * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
  * @param taskHash - Hash of the task object
  * @param inHash - Combined hash of input hashes
+ * @param executionId - Execution ID (UUIDv7)
  * @param stream - Which log stream to read ('stdout' or 'stderr')
  * @param options - Pagination options
  * @returns Log chunk with data and metadata
@@ -211,10 +264,11 @@ export async function executionReadLog(
   repo: string,
   taskHash: string,
   inHash: string,
+  executionId: string,
   stream: 'stdout' | 'stderr',
   options: LogReadOptions = {}
 ): Promise<LogChunk> {
-  return storage.logs.read(repo, taskHash, inHash, stream, options);
+  return storage.logs.read(repo, taskHash, inHash, executionId, stream, options);
 }
 
 // ============================================================================

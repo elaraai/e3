@@ -68,6 +68,7 @@ export { datasetTests } from './suites/datasets.js';
 export { dataflowTests } from './suites/dataflow.js';
 export { platformTests } from './suites/platform.js';
 export { cliTests } from './suites/cli.js';
+export { transferTests } from './suites/transfer.js';
 
 import type { TestContext } from './context.js';
 import { repositoryTests } from './suites/repository.js';
@@ -77,6 +78,7 @@ import { datasetTests } from './suites/datasets.js';
 import { dataflowTests } from './suites/dataflow.js';
 import { platformTests } from './suites/platform.js';
 import { cliTests } from './suites/cli.js';
+import { transferTests } from './suites/transfer.js';
 
 /**
  * Register all API test suites (excluding CLI tests).
@@ -106,4 +108,5 @@ export function allTests(
 ): void {
   allApiTests(getContext);
   cliTests(getContext, getCredentialsEnv);
+  transferTests(getContext, getCredentialsEnv);
 }

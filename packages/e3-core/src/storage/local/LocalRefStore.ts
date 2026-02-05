@@ -6,8 +6,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { decodeBeast2For, encodeBeast2For } from '@elaraai/east';
-import { ExecutionStatusType } from '@elaraai/e3-types';
-import type { ExecutionStatus } from '@elaraai/e3-types';
+import { ExecutionStatusType, DataflowRunType } from '@elaraai/e3-types';
+import type { ExecutionStatus, DataflowRun } from '@elaraai/e3-types';
 import type { RefStore } from '../interfaces.js';
 import { isNotFoundError, ExecutionCorruptError } from '../../errors.js';
 
@@ -151,15 +151,25 @@ export class LocalRefStore implements RefStore {
   }
 
   // -------------------------------------------------------------------------
-  // Execution Cache
+  // Execution Cache (with execution history)
   // -------------------------------------------------------------------------
 
-  private executionDir(repo: string, taskHash: string, inputsHash: string): string {
+  /**
+   * Path to execution directory: executions/<taskHash>/<inputsHash>/<executionId>/
+   */
+  private executionDir(repo: string, taskHash: string, inputsHash: string, executionId: string): string {
+    return path.join(repo, 'executions', taskHash, inputsHash, executionId);
+  }
+
+  /**
+   * Path to inputs directory: executions/<taskHash>/<inputsHash>/
+   */
+  private inputsDir(repo: string, taskHash: string, inputsHash: string): string {
     return path.join(repo, 'executions', taskHash, inputsHash);
   }
 
-  async executionGet(repo: string, taskHash: string, inputsHash: string): Promise<ExecutionStatus | null> {
-    const execDir = this.executionDir(repo, taskHash, inputsHash);
+  async executionGet(repo: string, taskHash: string, inputsHash: string, executionId: string): Promise<ExecutionStatus | null> {
+    const execDir = this.executionDir(repo, taskHash, inputsHash, executionId);
     const statusPath = path.join(execDir, 'status.beast2');
 
     let data: Buffer;
@@ -184,33 +194,63 @@ export class LocalRefStore implements RefStore {
     }
   }
 
-  async executionWrite(repo: string, taskHash: string, inputsHash: string, status: ExecutionStatus): Promise<void> {
-    const execDir = this.executionDir(repo, taskHash, inputsHash);
+  async executionWrite(repo: string, taskHash: string, inputsHash: string, executionId: string, status: ExecutionStatus): Promise<void> {
+    const execDir = this.executionDir(repo, taskHash, inputsHash, executionId);
     await fs.mkdir(execDir, { recursive: true });
 
     const encoder = encodeBeast2For(ExecutionStatusType);
     await fs.writeFile(path.join(execDir, 'status.beast2'), encoder(status));
+
+    // Also write output hash for success status
+    if (status.type === 'success') {
+      await fs.writeFile(path.join(execDir, 'output'), status.value.outputHash + '\n');
+    }
   }
 
-  async executionGetOutput(repo: string, taskHash: string, inputsHash: string): Promise<string | null> {
-    const execDir = this.executionDir(repo, taskHash, inputsHash);
-    const outputPath = path.join(execDir, 'output');
+  async executionListIds(repo: string, taskHash: string, inputsHash: string): Promise<string[]> {
+    const inputDir = this.inputsDir(repo, taskHash, inputsHash);
 
     try {
-      const content = await fs.readFile(outputPath, 'utf-8');
-      return content.trim();
+      const entries = await fs.readdir(inputDir);
+      // Filter for UUIDv7-like format (36 chars with dashes) and sort lexicographically
+      const uuids = entries.filter((e) => /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(e));
+      return uuids.sort();
     } catch (err) {
       if (isNotFoundError(err)) {
-        return null;
+        return [];
       }
       throw err;
     }
   }
 
-  async executionWriteOutput(repo: string, taskHash: string, inputsHash: string, outputHash: string): Promise<void> {
-    const execDir = this.executionDir(repo, taskHash, inputsHash);
-    await fs.mkdir(execDir, { recursive: true });
-    await fs.writeFile(path.join(execDir, 'output'), outputHash + '\n');
+  async executionGetLatest(repo: string, taskHash: string, inputsHash: string): Promise<ExecutionStatus | null> {
+    const ids = await this.executionListIds(repo, taskHash, inputsHash);
+    if (ids.length === 0) {
+      return null;
+    }
+    // Get the lexicographically greatest (latest) execution
+    const latestId = ids[ids.length - 1]!;
+    return this.executionGet(repo, taskHash, inputsHash, latestId);
+  }
+
+  async executionGetLatestOutput(repo: string, taskHash: string, inputsHash: string): Promise<string | null> {
+    const ids = await this.executionListIds(repo, taskHash, inputsHash);
+    // Iterate from latest to oldest, return first success
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const execDir = this.executionDir(repo, taskHash, inputsHash, ids[i]!);
+      const outputPath = path.join(execDir, 'output');
+      try {
+        const content = await fs.readFile(outputPath, 'utf-8');
+        return content.trim();
+      } catch (err) {
+        if (!isNotFoundError(err)) {
+          throw err;
+        }
+        // No output file, check status to see if it's a success without output
+        // or just continue to next execution
+      }
+    }
+    return null;
   }
 
   async executionList(repo: string): Promise<{ taskHash: string; inputsHash: string }[]> {
@@ -235,7 +275,6 @@ export class LocalRefStore implements RefStore {
         }
       }
     } catch (err) {
-      // Only suppress ENOENT - directory may not exist yet
       if (!isNotFoundError(err)) {
         throw err;
       }
@@ -251,11 +290,86 @@ export class LocalRefStore implements RefStore {
       const entries = await fs.readdir(taskDir);
       return entries.filter((e) => /^[a-f0-9]{64}$/.test(e));
     } catch (err) {
-      // Only suppress ENOENT - task may not have any executions yet
       if (!isNotFoundError(err)) {
         throw err;
       }
       return [];
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Dataflow Run History
+  // -------------------------------------------------------------------------
+
+  private dataflowDir(repo: string, workspace: string): string {
+    return path.join(repo, 'dataflows', workspace);
+  }
+
+  private dataflowRunPath(repo: string, workspace: string, runId: string): string {
+    return path.join(this.dataflowDir(repo, workspace), `${runId}.beast2`);
+  }
+
+  async dataflowRunGet(repo: string, workspace: string, runId: string): Promise<DataflowRun | null> {
+    const runPath = this.dataflowRunPath(repo, workspace, runId);
+
+    let data: Buffer;
+    try {
+      data = await fs.readFile(runPath);
+    } catch (err) {
+      if (isNotFoundError(err)) {
+        return null;
+      }
+      throw err;
+    }
+
+    const decoder = decodeBeast2For(DataflowRunType);
+    return decoder(data);
+  }
+
+  async dataflowRunWrite(repo: string, workspace: string, run: DataflowRun): Promise<void> {
+    const dir = this.dataflowDir(repo, workspace);
+    await fs.mkdir(dir, { recursive: true });
+
+    const encoder = encodeBeast2For(DataflowRunType);
+    const runPath = this.dataflowRunPath(repo, workspace, run.runId);
+    await fs.writeFile(runPath, encoder(run));
+  }
+
+  async dataflowRunList(repo: string, workspace: string): Promise<string[]> {
+    const dir = this.dataflowDir(repo, workspace);
+
+    try {
+      const entries = await fs.readdir(dir);
+      // Filter for .beast2 files, extract runId, and sort
+      const runIds = entries
+        .filter((e) => e.endsWith('.beast2'))
+        .map((e) => e.slice(0, -7))  // Remove .beast2
+        .filter((e) => /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(e));
+      return runIds.sort();
+    } catch (err) {
+      if (isNotFoundError(err)) {
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  async dataflowRunGetLatest(repo: string, workspace: string): Promise<DataflowRun | null> {
+    const ids = await this.dataflowRunList(repo, workspace);
+    if (ids.length === 0) {
+      return null;
+    }
+    const latestId = ids[ids.length - 1]!;
+    return this.dataflowRunGet(repo, workspace, latestId);
+  }
+
+  async dataflowRunDelete(repo: string, workspace: string, runId: string): Promise<void> {
+    const runPath = this.dataflowRunPath(repo, workspace, runId);
+    try {
+      await fs.unlink(runPath);
+    } catch (err) {
+      if (isNotFoundError(err)) return; // idempotent
+      throw err;
     }
   }
 }

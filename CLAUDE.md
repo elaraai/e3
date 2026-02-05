@@ -34,6 +34,8 @@ An e3 repository holds and manages datasets and East programs, and automatically
  - **dataset** - like git, workspace data is stored in a "tree" with datasets as the leaves - each dataset has a "path" and a fixed East type
  - **task** - a combination of a runner (an East interpretter or JIT compiler) and inputs datasets to be provided (both East IR and input data to the task)
  - **dataflow** - the DAG of tasks and datasets to be executed in a workspace
+ - **execution** - a single run of a task, identified by `(taskHash, inputsHash, executionId)` where executionId is a UUIDv7
+ - **dataflow run** - a complete execution of a workspace's dataflow, tracking which task executions were used
 
 ## References
 
@@ -41,5 +43,6 @@ Instructions in STANDARDS.md must be followed at all times.
 
 See USAGE.md for how to use e3.
 See design/e3-mvp*.md for the current design spec.
+See design/e3-execution-history.md for execution history and provenance tracking.
 
 You can find the East language implementation at ../east

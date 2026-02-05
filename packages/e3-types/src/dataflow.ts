@@ -283,3 +283,94 @@ export const DataflowExecutionStateType = StructType({
   eventSeq: IntegerType,
 });
 export type DataflowExecutionState = ValueTypeOf<typeof DataflowExecutionStateType>;
+
+// =============================================================================
+// Dataflow Run History
+// =============================================================================
+
+/**
+ * Status of a dataflow run.
+ */
+export const DataflowRunStatusType = VariantType({
+  /** Run is currently executing */
+  running: StructType({}),
+  /** Run completed successfully */
+  completed: StructType({}),
+  /** Run failed with a task error */
+  failed: StructType({
+    /** Name of the task that failed */
+    failedTask: StringType,
+    /** Error message */
+    error: StringType,
+  }),
+  /** Run was cancelled */
+  cancelled: StructType({}),
+});
+export type DataflowRunStatus = ValueTypeOf<typeof DataflowRunStatusType>;
+
+/**
+ * Record of a task execution within a dataflow run.
+ */
+export const TaskExecutionRecordType = StructType({
+  /** Execution ID (UUIDv7) */
+  executionId: StringType,
+  /** Whether this was a cache hit */
+  cached: BooleanType,
+});
+export type TaskExecutionRecord = ValueTypeOf<typeof TaskExecutionRecordType>;
+
+/**
+ * Summary statistics for a dataflow run.
+ */
+export const DataflowRunSummaryType = StructType({
+  /** Total number of tasks */
+  total: IntegerType,
+  /** Number of completed tasks */
+  completed: IntegerType,
+  /** Number of cached tasks */
+  cached: IntegerType,
+  /** Number of failed tasks */
+  failed: IntegerType,
+  /** Number of skipped tasks */
+  skipped: IntegerType,
+});
+export type DataflowRunSummary = ValueTypeOf<typeof DataflowRunSummaryType>;
+
+/**
+ * A dataflow run record, tracking one execution of a workspace's dataflow.
+ *
+ * Stored in: dataflows/<workspace>/<runId>.beast2
+ *
+ * This provides execution history and provenance tracking:
+ * - Which tasks ran and which were cached
+ * - Input/output snapshots for reproducibility
+ * - Timing information for performance analysis
+ */
+export const DataflowRunType = StructType({
+  /** Run ID (UUIDv7) */
+  runId: StringType,
+  /** Workspace name */
+  workspaceName: StringType,
+  /** Package reference at run time (name@version) */
+  packageRef: StringType,
+
+  /** When the run started */
+  startedAt: DateTimeType,
+  /** When the run completed (null if still running) */
+  completedAt: OptionType(DateTimeType),
+
+  /** Current status of the run */
+  status: DataflowRunStatusType,
+
+  /** Root hash at start (input snapshot) */
+  inputSnapshot: StringType,
+  /** Root hash at end (output snapshot, null if still running) */
+  outputSnapshot: OptionType(StringType),
+
+  /** Map of task name -> execution record */
+  taskExecutions: DictType(StringType, TaskExecutionRecordType),
+
+  /** Summary statistics */
+  summary: DataflowRunSummaryType,
+});
+export type DataflowRun = ValueTypeOf<typeof DataflowRunType>;

@@ -20,6 +20,7 @@ import { tmpdir } from 'os';
 import { decodeBeast2For, variant } from '@elaraai/east';
 import { type ExecutionStatus, TaskObjectType, type TaskObject } from '@elaraai/e3-types';
 import { inputsHash, evaluateCommandIr } from '../executions.js';
+import { uuidv7 } from '../uuid.js';
 import type { StorageBackend } from '../storage/interfaces.js';
 import type { TaskRunner, TaskExecuteOptions, TaskResult } from './interfaces.js';
 import { getBootId, getPidStartTime } from './processHelpers.js';
@@ -46,6 +47,8 @@ export interface ExecuteOptions {
 export interface ExecutionResult {
   /** Combined inputs hash (identifies this execution) */
   inputsHash: string;
+  /** Execution ID (UUIDv7) */
+  executionId: string;
   /** True if result was from cache */
   cached: boolean;
   /** Final state */
@@ -86,6 +89,7 @@ export class LocalTaskRunner implements TaskRunner {
     const taskResult: TaskResult = {
       state: result.state,
       cached: result.cached,
+      executionId: result.executionId,
     };
 
     if (result.state === 'success' && result.outputHash) {
@@ -130,12 +134,13 @@ export async function taskExecute(
 
   // Step 1: Check cache (unless force)
   if (!options.force) {
-    const existingOutput = await storage.refs.executionGetOutput(repo, taskHash, inHash);
+    const existingOutput = await storage.refs.executionGetLatestOutput(repo, taskHash, inHash);
     if (existingOutput !== null) {
-      const status = await storage.refs.executionGet(repo, taskHash, inHash);
+      const status = await storage.refs.executionGetLatest(repo, taskHash, inHash);
       if (status && status.type === 'success') {
         return {
           inputsHash: inHash,
+          executionId: status.value.executionId,
           cached: true,
           state: 'success',
           outputHash: existingOutput,
@@ -147,15 +152,29 @@ export async function taskExecute(
     }
   }
 
-  // Step 2: Read task object
+  // Step 2: Generate a new execution ID
+  const executionId = uuidv7();
+
+  // Step 3: Read task object
   let task: TaskObject;
   try {
     const taskData = await storage.objects.read(repo, taskHash);
     const decoder = decodeBeast2For(TaskObjectType);
     task = decoder(Buffer.from(taskData));
   } catch (err) {
+    // Record error with executionId for audit trail
+    const status: ExecutionStatus = variant('error', {
+      executionId,
+      inputHashes,
+      startedAt: new Date(startTime),
+      completedAt: new Date(),
+      message: `Failed to read task object: ${err}`,
+    });
+    await storage.refs.executionWrite(repo, taskHash, inHash, executionId, status);
+
     return {
       inputsHash: inHash,
+      executionId,
       cached: false,
       state: 'error',
       outputHash: null,
@@ -165,7 +184,7 @@ export async function taskExecute(
     };
   }
 
-  // Step 3: Create scratch directory
+  // Step 4: Create scratch directory
   // Include PID to prevent collisions when multiple e3 processes run the same
   // task concurrently (e.g., same task in different workspaces at same millisecond)
   const scratchDir = path.join(
@@ -175,7 +194,7 @@ export async function taskExecute(
   await fs.mkdir(scratchDir, { recursive: true });
 
   try {
-    // Step 4: Marshal inputs to scratch dir
+    // Step 5: Marshal inputs to scratch dir
     const inputPaths: string[] = [];
     for (let i = 0; i < inputHashes.length; i++) {
       const inputPath = path.join(scratchDir, `input-${i}.beast2`);
@@ -184,14 +203,24 @@ export async function taskExecute(
       inputPaths.push(inputPath);
     }
 
-    // Step 5: Evaluate command IR to get exec args
+    // Step 6: Evaluate command IR to get exec args
     const outputPath = path.join(scratchDir, 'output.beast2');
     let args: string[];
     try {
       args = await evaluateCommandIr(storage, repo, task.commandIr, inputPaths, outputPath);
     } catch (err) {
+      const status: ExecutionStatus = variant('error', {
+        executionId,
+        inputHashes,
+        startedAt: new Date(startTime),
+        completedAt: new Date(),
+        message: `Failed to evaluate command IR: ${err}`,
+      });
+      await storage.refs.executionWrite(repo, taskHash, inHash, executionId, status);
+
       return {
         inputsHash: inHash,
+        executionId,
         cached: false,
         state: 'error',
         outputHash: null,
@@ -202,8 +231,18 @@ export async function taskExecute(
     }
 
     if (args.length === 0) {
+      const status: ExecutionStatus = variant('error', {
+        executionId,
+        inputHashes,
+        startedAt: new Date(startTime),
+        completedAt: new Date(),
+        message: 'Command IR produced empty command',
+      });
+      await storage.refs.executionWrite(repo, taskHash, inHash, executionId, status);
+
       return {
         inputsHash: inHash,
+        executionId,
         cached: false,
         state: 'error',
         outputHash: null,
@@ -213,41 +252,42 @@ export async function taskExecute(
       };
     }
 
-    // Step 6: Get boot ID for crash detection
+    // Step 7: Get boot ID for crash detection
     const bootId = await getBootId();
 
-    // Step 7: Execute command
+    // Step 8: Execute command
     const result = await runCommand(
       storage,
       repo,
       taskHash,
       inHash,
+      executionId,
       args,
       inputHashes,
       bootId,
       options
     );
 
-    // Step 8: Handle result
+    // Step 9: Handle result
     if (result.exitCode === 0) {
       // Success - read and store output
       try {
         const outputData = await fs.readFile(outputPath);
         const outputHash = await storage.objects.write(repo, outputData);
 
-        // Write output ref and success status
-        await storage.refs.executionWriteOutput(repo, taskHash, inHash, outputHash);
-
+        // Write success status (output is stored within status.beast2's directory)
         const status: ExecutionStatus = variant('success', {
+          executionId,
           inputHashes,
           outputHash,
           startedAt: new Date(startTime),
           completedAt: new Date(),
         });
-        await storage.refs.executionWrite(repo, taskHash, inHash, status);
+        await storage.refs.executionWrite(repo, taskHash, inHash, executionId, status);
 
         return {
           inputsHash: inHash,
+          executionId,
           cached: false,
           state: 'success',
           outputHash,
@@ -258,15 +298,17 @@ export async function taskExecute(
       } catch (err) {
         // Output file missing or unreadable
         const status: ExecutionStatus = variant('error', {
+          executionId,
           inputHashes,
           startedAt: new Date(startTime),
           completedAt: new Date(),
           message: `Failed to read output: ${err}`,
         });
-        await storage.refs.executionWrite(repo, taskHash, inHash, status);
+        await storage.refs.executionWrite(repo, taskHash, inHash, executionId, status);
 
         return {
           inputsHash: inHash,
+          executionId,
           cached: false,
           state: 'error',
           outputHash: null,
@@ -278,15 +320,17 @@ export async function taskExecute(
     } else {
       // Failed - write failed status
       const status: ExecutionStatus = variant('failed', {
+        executionId,
         inputHashes,
         startedAt: new Date(startTime),
         completedAt: new Date(),
         exitCode: BigInt(result?.exitCode ?? -1),
       });
-      await storage.refs.executionWrite(repo, taskHash, inHash, status);
+      await storage.refs.executionWrite(repo, taskHash, inHash, executionId, status);
 
       return {
         inputsHash: inHash,
+        executionId,
         cached: false,
         state: 'failed',
         outputHash: null,
@@ -313,6 +357,7 @@ async function runCommand(
   repo: string,
   taskHash: string,
   inHash: string,
+  executionId: string,
   args: string[],
   inputHashes: string[],
   bootId: string,
@@ -368,7 +413,7 @@ async function runCommand(
     // Chain writes sequentially to avoid overlapping
     stdoutWriteChain = stdoutWriteChain.then(async () => {
       try {
-        await storage.logs.append(repo, taskHash, inHash, 'stdout', str);
+        await storage.logs.append(repo, taskHash, inHash, executionId, 'stdout', str);
       } catch (err) {
         console.warn(`Failed to append stdout log: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -384,7 +429,7 @@ async function runCommand(
     // Chain writes sequentially to avoid overlapping
     stderrWriteChain = stderrWriteChain.then(async () => {
       try {
-        await storage.logs.append(repo, taskHash, inHash, 'stderr', str);
+        await storage.logs.append(repo, taskHash, inHash, executionId, 'stderr', str);
       } catch (err) {
         console.warn(`Failed to append stderr log: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -426,13 +471,14 @@ async function runCommand(
   // Write running status with actual child PID
   const pidStartTime = await getPidStartTime(child.pid!);
   const status: ExecutionStatus = variant('running', {
+    executionId,
     inputHashes,
     startedAt: new Date(),
     pid: BigInt(child.pid ?? -1),
     pidStartTime: BigInt(pidStartTime ?? -1),
     bootId,
   });
-  await storage.refs.executionWrite(repo, taskHash, inHash, status);
+  await storage.refs.executionWrite(repo, taskHash, inHash, executionId, status);
 
   // Wait for process to complete
   const result = await resultPromise;

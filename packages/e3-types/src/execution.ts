@@ -42,6 +42,8 @@ import {
 export const ExecutionStatusType = VariantType({
   /** Task has been launched but not yet completed */
   running: StructType({
+    /** Unique execution ID (UUIDv7) */
+    executionId: StringType,
     /** Input dataset hashes */
     inputHashes: ArrayType(StringType),
     /** When execution started */
@@ -55,6 +57,8 @@ export const ExecutionStatusType = VariantType({
   }),
   /** Task ran and returned exit code 0 */
   success: StructType({
+    /** Unique execution ID (UUIDv7) */
+    executionId: StringType,
     /** Input dataset hashes */
     inputHashes: ArrayType(StringType),
     /** Hash of the output dataset */
@@ -66,6 +70,8 @@ export const ExecutionStatusType = VariantType({
   }),
   /** Task ran and returned non-zero exit code */
   failed: StructType({
+    /** Unique execution ID (UUIDv7) */
+    executionId: StringType,
     /** Input dataset hashes */
     inputHashes: ArrayType(StringType),
     /** When execution started */
@@ -77,6 +83,8 @@ export const ExecutionStatusType = VariantType({
   }),
   /** e3 execution engine had an internal error */
   error: StructType({
+    /** Unique execution ID (UUIDv7) */
+    executionId: StringType,
     /** Input dataset hashes */
     inputHashes: ArrayType(StringType),
     /** When execution started */

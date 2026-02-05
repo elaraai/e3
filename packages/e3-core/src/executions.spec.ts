@@ -16,11 +16,13 @@ import { TaskObjectType } from '@elaraai/e3-types';
 import {
   inputsHash,
   executionGet,
+  executionGetLatest,
   executionGetOutput,
   executionList,
   executionListForTask,
   executionReadLog,
 } from './executions.js';
+import { uuidv7 } from './uuid.js';
 import { taskExecute } from './execution/LocalTaskRunner.js';
 import { objectWrite } from './storage/local/LocalObjectStore.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
@@ -110,7 +112,17 @@ describe('executions', () => {
     it('returns null for non-existent execution', async () => {
       const taskHash = 'a'.repeat(64);
       const inHash = 'b'.repeat(64);
-      const status = await executionGet(storage, testRepo, taskHash, inHash);
+      const executionId = uuidv7();
+      const status = await executionGet(storage, testRepo, taskHash, inHash, executionId);
+      assert.strictEqual(status, null);
+    });
+  });
+
+  describe('executionGetLatest', () => {
+    it('returns null for non-existent execution', async () => {
+      const taskHash = 'a'.repeat(64);
+      const inHash = 'b'.repeat(64);
+      const status = await executionGetLatest(storage, testRepo, taskHash, inHash);
       assert.strictEqual(status, null);
     });
   });
@@ -126,10 +138,11 @@ describe('executions', () => {
     it('returns hash from output ref file', async () => {
       const taskHash = 'a'.repeat(64);
       const inHash = 'b'.repeat(64);
+      const executionId = uuidv7();
       const outputHash = 'c'.repeat(64);
 
-      // Create execution directory with output ref
-      const execDir = join(testRepo, 'executions', taskHash, inHash);
+      // Create execution directory with output ref (new structure includes executionId)
+      const execDir = join(testRepo, 'executions', taskHash, inHash, executionId);
       mkdirSync(execDir, { recursive: true });
       writeFileSync(join(execDir, 'output'), outputHash + '\n');
 
@@ -149,11 +162,14 @@ describe('executions', () => {
       const taskHash2 = 'b'.repeat(64);
       const inHash1 = 'c'.repeat(64);
       const inHash2 = 'd'.repeat(64);
+      const execId1 = uuidv7();
+      const execId2 = uuidv7();
+      const execId3 = uuidv7();
 
-      // Create execution directories
-      mkdirSync(join(testRepo, 'executions', taskHash1, inHash1), { recursive: true });
-      mkdirSync(join(testRepo, 'executions', taskHash1, inHash2), { recursive: true });
-      mkdirSync(join(testRepo, 'executions', taskHash2, inHash1), { recursive: true });
+      // Create execution directories (new structure includes executionId)
+      mkdirSync(join(testRepo, 'executions', taskHash1, inHash1, execId1), { recursive: true });
+      mkdirSync(join(testRepo, 'executions', taskHash1, inHash2, execId2), { recursive: true });
+      mkdirSync(join(testRepo, 'executions', taskHash2, inHash1, execId3), { recursive: true });
 
       const list = await executionList(storage, testRepo);
       assert.strictEqual(list.length, 3);
@@ -171,9 +187,12 @@ describe('executions', () => {
       const taskHash = 'a'.repeat(64);
       const inHash1 = 'b'.repeat(64);
       const inHash2 = 'c'.repeat(64);
+      const executionId1 = uuidv7();
+      const executionId2 = uuidv7();
 
-      mkdirSync(join(testRepo, 'executions', taskHash, inHash1), { recursive: true });
-      mkdirSync(join(testRepo, 'executions', taskHash, inHash2), { recursive: true });
+      // New structure includes executionId
+      mkdirSync(join(testRepo, 'executions', taskHash, inHash1, executionId1), { recursive: true });
+      mkdirSync(join(testRepo, 'executions', taskHash, inHash2, executionId2), { recursive: true });
 
       const list = await executionListForTask(storage, testRepo, taskHash);
       assert.strictEqual(list.length, 2);
@@ -186,7 +205,8 @@ describe('executions', () => {
     it('returns empty chunk for non-existent log', async () => {
       const taskHash = 'a'.repeat(64);
       const inHash = 'b'.repeat(64);
-      const chunk = await executionReadLog(storage, testRepo, taskHash, inHash, 'stdout');
+      const executionId = uuidv7();
+      const chunk = await executionReadLog(storage, testRepo, taskHash, inHash, executionId, 'stdout');
       assert.strictEqual(chunk.data, '');
       assert.strictEqual(chunk.size, 0);
       assert.strictEqual(chunk.complete, true);
@@ -195,13 +215,14 @@ describe('executions', () => {
     it('reads log content', async () => {
       const taskHash = 'a'.repeat(64);
       const inHash = 'b'.repeat(64);
+      const executionId = uuidv7();
       const logContent = 'Hello, world!\nLine 2\n';
 
-      const execDir = join(testRepo, 'executions', taskHash, inHash);
+      const execDir = join(testRepo, 'executions', taskHash, inHash, executionId);
       mkdirSync(execDir, { recursive: true });
       writeFileSync(join(execDir, 'stdout.txt'), logContent);
 
-      const chunk = await executionReadLog(storage, testRepo, taskHash, inHash, 'stdout');
+      const chunk = await executionReadLog(storage, testRepo, taskHash, inHash, executionId, 'stdout');
       assert.strictEqual(chunk.data, logContent);
       assert.strictEqual(chunk.size, logContent.length);
       assert.strictEqual(chunk.totalSize, logContent.length);
@@ -211,14 +232,15 @@ describe('executions', () => {
     it('supports pagination', async () => {
       const taskHash = 'a'.repeat(64);
       const inHash = 'b'.repeat(64);
+      const executionId = uuidv7();
       const logContent = 'ABCDEFGHIJ';
 
-      const execDir = join(testRepo, 'executions', taskHash, inHash);
+      const execDir = join(testRepo, 'executions', taskHash, inHash, executionId);
       mkdirSync(execDir, { recursive: true });
       writeFileSync(join(execDir, 'stderr.txt'), logContent);
 
       // Read first 5 bytes
-      const chunk1 = await executionReadLog(storage, testRepo, taskHash, inHash, 'stderr', {
+      const chunk1 = await executionReadLog(storage, testRepo, taskHash, inHash, executionId, 'stderr', {
         offset: 0,
         limit: 5,
       });
@@ -228,7 +250,7 @@ describe('executions', () => {
       assert.strictEqual(chunk1.complete, false);
 
       // Read next 5 bytes
-      const chunk2 = await executionReadLog(storage, testRepo, taskHash, inHash, 'stderr', {
+      const chunk2 = await executionReadLog(storage, testRepo, taskHash, inHash, executionId, 'stderr', {
         offset: 5,
         limit: 5,
       });
@@ -394,8 +416,9 @@ describe('executions', () => {
 
       // Check logs were written
       const inHash = result.inputsHash;
-      const stdoutLog = await executionReadLog(storage, testRepo, taskHash, inHash, 'stdout');
-      const stderrLog = await executionReadLog(storage, testRepo, taskHash, inHash, 'stderr');
+      const executionId = result.executionId;
+      const stdoutLog = await executionReadLog(storage, testRepo, taskHash, inHash, executionId, 'stdout');
+      const stderrLog = await executionReadLog(storage, testRepo, taskHash, inHash, executionId, 'stderr');
 
       assert.ok(stdoutLog.data.includes('stdout'));
       assert.ok(stderrLog.data.includes('stderr'));
@@ -425,7 +448,7 @@ describe('executions', () => {
       assert.strictEqual(result.outputHash, null);
 
       // Check status was written
-      const status = await executionGet(storage, testRepo, taskHash, result.inputsHash);
+      const status = await executionGet(storage, testRepo, taskHash, result.inputsHash, result.executionId);
       assert.ok(status);
       assert.strictEqual(status.type, 'failed');
     });

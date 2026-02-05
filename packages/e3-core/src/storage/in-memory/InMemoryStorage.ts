@@ -6,7 +6,7 @@
 import { none } from '@elaraai/east';
 import { computeHash } from '../../objects.js';
 import { ObjectNotFoundError, RepositoryNotFoundError } from '../../errors.js';
-import type { ExecutionStatus } from '@elaraai/e3-types';
+import type { ExecutionStatus, DataflowRun } from '@elaraai/e3-types';
 import type {
   StorageBackend,
   ObjectStore,
@@ -85,8 +85,10 @@ class InMemoryObjectStore implements ObjectStore {
 class InMemoryRefStore implements RefStore {
   private packages = new Map<string, Map<string, string>>();
   private workspaces = new Map<string, Map<string, Uint8Array>>();
+  // executions now keyed by taskHash/inputsHash/executionId
   private executions = new Map<string, Map<string, ExecutionStatus>>();
-  private executionOutputs = new Map<string, Map<string, string>>();
+  // dataflow runs keyed by workspace/runId
+  private dataflowRuns = new Map<string, Map<string, DataflowRun>>();
 
   private getPackages(repo: string): Map<string, string> {
     let repoPackages = this.packages.get(repo);
@@ -115,21 +117,29 @@ class InMemoryRefStore implements RefStore {
     return repoExecutions;
   }
 
-  private getExecutionOutputs(repo: string): Map<string, string> {
-    let repoOutputs = this.executionOutputs.get(repo);
-    if (!repoOutputs) {
-      repoOutputs = new Map();
-      this.executionOutputs.set(repo, repoOutputs);
+  private getDataflowRuns(repo: string): Map<string, DataflowRun> {
+    let repoRuns = this.dataflowRuns.get(repo);
+    if (!repoRuns) {
+      repoRuns = new Map();
+      this.dataflowRuns.set(repo, repoRuns);
     }
-    return repoOutputs;
+    return repoRuns;
   }
 
   private makePackageKey(name: string, version: string): string {
     return `${name}@${version}`;
   }
 
-  private makeExecutionKey(taskHash: string, inputsHash: string): string {
+  private makeExecutionKey(taskHash: string, inputsHash: string, executionId: string): string {
+    return `${taskHash}/${inputsHash}/${executionId}`;
+  }
+
+  private makeInputsKey(taskHash: string, inputsHash: string): string {
     return `${taskHash}/${inputsHash}`;
+  }
+
+  private makeDataflowRunKey(workspace: string, runId: string): string {
+    return `${workspace}/${runId}`;
   }
 
   // Package operations
@@ -137,7 +147,7 @@ class InMemoryRefStore implements RefStore {
     const result: { name: string; version: string }[] = [];
     for (const key of this.getPackages(repo).keys()) {
       const [name, version] = key.split('@');
-      result.push({ name, version });
+      result.push({ name: name!, version: version! });
     }
     return result;
   }
@@ -171,47 +181,107 @@ class InMemoryRefStore implements RefStore {
     this.getWorkspaces(repo).delete(name);
   }
 
-  // Execution operations
-  async executionGet(repo: string, taskHash: string, inputsHash: string): Promise<ExecutionStatus | null> {
-    return this.getExecutions(repo).get(this.makeExecutionKey(taskHash, inputsHash)) ?? null;
+  // Execution operations (with executionId)
+  async executionGet(repo: string, taskHash: string, inputsHash: string, executionId: string): Promise<ExecutionStatus | null> {
+    return this.getExecutions(repo).get(this.makeExecutionKey(taskHash, inputsHash, executionId)) ?? null;
   }
 
-  async executionWrite(repo: string, taskHash: string, inputsHash: string, status: ExecutionStatus): Promise<void> {
-    this.getExecutions(repo).set(this.makeExecutionKey(taskHash, inputsHash), status);
+  async executionWrite(repo: string, taskHash: string, inputsHash: string, executionId: string, status: ExecutionStatus): Promise<void> {
+    this.getExecutions(repo).set(this.makeExecutionKey(taskHash, inputsHash, executionId), status);
   }
 
-  async executionGetOutput(repo: string, taskHash: string, inputsHash: string): Promise<string | null> {
-    return this.getExecutionOutputs(repo).get(this.makeExecutionKey(taskHash, inputsHash)) ?? null;
+  async executionListIds(repo: string, taskHash: string, inputsHash: string): Promise<string[]> {
+    const prefix = this.makeInputsKey(taskHash, inputsHash) + '/';
+    const ids: string[] = [];
+    for (const key of this.getExecutions(repo).keys()) {
+      if (key.startsWith(prefix)) {
+        ids.push(key.slice(prefix.length));
+      }
+    }
+    return ids.sort();
   }
 
-  async executionWriteOutput(repo: string, taskHash: string, inputsHash: string, outputHash: string): Promise<void> {
-    this.getExecutionOutputs(repo).set(this.makeExecutionKey(taskHash, inputsHash), outputHash);
+  async executionGetLatest(repo: string, taskHash: string, inputsHash: string): Promise<ExecutionStatus | null> {
+    const ids = await this.executionListIds(repo, taskHash, inputsHash);
+    if (ids.length === 0) return null;
+    const latestId = ids[ids.length - 1]!;
+    return this.executionGet(repo, taskHash, inputsHash, latestId);
+  }
+
+  async executionGetLatestOutput(repo: string, taskHash: string, inputsHash: string): Promise<string | null> {
+    const ids = await this.executionListIds(repo, taskHash, inputsHash);
+    // Iterate from latest to oldest
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const status = await this.executionGet(repo, taskHash, inputsHash, ids[i]!);
+      if (status && status.type === 'success') {
+        return status.value.outputHash;
+      }
+    }
+    return null;
   }
 
   async executionList(repo: string): Promise<{ taskHash: string; inputsHash: string }[]> {
+    const seen = new Set<string>();
     const result: { taskHash: string; inputsHash: string }[] = [];
     for (const key of this.getExecutions(repo).keys()) {
-      const [taskHash, inputsHash] = key.split('/');
-      result.push({ taskHash, inputsHash });
+      const parts = key.split('/');
+      const inputsKey = `${parts[0]}/${parts[1]}`;
+      if (!seen.has(inputsKey)) {
+        seen.add(inputsKey);
+        result.push({ taskHash: parts[0]!, inputsHash: parts[1]! });
+      }
     }
     return result;
   }
 
   async executionListForTask(repo: string, taskHash: string): Promise<string[]> {
-    const result: string[] = [];
+    const seen = new Set<string>();
     for (const key of this.getExecutions(repo).keys()) {
       if (key.startsWith(`${taskHash}/`)) {
-        result.push(key.split('/')[1]);
+        const parts = key.split('/');
+        seen.add(parts[1]!);
       }
     }
-    return result;
+    return [...seen];
+  }
+
+  // Dataflow run operations
+  async dataflowRunGet(repo: string, workspace: string, runId: string): Promise<DataflowRun | null> {
+    return this.getDataflowRuns(repo).get(this.makeDataflowRunKey(workspace, runId)) ?? null;
+  }
+
+  async dataflowRunWrite(repo: string, workspace: string, run: DataflowRun): Promise<void> {
+    this.getDataflowRuns(repo).set(this.makeDataflowRunKey(workspace, run.runId), run);
+  }
+
+  async dataflowRunList(repo: string, workspace: string): Promise<string[]> {
+    const prefix = `${workspace}/`;
+    const ids: string[] = [];
+    for (const key of this.getDataflowRuns(repo).keys()) {
+      if (key.startsWith(prefix)) {
+        ids.push(key.slice(prefix.length));
+      }
+    }
+    return ids.sort();
+  }
+
+  async dataflowRunGetLatest(repo: string, workspace: string): Promise<DataflowRun | null> {
+    const ids = await this.dataflowRunList(repo, workspace);
+    if (ids.length === 0) return null;
+    const latestId = ids[ids.length - 1]!;
+    return this.dataflowRunGet(repo, workspace, latestId);
+  }
+
+  async dataflowRunDelete(repo: string, workspace: string, runId: string): Promise<void> {
+    const key = this.makeDataflowRunKey(workspace, runId);
+    this.getDataflowRuns(repo).delete(key);
   }
 
   clear(): void {
     this.packages.clear();
     this.workspaces.clear();
     this.executions.clear();
-    this.executionOutputs.clear();
+    this.dataflowRuns.clear();
   }
 }
 
@@ -275,18 +345,19 @@ class InMemoryLockService implements LockService {
 class InMemoryLogStore implements LogStore {
   private logs = new Map<string, string>();
 
-  private makeLogKey(repo: string, taskHash: string, inputsHash: string, stream: string): string {
-    return `${repo}:${taskHash}:${inputsHash}:${stream}`;
+  private makeLogKey(repo: string, taskHash: string, inputsHash: string, executionId: string, stream: string): string {
+    return `${repo}:${taskHash}:${inputsHash}:${executionId}:${stream}`;
   }
 
   async append(
     repo: string,
     taskHash: string,
     inputsHash: string,
+    executionId: string,
     stream: 'stdout' | 'stderr',
     data: string
   ): Promise<void> {
-    const key = this.makeLogKey(repo, taskHash, inputsHash, stream);
+    const key = this.makeLogKey(repo, taskHash, inputsHash, executionId, stream);
     const existing = this.logs.get(key) ?? '';
     this.logs.set(key, existing + data);
   }
@@ -295,10 +366,11 @@ class InMemoryLogStore implements LogStore {
     repo: string,
     taskHash: string,
     inputsHash: string,
+    executionId: string,
     stream: 'stdout' | 'stderr',
     options?: { offset?: number; limit?: number }
   ): Promise<LogChunk> {
-    const key = this.makeLogKey(repo, taskHash, inputsHash, stream);
+    const key = this.makeLogKey(repo, taskHash, inputsHash, executionId, stream);
     const content = this.logs.get(key) ?? '';
     const offset = options?.offset ?? 0;
     const limit = options?.limit ?? content.length - offset;

@@ -17,7 +17,7 @@ import {
   workspaceGetTaskHash,
   executionListForTask,
   executionReadLog,
-  executionGet,
+  executionGetLatest,
   executionFindCurrent,
   isProcessAlive,
   LocalStorage,
@@ -73,8 +73,8 @@ async function listWorkspaceTasks(storage: StorageBackend, repoPath: string, ws:
       console.log(`  ${taskName}  (no executions)`);
     } else {
       // Get status of the most recent execution
-      const latestInHash = executions[0];
-      const status = await executionGet(storage, repoPath, taskHash, latestInHash);
+      const latestInHash = executions[0]!;
+      const status = await executionGetLatest(storage, repoPath, taskHash, latestInHash);
       let state = status?.type ?? 'unknown';
 
       // Check if running process is actually alive
@@ -105,11 +105,12 @@ async function showLogs(
   repoPath: string,
   taskHash: string,
   inHash: string,
+  executionId: string,
   follow: boolean
 ): Promise<void> {
   // Read stdout and stderr
-  const stdout = await executionReadLog(storage, repoPath, taskHash, inHash, 'stdout');
-  const stderr = await executionReadLog(storage, repoPath, taskHash, inHash, 'stderr');
+  const stdout = await executionReadLog(storage, repoPath, taskHash, inHash, executionId, 'stdout');
+  const stderr = await executionReadLog(storage, repoPath, taskHash, inHash, executionId, 'stderr');
 
   if (stdout.totalSize === 0 && stderr.totalSize === 0) {
     console.log('No log output.');
@@ -139,10 +140,10 @@ async function showLogs(
 
     const pollInterval = 500; // ms
     const poll = async () => {
-      const newStdout = await executionReadLog(storage, repoPath, taskHash, inHash, 'stdout', {
+      const newStdout = await executionReadLog(storage, repoPath, taskHash, inHash, executionId, 'stdout', {
         offset: stdoutOffset,
       });
-      const newStderr = await executionReadLog(storage, repoPath, taskHash, inHash, 'stderr', {
+      const newStderr = await executionReadLog(storage, repoPath, taskHash, inHash, executionId, 'stderr', {
         offset: stderrOffset,
       });
 
@@ -321,10 +322,10 @@ export async function logsCommand(
       }
 
       console.log(`Task: ${ws}.${taskName}`);
-      console.log(`Execution: ${abbrev(execution.taskHash)}/${abbrev(execution.inputsHash)}`);
+      console.log(`Execution: ${abbrev(execution.taskHash)}/${abbrev(execution.inputsHash)}/${abbrev(execution.executionId)}`);
       console.log('');
 
-      await showLogs(storage, location.path, execution.taskHash, execution.inputsHash, options.follow ?? false);
+      await showLogs(storage, location.path, execution.taskHash, execution.inputsHash, execution.executionId, options.follow ?? false);
     } else {
       // Remote
       if (!taskName) {

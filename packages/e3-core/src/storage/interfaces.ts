@@ -15,7 +15,7 @@
  * a StorageBackend, the same code can run locally or in the cloud.
  */
 
-import type { ExecutionStatus, LockState, LockOperation } from '@elaraai/e3-types';
+import type { ExecutionStatus, LockState, LockOperation, DataflowRun } from '@elaraai/e3-types';
 import type { LockHolderInfo } from '../errors.js';
 
 // Re-export lock types for consumers of this module
@@ -232,47 +232,59 @@ export interface RefStore {
   workspaceRemove(repo: string, name: string): Promise<void>;
 
   // -------------------------------------------------------------------------
-  // Execution Cache
+  // Execution Cache (with execution history)
   // -------------------------------------------------------------------------
 
   /**
-   * Get execution status.
+   * Get execution status for a specific execution.
    * @param repo - Repository identifier
    * @param taskHash - Task object hash
    * @param inputsHash - Combined input hashes
+   * @param executionId - Execution ID (UUIDv7)
    * @returns ExecutionStatus or null if not found
    */
-  executionGet(repo: string, taskHash: string, inputsHash: string): Promise<ExecutionStatus | null>;
+  executionGet(repo: string, taskHash: string, inputsHash: string, executionId: string): Promise<ExecutionStatus | null>;
 
   /**
    * Write execution status.
    * @param repo - Repository identifier
    * @param taskHash - Task object hash
    * @param inputsHash - Combined input hashes
+   * @param executionId - Execution ID (UUIDv7)
    * @param status - Execution status
    */
-  executionWrite(repo: string, taskHash: string, inputsHash: string, status: ExecutionStatus): Promise<void>;
+  executionWrite(repo: string, taskHash: string, inputsHash: string, executionId: string, status: ExecutionStatus): Promise<void>;
 
   /**
-   * Get execution output hash.
+   * List all execution IDs for a (taskHash, inputsHash) pair.
    * @param repo - Repository identifier
    * @param taskHash - Task object hash
    * @param inputsHash - Combined input hashes
-   * @returns Output hash or null if not available
+   * @returns Array of executionId values (sorted lexicographically ascending)
    */
-  executionGetOutput(repo: string, taskHash: string, inputsHash: string): Promise<string | null>;
+  executionListIds(repo: string, taskHash: string, inputsHash: string): Promise<string[]>;
 
   /**
-   * Write execution output hash.
+   * Get the latest execution status (lexicographically greatest executionId).
    * @param repo - Repository identifier
    * @param taskHash - Task object hash
    * @param inputsHash - Combined input hashes
-   * @param outputHash - Output object hash
+   * @returns ExecutionStatus or null if no executions exist
    */
-  executionWriteOutput(repo: string, taskHash: string, inputsHash: string, outputHash: string): Promise<void>;
+  executionGetLatest(repo: string, taskHash: string, inputsHash: string): Promise<ExecutionStatus | null>;
 
   /**
-   * List all executions.
+   * Get the latest successful output hash (for cache lookup).
+   * Iterates from latest executionId backwards, returns first success.outputHash found.
+   * @param repo - Repository identifier
+   * @param taskHash - Task object hash
+   * @param inputsHash - Combined input hashes
+   * @returns Output hash or null if no successful execution exists
+   */
+  executionGetLatestOutput(repo: string, taskHash: string, inputsHash: string): Promise<string | null>;
+
+  /**
+   * List all executions in the repository.
    * @param repo - Repository identifier
    * @returns Array of {taskHash, inputsHash} pairs
    */
@@ -285,6 +297,51 @@ export interface RefStore {
    * @returns Array of inputsHash values
    */
   executionListForTask(repo: string, taskHash: string): Promise<string[]>;
+
+  // -------------------------------------------------------------------------
+  // Dataflow Run History
+  // -------------------------------------------------------------------------
+
+  /**
+   * Get a specific dataflow run.
+   * @param repo - Repository identifier
+   * @param workspace - Workspace name
+   * @param runId - Run ID (UUIDv7)
+   * @returns DataflowRun or null if not found
+   */
+  dataflowRunGet(repo: string, workspace: string, runId: string): Promise<DataflowRun | null>;
+
+  /**
+   * Write a dataflow run.
+   * @param repo - Repository identifier
+   * @param workspace - Workspace name
+   * @param run - The dataflow run record
+   */
+  dataflowRunWrite(repo: string, workspace: string, run: DataflowRun): Promise<void>;
+
+  /**
+   * List all run IDs for a workspace (sorted lexicographically ascending).
+   * @param repo - Repository identifier
+   * @param workspace - Workspace name
+   * @returns Array of runId values
+   */
+  dataflowRunList(repo: string, workspace: string): Promise<string[]>;
+
+  /**
+   * Get the latest dataflow run for a workspace.
+   * @param repo - Repository identifier
+   * @param workspace - Workspace name
+   * @returns DataflowRun or null if no runs exist
+   */
+  dataflowRunGetLatest(repo: string, workspace: string): Promise<DataflowRun | null>;
+
+  /**
+   * Delete a specific dataflow run.
+   * @param repo - Repository identifier
+   * @param workspace - Workspace name
+   * @param runId - Run ID (UUIDv7)
+   */
+  dataflowRunDelete(repo: string, workspace: string, runId: string): Promise<void>;
 }
 
 // =============================================================================
@@ -379,6 +436,7 @@ export interface LogStore {
    * @param repo - Repository identifier
    * @param taskHash - Task object hash
    * @param inputsHash - Combined input hashes
+   * @param executionId - Execution ID (UUIDv7)
    * @param stream - 'stdout' or 'stderr'
    * @param data - Data to append
    */
@@ -386,6 +444,7 @@ export interface LogStore {
     repo: string,
     taskHash: string,
     inputsHash: string,
+    executionId: string,
     stream: 'stdout' | 'stderr',
     data: string
   ): Promise<void>;
@@ -395,6 +454,7 @@ export interface LogStore {
    * @param repo - Repository identifier
    * @param taskHash - Task object hash
    * @param inputsHash - Combined input hashes
+   * @param executionId - Execution ID (UUIDv7)
    * @param stream - 'stdout' or 'stderr'
    * @param options - Read options
    * @returns Log chunk
@@ -403,6 +463,7 @@ export interface LogStore {
     repo: string,
     taskHash: string,
     inputsHash: string,
+    executionId: string,
     stream: 'stdout' | 'stderr',
     options?: { offset?: number; limit?: number }
   ): Promise<LogChunk>;
