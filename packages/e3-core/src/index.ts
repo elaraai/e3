@@ -122,7 +122,9 @@ export {
   inputsHash,
   // Status
   executionGet,
+  executionGetLatest,
   executionGetOutput,
+  executionListIds,
   executionListForTask,
   executionList,
   // Find current execution for a task in workspace
@@ -135,6 +137,9 @@ export {
   // Command IR evaluation
   evaluateCommandIr,
 } from './executions.js';
+
+// UUID utilities (for execution history)
+export { uuidv7, uuidv7Timestamp, isUuidv7 } from './uuid.js';
 
 // Local process execution (in execution/ directory)
 export {

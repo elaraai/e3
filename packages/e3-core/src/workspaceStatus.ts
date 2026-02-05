@@ -25,7 +25,7 @@ import {
   type Structure,
 } from '@elaraai/e3-types';
 import {
-  executionGet,
+  executionGetLatest,
   inputsHash,
 } from './executions.js';
 import { isProcessAlive } from './execution/processHelpers.js';
@@ -437,7 +437,7 @@ async function computeTaskStatus(
 
   // Check the execution status for these inputs
   const inHash = inputsHash(currentInputHashes);
-  const execStatus = await executionGet(storage, repo, node.hash, inHash);
+  const execStatus = await executionGetLatest(storage, repo, node.hash, inHash);
 
   if (execStatus === null) {
     // No execution attempted - task is ready to run
@@ -512,11 +512,12 @@ async function checkInProgress(
   repo: string,
   taskHash: string
 ): Promise<TaskStatus | null> {
-  // List all executions for this task
+  // List all inputsHashes for this task
   const inputsHashes = await storage.refs.executionListForTask(repo, taskHash);
 
   for (const inHash of inputsHashes) {
-    const status = await storage.refs.executionGet(repo, taskHash, inHash);
+    // Check the latest execution for this inputsHash
+    const status = await storage.refs.executionGetLatest(repo, taskHash, inHash);
     if (status?.type === 'running') {
       // Found a running execution - verify process is actually alive
       const pid = Number(status.value.pid);

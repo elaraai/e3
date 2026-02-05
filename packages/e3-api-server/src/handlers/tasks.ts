@@ -10,7 +10,7 @@ import {
   workspaceGetTask,
   workspaceGetTaskHash,
   executionListForTask,
-  executionGet,
+  executionGetLatest,
 } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
@@ -106,7 +106,7 @@ export async function listExecutions(
     const result: ExecutionListItem[] = [];
 
     for (const inputsHash of inputsHashes) {
-      const status = await executionGet(storage, repoPath, taskHash, inputsHash);
+      const status = await executionGetLatest(storage, repoPath, taskHash, inputsHash);
       if (!status) continue;
 
       // Build the complete item based on status type

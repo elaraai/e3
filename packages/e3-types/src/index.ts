@@ -106,4 +106,13 @@ export {
   type ExecutionEvent,
   DataflowExecutionStateType,
   type DataflowExecutionState,
+  // Dataflow run history
+  DataflowRunStatusType,
+  type DataflowRunStatus,
+  TaskExecutionRecordType,
+  type TaskExecutionRecord,
+  DataflowRunSummaryType,
+  type DataflowRunSummary,
+  DataflowRunType,
+  type DataflowRun,
 } from './dataflow.js';

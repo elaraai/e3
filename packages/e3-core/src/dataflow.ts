@@ -23,7 +23,7 @@
  * write completes, ensuring downstream tasks see consistent state.
  */
 
-import { decodeBeast2For, variant } from '@elaraai/east';
+import { decodeBeast2For, encodeBeast2For, variant } from '@elaraai/east';
 import {
   PackageObjectType,
   TaskObjectType,
@@ -31,11 +31,14 @@ import {
   pathToString,
   type TaskObject,
   type TreePath,
+  type DataflowRun,
+  type TaskExecutionRecord,
 } from '@elaraai/e3-types';
 import {
   executionGetOutput,
   inputsHash,
 } from './executions.js';
+import { uuidv7 } from './uuid.js';
 import type { TaskRunner, TaskExecuteOptions } from './execution/interfaces.js';
 import { taskExecute } from './execution/LocalTaskRunner.js';
 import {
@@ -185,6 +188,8 @@ export interface TaskExecutionResult {
   name: string;
   /** Whether the task was cached */
   cached: boolean;
+  /** Execution ID (UUIDv7) - present for executed or cached tasks */
+  executionId?: string;
   /** Final state */
   state: 'success' | 'failed' | 'error' | 'skipped';
   /** Error message if state is 'error' */
@@ -201,6 +206,8 @@ export interface TaskExecutionResult {
 export interface DataflowResult {
   /** Overall success - true if all tasks completed successfully */
   success: boolean;
+  /** Dataflow run ID (UUIDv7) */
+  runId: string;
   /** Number of tasks executed (not from cache) */
   executed: number;
   /** Number of tasks served from cache */
@@ -452,13 +459,21 @@ async function dataflowExecuteWithLock(
   options: DataflowOptions
 ): Promise<DataflowResult> {
   const startTime = Date.now();
+  const startedAt = new Date();
   const concurrency = options.concurrency ?? 4;
+
+  // Generate run ID for this execution
+  const runId = uuidv7();
 
   let taskNodes: Map<string, TaskNode>;
   let taskDependents: Map<string, Set<string>>;
   let outputToTask: Map<string, string>;
+  let wsState: { packageName: string; packageVersion: string; rootHash: string };
 
   try {
+    // Read workspace state for run tracking
+    wsState = await readWorkspaceState(storage, repo, ws);
+
     // Build dependency graph
     const graphResult = await buildDependencyGraph(storage, repo, ws);
     taskNodes = graphResult.taskNodes;
@@ -470,6 +485,38 @@ async function dataflowExecuteWithLock(
     // Wrap unexpected errors
     throw new DataflowError(`Failed to build dependency graph: ${err instanceof Error ? err.message : err}`);
   }
+
+  // Clean up all previous runs (we hold the lock, so no concurrent runs)
+  const allRunIds = await storage.refs.dataflowRunList(repo, ws);
+  for (const oldRunId of allRunIds) {
+    await storage.refs.dataflowRunDelete(repo, ws, oldRunId);
+  }
+
+  // Initialize task execution records map
+  const taskExecutions = new Map<string, TaskExecutionRecord>();
+
+  // Create initial DataflowRun record
+  const initialRun: DataflowRun = {
+    runId,
+    workspaceName: ws,
+    packageRef: `${wsState.packageName}@${wsState.packageVersion}`,
+    startedAt,
+    completedAt: variant('none', null),
+    status: variant('running', {}),
+    inputSnapshot: wsState.rootHash,
+    outputSnapshot: variant('none', null),
+    taskExecutions: taskExecutions,
+    summary: {
+      total: BigInt(taskNodes.size),
+      completed: 0n,
+      cached: 0n,
+      failed: 0n,
+      skipped: 0n,
+    },
+  };
+
+  // Write initial run record
+  await storage.refs.dataflowRunWrite(repo, ws, initialRun);
 
   // Build DataflowGraph for use with decomposed building blocks
   const dataflowGraph: DataflowGraph = {
@@ -541,8 +588,8 @@ async function dataflowExecuteWithLock(
   }
 
   // Check if the task has a valid cached execution for current inputs
-  // Returns the output hash if cached, null if re-execution is needed
-  async function getCachedOutput(taskName: string): Promise<string | null> {
+  // Returns the output hash and executionId if cached, null if re-execution is needed
+  async function getCachedOutput(taskName: string): Promise<{ outputHash: string; executionId: string } | null> {
     const node = taskNodes.get(taskName)!;
 
     // Gather current input hashes
@@ -565,6 +612,13 @@ async function dataflowExecuteWithLock(
       return null;
     }
 
+    // Get the latest execution status to retrieve the executionId
+    const latestStatus = await storage.refs.executionGetLatest(repo, node.hash, inHash);
+    if (!latestStatus || latestStatus.type !== 'success') {
+      // Latest execution wasn't a success
+      return null;
+    }
+
     // Also verify the workspace output matches the cached output
     // (in case the workspace was modified outside of execution)
     const { refType, hash: wsOutputHash } = await workspaceGetDatasetHash(storage, repo, ws, node.outputPath);
@@ -574,12 +628,13 @@ async function dataflowExecuteWithLock(
       return null;
     }
 
-    return cachedOutputHash;
+    return { outputHash: cachedOutputHash, executionId: latestStatus.value.executionId };
   }
 
   // Internal result type that includes output hash for workspace update
   interface InternalTaskResult extends TaskExecutionResult {
     outputHash?: string;
+    executionId?: string;
   }
 
   // Execute a single task (does NOT write to workspace - caller must do that)
@@ -623,6 +678,7 @@ async function dataflowExecuteWithLock(
     const taskResult: InternalTaskResult = {
       name: taskName,
       cached: result.cached,
+      executionId: result.executionId,
       state: result.state,
       duration: Date.now() - taskStartTime,
     };
@@ -704,8 +760,8 @@ async function dataflowExecuteWithLock(
         if (completed.has(taskName) || inProgress.has(taskName)) continue;
 
         // Check if there's a valid cached execution for current inputs
-        const cachedOutputHash = await getCachedOutput(taskName);
-        if (cachedOutputHash !== null && !options.force) {
+        const cachedResult = await getCachedOutput(taskName);
+        if (cachedResult !== null && !options.force) {
           // Valid cached execution exists for current inputs.
           // No workspace write needed (output already matches), but we still
           // need mutex protection for state updates to prevent races with
@@ -716,12 +772,19 @@ async function dataflowExecuteWithLock(
             const result: TaskExecutionResult = {
               name: taskName,
               cached: true,
+              executionId: cachedResult.executionId,
               state: 'success',
               duration: 0,
             };
             results.push(result);
             options.onTaskComplete?.(result);
             notifyDependents(taskName);
+
+            // Track in taskExecutions map
+            taskExecutions.set(taskName, {
+              executionId: cachedResult.executionId,
+              cached: true,
+            });
           });
           continue;
         }
@@ -755,10 +818,26 @@ async function dataflowExecuteWithLock(
                   executed++;
                 }
                 notifyDependents(taskName);
+
+                // Track in taskExecutions map
+                if (result.executionId) {
+                  taskExecutions.set(taskName, {
+                    executionId: result.executionId,
+                    cached: result.cached,
+                  });
+                }
               } else {
                 failed++;
                 hasFailure = true;
                 skipDependents(taskName);
+
+                // Track failed execution too
+                if (result.executionId) {
+                  taskExecutions.set(taskName, {
+                    executionId: result.executionId,
+                    cached: false,
+                  });
+                }
               }
             });
           } finally {
@@ -791,13 +870,83 @@ async function dataflowExecuteWithLock(
   // Check for abort one final time
   checkAborted();
 
-  // If aborted, throw with partial results
+  // If aborted, throw with partial results (also update run record)
   if (aborted) {
+    const finalWsState = await readWorkspaceState(storage, repo, ws);
+    const cancelledRun: DataflowRun = {
+      runId,
+      workspaceName: ws,
+      packageRef: `${wsState.packageName}@${wsState.packageVersion}`,
+      startedAt,
+      completedAt: variant('some', new Date()),
+      status: variant('cancelled', {}),
+      inputSnapshot: wsState.rootHash,
+      outputSnapshot: variant('some', finalWsState.rootHash),
+      taskExecutions,
+      summary: {
+        total: BigInt(taskNodes.size),
+        completed: BigInt(executed + cached),
+        cached: BigInt(cached),
+        failed: BigInt(failed),
+        skipped: BigInt(skipped),
+      },
+    };
+    await storage.refs.dataflowRunWrite(repo, ws, cancelledRun);
     throw new DataflowAbortedError(results);
+  }
+
+  // Read final workspace state for output snapshot
+  const finalWsState = await readWorkspaceState(storage, repo, ws);
+
+  // Determine final status
+  let finalStatus: DataflowRun['status'];
+  if (hasFailure) {
+    // Find the failed task
+    const failedTask = results.find(r => r.state === 'failed' || r.state === 'error');
+    finalStatus = variant('failed', {
+      failedTask: failedTask?.name ?? 'unknown',
+      error: failedTask?.error ?? failedTask?.exitCode?.toString() ?? 'Task failed',
+    });
+  } else {
+    finalStatus = variant('completed', {});
+  }
+
+  // Write final DataflowRun record
+  const finalRun: DataflowRun = {
+    runId,
+    workspaceName: ws,
+    packageRef: `${wsState.packageName}@${wsState.packageVersion}`,
+    startedAt,
+    completedAt: variant('some', new Date()),
+    status: finalStatus,
+    inputSnapshot: wsState.rootHash,
+    outputSnapshot: variant('some', finalWsState.rootHash),
+    taskExecutions,
+    summary: {
+      total: BigInt(taskNodes.size),
+      completed: BigInt(executed + cached),
+      cached: BigInt(cached),
+      failed: BigInt(failed),
+      skipped: BigInt(skipped),
+    },
+  };
+  await storage.refs.dataflowRunWrite(repo, ws, finalRun);
+
+  // Update workspace state with currentRunId on success
+  if (!hasFailure) {
+    // Read, update, write workspace state
+    const currentState = await readWorkspaceState(storage, repo, ws);
+    const updatedState = {
+      ...currentState,
+      currentRunId: variant('some', runId),
+    };
+    const encoder = encodeBeast2For(WorkspaceStateType);
+    await storage.refs.workspaceWrite(repo, ws, encoder(updatedState));
   }
 
   return {
     success: !hasFailure,
+    runId,
     executed,
     cached,
     failed,

@@ -11,7 +11,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { StringType, encodeBeast2For } from '@elaraai/east';
+import { StringType, encodeBeast2For, variant } from '@elaraai/east';
 import e3 from '@elaraai/e3';
 import { WorkspaceStateType } from '@elaraai/e3-types';
 import type { WorkspaceState } from '@elaraai/e3-types';
@@ -357,6 +357,7 @@ describe('gc', () => {
         deployedAt: new Date(),
         rootHash: rootHash,
         rootUpdatedAt: new Date(),
+        currentRunId: variant('none', null),
       };
       const encoder = encodeBeast2For(WorkspaceStateType);
       writeFileSync(join(wsDir, 'myworkspace.beast2'), encoder(state));

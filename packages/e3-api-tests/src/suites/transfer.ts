@@ -432,6 +432,146 @@ export function transferTests(
       });
     });
 
+    describe('execution logs', () => {
+      it('exports workspace with execution logs and imports them', async () => {
+        const ctx = getContext();
+        const env = getCredentialsEnv();
+        const { path: localRepo1, cleanup: cleanup1 } = await createLocalTestRepo(ctx.tempDir);
+        const { path: localRepo2, cleanup: cleanup2 } = await createLocalTestRepo(ctx.tempDir);
+        const exportZip = join(ctx.tempDir, `export-with-logs-${Date.now()}.zip`);
+        const wsName = `ws-logs-${Date.now()}`;
+
+        try {
+          // 1. Create and import package to local repo 1
+          const pkgZip = await createPackageZip(ctx.tempDir, 'logs-pkg', '1.0.0');
+          let result = await runE3Command(['package', 'import', localRepo1, pkgZip], workDir);
+          assert.strictEqual(result.exitCode, 0, `Local import failed: ${result.stderr}`);
+
+          // 2. Create workspace, deploy, and execute to generate logs
+          result = await runE3Command(['workspace', 'create', localRepo1, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0, `Workspace create failed: ${result.stderr}`);
+
+          result = await runE3Command(['workspace', 'deploy', localRepo1, wsName, 'logs-pkg@1.0.0'], workDir);
+          assert.strictEqual(result.exitCode, 0, `Deploy failed: ${result.stderr}`);
+
+          result = await runE3Command(['start', localRepo1, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0, `Start failed: ${result.stderr}`);
+
+          // Verify output exists (10 * 2 = 20)
+          result = await runE3Command(['get', localRepo1, `${wsName}.tasks.compute.output`], workDir);
+          assert.strictEqual(result.exitCode, 0, `Get output failed: ${result.stderr}`);
+          assert.match(result.stdout, /20/);
+
+          // 3. Export workspace (should include execution logs)
+          result = await runE3Command(
+            ['workspace', 'export', localRepo1, wsName, exportZip, '--name', 'logs-snapshot'],
+            workDir
+          );
+          assert.strictEqual(result.exitCode, 0, `Workspace export failed: ${result.stderr}`);
+
+          // 4. Import to local repo 2
+          result = await runE3Command(['package', 'import', localRepo2, exportZip], workDir);
+          assert.strictEqual(result.exitCode, 0, `Local 2 import failed: ${result.stderr}`);
+
+          // Extract the imported package reference
+          const importMatch = result.stdout.match(/Imported (logs-snapshot@[\w.-]+)/);
+          assert.ok(importMatch, `Could not extract imported package ref from: ${result.stdout}`);
+          const importedPkgRef = importMatch[1];
+
+          // 5. Deploy the imported package in repo 2
+          const ws2Name = `ws2-logs-${Date.now()}`;
+          result = await runE3Command(['workspace', 'create', localRepo2, ws2Name], workDir);
+          assert.strictEqual(result.exitCode, 0, `Workspace 2 create failed: ${result.stderr}`);
+
+          result = await runE3Command(['workspace', 'deploy', localRepo2, ws2Name, importedPkgRef], workDir);
+          assert.strictEqual(result.exitCode, 0, `Deploy 2 failed: ${result.stderr}`);
+
+          // 6. Execute in repo 2 - should be a cache hit
+          result = await runE3Command(['start', localRepo2, ws2Name], workDir);
+          assert.strictEqual(result.exitCode, 0, `Start 2 failed: ${result.stderr}`);
+
+          // Verify output is correct
+          result = await runE3Command(['get', localRepo2, `${ws2Name}.tasks.compute.output`], workDir);
+          assert.strictEqual(result.exitCode, 0, `Get output 2 failed: ${result.stderr}`);
+          assert.match(result.stdout, /20/);
+        } finally {
+          cleanup1();
+          cleanup2();
+        }
+      });
+
+      it('preserves execution logs through remote transfer', async () => {
+        const ctx = getContext();
+        const env = getCredentialsEnv();
+        const { path: localRepo, cleanup } = await createLocalTestRepo(ctx.tempDir);
+        const exportZip1 = join(ctx.tempDir, `remote-logs-1-${Date.now()}.zip`);
+        const exportZip2 = join(ctx.tempDir, `remote-logs-2-${Date.now()}.zip`);
+        const wsName = `ws-remote-logs-${Date.now()}`;
+
+        try {
+          // 1. Create package and execute in local repo
+          const pkgZip = await createPackageZip(ctx.tempDir, 'remote-logs-pkg', '1.0.0');
+          let result = await runE3Command(['package', 'import', localRepo, pkgZip], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['workspace', 'create', localRepo, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['workspace', 'deploy', localRepo, wsName, 'remote-logs-pkg@1.0.0'], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['start', localRepo, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          // 2. Export workspace with logs
+          result = await runE3Command(
+            ['workspace', 'export', localRepo, wsName, exportZip1, '--name', 'logs-transfer'],
+            workDir
+          );
+          assert.strictEqual(result.exitCode, 0, `Export failed: ${result.stderr}`);
+
+          // 3. Import to remote
+          result = await runE3Command(['package', 'import', remoteUrl, exportZip1], workDir, { env });
+          assert.strictEqual(result.exitCode, 0, `Remote import failed: ${result.stderr}`);
+
+          // Extract the imported package reference
+          const importMatch = result.stdout.match(/Imported (logs-transfer@[\w.-]+)/);
+          assert.ok(importMatch, `Could not extract imported package ref from: ${result.stdout}`);
+          const importedPkgRef = importMatch[1];
+
+          // 4. Export from remote
+          result = await runE3Command(['package', 'export', remoteUrl, importedPkgRef, exportZip2], workDir, { env });
+          assert.strictEqual(result.exitCode, 0, `Remote export failed: ${result.stderr}`);
+
+          // 5. The round-trip should preserve the package
+          const { path: localRepo2, cleanup: cleanup2 } = await createLocalTestRepo(ctx.tempDir);
+          try {
+            result = await runE3Command(['package', 'import', localRepo2, exportZip2], workDir);
+            assert.strictEqual(result.exitCode, 0, `Local 2 import failed: ${result.stderr}`);
+
+            // Deploy and verify
+            const ws2Name = `ws2-remote-logs-${Date.now()}`;
+            result = await runE3Command(['workspace', 'create', localRepo2, ws2Name], workDir);
+            assert.strictEqual(result.exitCode, 0);
+
+            result = await runE3Command(['workspace', 'deploy', localRepo2, ws2Name, importedPkgRef], workDir);
+            assert.strictEqual(result.exitCode, 0);
+
+            result = await runE3Command(['start', localRepo2, ws2Name], workDir);
+            assert.strictEqual(result.exitCode, 0);
+
+            result = await runE3Command(['get', localRepo2, `${ws2Name}.tasks.compute.output`], workDir);
+            assert.strictEqual(result.exitCode, 0);
+            assert.match(result.stdout, /20/);
+          } finally {
+            cleanup2();
+          }
+        } finally {
+          cleanup();
+        }
+      });
+    });
+
     describe('error handling', () => {
       it('returns error when exporting non-existent package', async () => {
         const ctx = getContext();

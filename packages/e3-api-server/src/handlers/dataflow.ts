@@ -256,7 +256,7 @@ export async function getTaskLogs(
     }
 
     // Read logs
-    const chunk = await executionReadLog(storage, repoPath, execution.taskHash, execution.inputsHash, stream, { offset, limit });
+    const chunk = await executionReadLog(storage, repoPath, execution.taskHash, execution.inputsHash, execution.executionId, stream, { offset, limit });
 
     return sendSuccess(LogChunkType, {
       data: chunk.data,

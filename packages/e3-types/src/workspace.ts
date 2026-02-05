@@ -16,7 +16,7 @@
  * No state file = workspace exists but not yet deployed.
  */
 
-import { StructType, StringType, DateTimeType, ValueTypeOf } from '@elaraai/east';
+import { StructType, StringType, DateTimeType, OptionType, ValueTypeOf } from '@elaraai/east';
 
 /**
  * Workspace state stored in workspaces/<name>/state.beast2
@@ -47,6 +47,8 @@ export const WorkspaceStateType = StructType({
   rootHash: StringType,
   /** UTC datetime when root was last updated */
   rootUpdatedAt: DateTimeType,
+  /** Run ID of the latest completed dataflow run (null if never run) */
+  currentRunId: OptionType(StringType),
 });
 
 export type WorkspaceState = ValueTypeOf<typeof WorkspaceStateType>;
