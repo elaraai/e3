@@ -234,26 +234,34 @@ async function dataflowStart(
   options?: DataflowOptions
 ): Promise<DataflowRun>;
 
-// Get a specific run
-async function dataflowGet(
-  repo: string,
-  ws: string,
-  runId: string
-): Promise<DataflowRun | null>;
-
-// List runs for a workspace (newest first)
-async function dataflowList(
-  repo: string,
-  ws: string,
-  options?: { limit?: number }
-): Promise<DataflowRun[]>;
-
-// Get the latest completed run
-async function dataflowGetLatest(
-  repo: string,
-  ws: string
-): Promise<DataflowRun | null>;
+// Low-level storage methods (via storage.refs):
+interface RefStore {
+  dataflowRunGet(repo: string, workspace: string, runId: string): Promise<DataflowRun | null>;
+  dataflowRunWrite(repo: string, workspace: string, run: DataflowRun): Promise<void>;
+  dataflowRunList(repo: string, workspace: string): Promise<string[]>;
+  dataflowRunGetLatest(repo: string, workspace: string): Promise<DataflowRun | null>;
+  dataflowRunDelete(repo: string, workspace: string, runId: string): Promise<void>;
+}
 ```
+
+### Run Cleanup
+
+Dataflow runs are mutable records with a lifecycle - they are cleaned up, not garbage collected like immutable objects.
+
+**Cleanup on start:** When a new dataflow run starts (while holding the workspace lock), all previous runs are deleted. This ensures at most one run exists per workspace at any time.
+
+```typescript
+// In dataflowExecuteWithLock(), after building dependency graph:
+const allRunIds = await storage.refs.dataflowRunList(repo, ws);
+for (const oldRunId of allRunIds) {
+  await storage.refs.dataflowRunDelete(repo, ws, oldRunId);
+}
+```
+
+**Rationale:**
+- We hold the workspace lock at start, guaranteeing no concurrent runs
+- Previous run might be stale (crashed process left "running" status)
+- Simpler than tracking run completion states or implementing TTL
 
 ## Updated Workspace State
 
@@ -328,26 +336,40 @@ Because executionIds are globally unique UUIDv7s:
 
 ## Garbage Collection
 
-Executions referenced by any `DataflowRun` are retained. Unreferenced executions (from deleted runs or orphaned by schema changes) can be pruned.
+### Object GC
 
-The existing GC traces from execution outputs. With history, it traces from all `DataflowRun` records:
+The GC traces reachable objects from three root sources:
+
+1. **Package refs**: `packages/<name>/<version>` → package hash → tree/task objects
+2. **Execution outputs**: `executions/<taskHash>/<inputsHash>/*/output` → output dataset hashes
+3. **Workspace state**: `workspaces/<name>.beast2` → packageHash, rootHash
+
+All execution outputs are retained, regardless of whether they're referenced by the current dataflow run. This is intentional - executions are the cache, and keeping them allows cache hits across runs.
 
 ```typescript
-function markExecutionRoots(repo: string): Set<string> {
+async function collectRoots(repoPath: string): Promise<Set<string>> {
   const roots = new Set<string>();
 
-  for (const run of listAllDataflowRuns(repo)) {
-    for (const [taskName, exec] of run.taskExecutions) {
-      const status = getExecution(repo, exec.taskHash, exec.inputsHash, exec.executionId);
-      if (status.type === 'success') {
-        roots.add(status.outputHash);
-      }
-    }
-  }
+  // Package objects
+  await collectRefsFromDir(packagesDir, roots, 2);
+
+  // All execution outputs (the cache)
+  await collectRefsFromDir(executionsDir, roots, 3);
+
+  // Workspace package and root hashes
+  await collectWorkspaceRoots(workspacesDir, roots);
 
   return roots;
 }
 ```
+
+### Dataflow Run Cleanup
+
+Dataflow run files (`dataflows/<workspace>/<runId>.beast2`) are **not** garbage collected - they're cleaned up directly at the start of each new run (see "Run Cleanup" above). This is because:
+
+- Runs are mutable records with a lifecycle, not immutable objects
+- At most one run exists per workspace at any time
+- The run file itself doesn't contain object hashes (just executionIds as strings)
 
 ## Migration
 
@@ -380,14 +402,21 @@ function executionReadLog(repo, taskHash, inputsHash, executionId, stream): Prom
 ### Dataflow APIs (New)
 
 ```typescript
-// Run management
-function dataflowStart(repo, ws, options?): Promise<DataflowRun>;
-function dataflowGet(repo, ws, runId): Promise<DataflowRun | null>;
-function dataflowGetLatest(repo, ws): Promise<DataflowRun | null>;
-function dataflowList(repo, ws, options?): Promise<DataflowRun[]>;
+// High-level execution
+function dataflowExecute(storage, repo, ws, options?): Promise<DataflowResult>;
+function dataflowStart(storage, repo, ws, options): Promise<DataflowResult>;
+
+// Low-level storage (via storage.refs)
+interface RefStore {
+  dataflowRunGet(repo, ws, runId): Promise<DataflowRun | null>;
+  dataflowRunWrite(repo, ws, run): Promise<void>;
+  dataflowRunList(repo, ws): Promise<string[]>;
+  dataflowRunGetLatest(repo, ws): Promise<DataflowRun | null>;
+  dataflowRunDelete(repo, ws, runId): Promise<void>;
+}
 
 // Workspace state includes currentRunId
-function workspaceGet(repo, ws): Promise<WorkspaceState>;
+function workspaceGetState(storage, repo, ws): Promise<WorkspaceState>;
 ```
 
 ### Export/Import (Updated)
@@ -406,33 +435,26 @@ function packageImport(repo, zipPath): Promise<ImportResult>;
 # Run dataflow
 $ e3 start . prod
 Run 018f3b4c-9a2d-7def started
-  [cached] preprocess (from run 018f2a1b-...)
+  [cached] preprocess
   [start]  train
   [done]   train (12.3s)
-  [cached] evaluate (from run 018f2a1b-...)
+  [cached] evaluate
 Run 018f3b4c-9a2d-7def completed (2 cached, 1 executed)
 
-# List runs
-$ e3 runs . prod
-RUN                                  STATUS     STARTED              TASKS
-018f3b4c-9a2d-7def-8abc-123456789012 completed  2024-01-15 10:30:42  3/3
-018f2a1b-5c6d-7890-abcd-ef0123456789 completed  2024-01-15 09:15:00  3/3
-018f1234-abcd-7def-0123-456789abcdef failed     2024-01-14 16:45:22  2/3
-
-# View specific run
-$ e3 run . prod 018f3b4c
+# View current run (only one run exists per workspace - old runs are cleaned up)
+$ e3 run . prod
 Run 018f3b4c-9a2d-7def-8abc-123456789012
   Status:    completed
   Started:   2024-01-15 10:30:42
   Completed: 2024-01-15 10:31:15
 
   Tasks:
-    preprocess  cached   (from 018f2a1b)
+    preprocess  cached   12ms
     train       success  12.3s
-    evaluate    cached   (from 018f2a1b)
+    evaluate    cached   8ms
 
-# View logs from a specific run's execution
-$ e3 logs . prod.train --run 018f3b4c
+# View logs from the current run's execution
+$ e3 logs . prod.train
 [execution 018f3b4c-task-train-7890]
 Loading model...
 Training epoch 1/10...
