@@ -15,6 +15,7 @@ import {
   PackageInvalidError,
   DatasetNotFoundError,
   TaskNotFoundError,
+  ExecutionNotFoundError,
   ObjectNotFoundError,
   DataflowError,
   DataflowAbortedError,
@@ -74,6 +75,9 @@ export function errorToVariant(err: unknown): Error {
   }
   if (err instanceof TaskNotFoundError) {
     return variant('task_not_found', { task: err.task });
+  }
+  if (err instanceof ExecutionNotFoundError) {
+    return variant('execution_not_found', { task: err.task });
   }
   if (err instanceof ObjectNotFoundError) {
     return variant('object_not_found', { hash: err.hash });

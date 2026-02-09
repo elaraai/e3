@@ -10,6 +10,7 @@
 import { resolve } from 'path';
 import { repoGet } from '@elaraai/e3-core';
 import { parseDatasetPath, parsePackageRef } from '@elaraai/e3-types';
+import { ApiError } from '@elaraai/e3-api-client';
 import { getValidToken } from './credentials.js';
 
 // Re-export for convenience
@@ -113,6 +114,11 @@ export function parsePackageSpec(spec: string): { name: string; version: string 
  * Format error for CLI output.
  */
 export function formatError(err: unknown): string {
+  if (err instanceof ApiError) {
+    // Humanize the error code: "execution_not_found" → "Execution not found"
+    const message = err.code.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+    return message;
+  }
   if (err instanceof Error) {
     return err.message;
   }

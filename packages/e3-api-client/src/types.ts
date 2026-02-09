@@ -55,6 +55,7 @@ export const PackageExistsErrorType = StructType({ packageName: StringType, vers
 export const PackageInvalidErrorType = StructType({ reason: StringType });
 export const DatasetNotFoundErrorType = StructType({ workspace: StringType, path: StringType });
 export const TaskNotFoundErrorType = StructType({ task: StringType });
+export const ExecutionNotFoundErrorType = StructType({ task: StringType });
 export const ObjectNotFoundErrorType = StructType({ hash: StringType });
 export const DataflowErrorType = StructType({ message: StringType });
 export const PermissionDeniedErrorType = StructType({ path: StringType });
@@ -72,6 +73,7 @@ export const ErrorType = VariantType({
   package_invalid: PackageInvalidErrorType,
   dataset_not_found: DatasetNotFoundErrorType,
   task_not_found: TaskNotFoundErrorType,
+  execution_not_found: ExecutionNotFoundErrorType,
   object_not_found: ObjectNotFoundErrorType,
   dataflow_error: DataflowErrorType,
   dataflow_aborted: NullType,
@@ -760,6 +762,7 @@ export const ApiTypes = {
   PackageInvalidErrorType,
   DatasetNotFoundErrorType,
   TaskNotFoundErrorType,
+  ExecutionNotFoundErrorType,
   ObjectNotFoundErrorType,
   DataflowErrorType,
   PermissionDeniedErrorType,

@@ -27,6 +27,7 @@ import {
   taskList as taskListRemote,
   taskExecutionList as taskExecutionListRemote,
   taskLogs as taskLogsRemote,
+  ApiError,
 } from '@elaraai/e3-api-client';
 import { parseRepoLocation, formatError, exitError } from '../utils.js';
 
@@ -97,21 +98,27 @@ async function listWorkspaceTasks(storage: StorageBackend, repoPath: string, ws:
 }
 
 
-/**
- * Show logs for a specific execution.
- */
-async function showLogs(
-  storage: StorageBackend,
-  repoPath: string,
-  taskHash: string,
-  inHash: string,
-  executionId: string,
-  follow: boolean
-): Promise<void> {
-  // Read stdout and stderr
-  const stdout = await executionReadLog(storage, repoPath, taskHash, inHash, executionId, 'stdout');
-  const stderr = await executionReadLog(storage, repoPath, taskHash, inHash, executionId, 'stderr');
+/** Normalized log chunk with plain numbers. */
+interface LogData {
+  data: string;
+  offset: number;
+  size: number;
+  totalSize: number;
+  complete: boolean;
+}
 
+/** Callback to fetch new log data from a given offset. */
+type PollFn = (stream: 'stdout' | 'stderr', offset: number) => Promise<LogData>;
+
+/**
+ * Display logs and optionally follow for new output.
+ */
+async function displayLogs(
+  stdout: LogData,
+  stderr: LogData,
+  follow: boolean,
+  poll: PollFn
+): Promise<void> {
   if (stdout.totalSize === 0 && stderr.totalSize === 0) {
     console.log('No log output.');
     return;
@@ -131,7 +138,6 @@ async function showLogs(
   }
 
   if (follow) {
-    // Follow mode: poll for new content
     let stdoutOffset = stdout.offset + stdout.size;
     let stderrOffset = stderr.offset + stderr.size;
 
@@ -139,13 +145,9 @@ async function showLogs(
     console.log('[Following... press Ctrl+C to stop]');
 
     const pollInterval = 500; // ms
-    const poll = async () => {
-      const newStdout = await executionReadLog(storage, repoPath, taskHash, inHash, executionId, 'stdout', {
-        offset: stdoutOffset,
-      });
-      const newStderr = await executionReadLog(storage, repoPath, taskHash, inHash, executionId, 'stderr', {
-        offset: stderrOffset,
-      });
+    const tick = async () => {
+      const newStdout = await poll('stdout', stdoutOffset);
+      const newStderr = await poll('stderr', stderrOffset);
 
       if (newStdout.size > 0) {
         process.stdout.write(newStdout.data);
@@ -158,18 +160,15 @@ async function showLogs(
       }
     };
 
-    // Keep polling until interrupted
-    const intervalId = setInterval(() => void poll(), pollInterval);
+    const intervalId = setInterval(() => void tick(), pollInterval);
     process.on('SIGINT', () => {
       clearInterval(intervalId);
       console.log('\n[Stopped]');
       process.exit(0);
     });
 
-    // Keep the process alive
-    await new Promise(() => {
-      // Never resolves - will be interrupted by Ctrl+C
-    });
+    // Keep the process alive — interrupted by Ctrl+C
+    await new Promise(() => {});
   }
 }
 
@@ -209,82 +208,15 @@ async function listWorkspaceTasksRemote(
   console.log(`Use "e3 logs <repo> ${ws}.<taskName>" to view logs.`);
 }
 
-/**
- * Show logs for a task (remote).
- */
-async function showLogsRemote(
-  baseUrl: string,
-  repo: string,
-  ws: string,
-  taskName: string,
-  token: string,
-  follow: boolean
-): Promise<void> {
-  // Read stdout and stderr
-  const stdout = await taskLogsRemote(baseUrl, repo, ws, taskName, { stream: 'stdout' }, { token });
-  const stderr = await taskLogsRemote(baseUrl, repo, ws, taskName, { stream: 'stderr' }, { token });
-
-  if (Number(stdout.totalSize) === 0 && Number(stderr.totalSize) === 0) {
-    console.log('No log output.');
-    return;
-  }
-
-  if (Number(stdout.totalSize) > 0) {
-    console.log('=== STDOUT ===');
-    console.log(stdout.data);
-  }
-
-  if (Number(stderr.totalSize) > 0) {
-    if (Number(stdout.totalSize) > 0) {
-      console.log('');
-    }
-    console.log('=== STDERR ===');
-    console.log(stderr.data);
-  }
-
-  if (follow) {
-    // Follow mode: poll for new content
-    let stdoutOffset = Number(stdout.offset) + Number(stdout.size);
-    let stderrOffset = Number(stderr.offset) + Number(stderr.size);
-
-    console.log('');
-    console.log('[Following... press Ctrl+C to stop]');
-
-    const pollInterval = 500; // ms
-    const poll = async () => {
-      const newStdout = await taskLogsRemote(baseUrl, repo, ws, taskName, {
-        stream: 'stdout',
-        offset: stdoutOffset,
-      }, { token });
-      const newStderr = await taskLogsRemote(baseUrl, repo, ws, taskName, {
-        stream: 'stderr',
-        offset: stderrOffset,
-      }, { token });
-
-      if (Number(newStdout.size) > 0) {
-        process.stdout.write(newStdout.data);
-        stdoutOffset += Number(newStdout.size);
-      }
-
-      if (Number(newStderr.size) > 0) {
-        process.stderr.write(newStderr.data);
-        stderrOffset += Number(newStderr.size);
-      }
-    };
-
-    // Keep polling until interrupted
-    const intervalId = setInterval(() => void poll(), pollInterval);
-    process.on('SIGINT', () => {
-      clearInterval(intervalId);
-      console.log('\n[Stopped]');
-      process.exit(0);
-    });
-
-    // Keep the process alive
-    await new Promise(() => {
-      // Never resolves - will be interrupted by Ctrl+C
-    });
-  }
+/** Convert a remote LogChunk (bigint fields) to LogData. */
+function toLogData(chunk: Awaited<ReturnType<typeof taskLogsRemote>>): LogData {
+  return {
+    data: chunk.data,
+    offset: Number(chunk.offset),
+    size: Number(chunk.size),
+    totalSize: Number(chunk.totalSize),
+    complete: chunk.complete,
+  };
 }
 
 /**
@@ -321,11 +253,18 @@ export async function logsCommand(
         exitError(`No executions found for task: ${ws}.${taskName}`);
       }
 
+      const { taskHash, inputsHash, executionId } = execution;
+
       console.log(`Task: ${ws}.${taskName}`);
-      console.log(`Execution: ${abbrev(execution.taskHash)}/${abbrev(execution.inputsHash)}/${abbrev(execution.executionId)}`);
+      console.log(`Execution: ${abbrev(taskHash)}/${abbrev(inputsHash)}/${abbrev(executionId)}`);
       console.log('');
 
-      await showLogs(storage, location.path, execution.taskHash, execution.inputsHash, execution.executionId, options.follow ?? false);
+      const stdout = await executionReadLog(storage, location.path, taskHash, inputsHash, executionId, 'stdout');
+      const stderr = await executionReadLog(storage, location.path, taskHash, inputsHash, executionId, 'stderr');
+
+      await displayLogs(stdout, stderr, options.follow ?? false, (stream, offset) =>
+        executionReadLog(storage, location.path, taskHash, inputsHash, executionId, stream, { offset })
+      );
     } else {
       // Remote
       if (!taskName) {
@@ -337,7 +276,21 @@ export async function logsCommand(
       console.log(`Task: ${ws}.${taskName}`);
       console.log('');
 
-      await showLogsRemote(location.baseUrl, location.repo, ws, taskName, location.token, options.follow ?? false);
+      const { baseUrl, repo, token } = location;
+      let stdout, stderr;
+      try {
+        stdout = toLogData(await taskLogsRemote(baseUrl, repo, ws, taskName, { stream: 'stdout' }, { token }));
+        stderr = toLogData(await taskLogsRemote(baseUrl, repo, ws, taskName, { stream: 'stderr' }, { token }));
+      } catch (err) {
+        if (err instanceof ApiError && err.code === 'execution_not_found') {
+          exitError(`No executions found for task: ${ws}.${taskName}`);
+        }
+        throw err;
+      }
+
+      await displayLogs(stdout, stderr, options.follow ?? false, async (stream, offset) =>
+        toLogData(await taskLogsRemote(baseUrl, repo, ws, taskName, { stream, offset }, { token }))
+      );
     }
   } catch (err) {
     exitError(formatError(err));

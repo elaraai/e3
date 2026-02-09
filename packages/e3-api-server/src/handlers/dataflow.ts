@@ -10,6 +10,7 @@ import {
   executionFindCurrent,
   executionReadLog,
   WorkspaceLockError,
+  ExecutionNotFoundError,
   coreEventToApiEvent,
   coreStatusToApiStatus,
   type WorkspaceStatusResult as CoreWorkspaceStatusResult,
@@ -252,7 +253,7 @@ export async function getTaskLogs(
     // Find the current execution for this task
     const execution = await executionFindCurrent(storage, repoPath, workspace, taskName);
     if (!execution) {
-      return sendError(LogChunkType, errorToVariant(new Error('No executions found for task')));
+      throw new ExecutionNotFoundError(taskName);
     }
 
     // Read logs

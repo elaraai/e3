@@ -22,11 +22,21 @@ import {
   dataflowExecute,
   dataflowExecution,
   dataflowCancel,
+  dataflowGraph,
   taskLogs,
+  ApiError,
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
-import { createPackageZip, createDiamondPackageZip, createFailingPackageZip, createSlowPackageZip } from '../fixtures.js';
+import {
+  createPackageZip,
+  createDiamondPackageZip,
+  createFailingPackageZip,
+  createSlowPackageZip,
+  createParallelMixedPackageZip,
+  createFailingDiamondPackageZip,
+  createWideParallelPackageZip,
+} from '../fixtures.js';
 
 /**
  * Register dataflow execution tests.
@@ -303,6 +313,164 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
+    describe('parallel task failures', () => {
+      describe('mixed success/failure', () => {
+        beforeEach(async () => {
+          const ctx = getContext();
+          const opts = await ctx.opts();
+
+          const zipPath = await createParallelMixedPackageZip(ctx.tempDir, 'mixed-pkg', '1.0.0');
+          const packageZip = readFileSync(zipPath);
+          await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+          await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', opts);
+          await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', 'mixed-pkg@1.0.0', opts);
+        });
+
+        it('parallel tasks with mixed success/failure complete without stalling', async () => {
+          const ctx = getContext();
+          const opts = await ctx.opts();
+
+          const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', { force: true }, opts);
+
+          // Dataflow should complete (not stall) and report failure
+          assert.strictEqual(result.success, false);
+          assert.strictEqual(result.failed, 1n);
+
+          // The failing task must be reported
+          const failC = result.tasks.find(t => t.name === 'fail_c');
+          assert.ok(failC, 'fail_c task should be in results');
+          assert.strictEqual(failC.state.type, 'failed');
+
+          // Tasks that did execute should have succeeded
+          // (orchestrator may stop launching new tasks after a failure,
+          //  so not all succeed tasks are guaranteed to have run)
+          for (const task of result.tasks) {
+            if (task.name !== 'fail_c') {
+              assert.strictEqual(task.state.type, 'success', `Task ${task.name} should succeed`);
+            }
+          }
+        });
+
+        it('failed task logs are accessible', async () => {
+          const ctx = getContext();
+          const opts = await ctx.opts();
+
+          // Execute first to generate logs
+          await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', { force: true }, opts);
+
+          // taskLogs for failed task should NOT throw
+          const logs = await taskLogs(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', 'fail_c', { stream: 'stderr' }, opts);
+
+          assert.ok(typeof logs.data === 'string', 'logs.data should be a string');
+          assert.ok(typeof logs.complete === 'boolean', 'logs.complete should be a boolean');
+        });
+
+        it('workspace status reflects failed tasks correctly', async () => {
+          const ctx = getContext();
+          const opts = await ctx.opts();
+
+          await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', { force: true }, opts);
+
+          const status = await workspaceStatus(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', opts);
+
+          // Failed task should show 'failed' status, not stuck as 'in-progress'
+          const failedTask = status.tasks.find(t => t.name === 'fail_c');
+          assert.ok(failedTask, 'fail_c task should be in workspace status');
+          assert.strictEqual(failedTask.status.type, 'failed', 'Failed task should have failed status');
+
+          // No task should be stuck as 'in-progress'
+          for (const task of status.tasks) {
+            assert.notStrictEqual(task.status.type, 'in-progress', `Task ${task.name} should not be stuck in-progress`);
+          }
+        });
+      });
+
+      describe('diamond with upstream failure', () => {
+        beforeEach(async () => {
+          const ctx = getContext();
+          const opts = await ctx.opts();
+
+          const zipPath = await createFailingDiamondPackageZip(ctx.tempDir, 'fdiamond-pkg', '1.0.0');
+          const packageZip = readFileSync(zipPath);
+          await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+          await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'fdiamond-ws', opts);
+          await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'fdiamond-ws', 'fdiamond-pkg@1.0.0', opts);
+        });
+
+        it('diamond with upstream failure skips dependents', async () => {
+          const ctx = getContext();
+          const opts = await ctx.opts();
+
+          const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'fdiamond-ws', { force: true }, opts);
+
+          assert.strictEqual(result.success, false);
+          assert.strictEqual(result.failed, 1n);
+          assert.ok(result.skipped >= 1n, `Expected at least 1 skipped task, got ${result.skipped}`);
+
+          // Verify individual task states
+          const leftTask = result.tasks.find(t => t.name === 'left');
+          const rightTask = result.tasks.find(t => t.name === 'right');
+          const mergeTask = result.tasks.find(t => t.name === 'merge');
+
+          assert.ok(leftTask, 'left task should be in results');
+          assert.ok(rightTask, 'right task should be in results');
+          assert.ok(mergeTask, 'merge task should be in results');
+
+          assert.strictEqual(leftTask.state.type, 'success');
+          assert.strictEqual(rightTask.state.type, 'failed');
+          assert.strictEqual(mergeTask.state.type, 'skipped');
+        });
+
+        it('taskLogs returns execution_not_found for skipped task', async () => {
+          const ctx = getContext();
+          const opts = await ctx.opts();
+
+          // Execute — merge will be skipped because right fails
+          await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'fdiamond-ws', { force: true }, opts);
+
+          try {
+            await taskLogs(ctx.config.baseUrl, ctx.repoName, 'fdiamond-ws', 'merge', { stream: 'stdout' }, opts);
+            assert.fail('Should have thrown an ApiError');
+          } catch (err) {
+            assert.ok(err instanceof ApiError, `Expected ApiError, got ${err}`);
+            assert.strictEqual(err.code, 'execution_not_found');
+          }
+        });
+      });
+
+      describe('wide parallel execution', () => {
+        beforeEach(async () => {
+          const ctx = getContext();
+          const opts = await ctx.opts();
+
+          const zipPath = await createWideParallelPackageZip(ctx.tempDir, 'wide-pkg', '1.0.0', 6);
+          const packageZip = readFileSync(zipPath);
+          await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+          await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'wide-ws', opts);
+          await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'wide-ws', 'wide-pkg@1.0.0', opts);
+        });
+
+        it('wide parallel execution completes correctly', async () => {
+          const ctx = getContext();
+          const opts = await ctx.opts();
+
+          const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'wide-ws', { force: true }, opts);
+
+          assert.strictEqual(result.success, true);
+          assert.strictEqual(result.executed, 6n);
+          assert.strictEqual(result.failed, 0n);
+
+          // All tasks should succeed
+          for (const task of result.tasks) {
+            assert.strictEqual(task.state.type, 'success', `Task ${task.name} should succeed`);
+          }
+        });
+      });
+    });
+
     describe('concurrent execution', () => {
       beforeEach(async () => {
         const ctx = getContext();
@@ -396,6 +564,337 @@ export function dataflowTests(getContext: () => TestContext): void {
           assert.ok(err instanceof Error);
           // Expect error about no active execution
         }
+      });
+    });
+
+    describe('execution not found', () => {
+      beforeEach(async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Create and import a simple package, deploy but do NOT execute
+        const zipPath = await createPackageZip(ctx.tempDir, 'noexec-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'noexec-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'noexec-ws', 'noexec-pkg@1.0.0', opts);
+      });
+
+      it('taskLogs returns execution_not_found for never-executed task', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        try {
+          await taskLogs(ctx.config.baseUrl, ctx.repoName, 'noexec-ws', 'compute', { stream: 'stdout' }, opts);
+          assert.fail('Should have thrown an ApiError');
+        } catch (err) {
+          assert.ok(err instanceof ApiError, `Expected ApiError, got ${err}`);
+          assert.strictEqual(err.code, 'execution_not_found');
+        }
+      });
+
+      it('taskLogs returns task_not_found for non-existent task', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        try {
+          await taskLogs(ctx.config.baseUrl, ctx.repoName, 'noexec-ws', 'no_such_task', { stream: 'stdout' }, opts);
+          assert.fail('Should have thrown an ApiError');
+        } catch (err) {
+          assert.ok(err instanceof ApiError, `Expected ApiError, got ${err}`);
+          assert.strictEqual(err.code, 'task_not_found');
+        }
+      });
+
+      it('taskLogs returns workspace_not_found for non-existent workspace', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        try {
+          await taskLogs(ctx.config.baseUrl, ctx.repoName, 'no_such_ws', 'compute', { stream: 'stdout' }, opts);
+          assert.fail('Should have thrown an ApiError');
+        } catch (err) {
+          assert.ok(err instanceof ApiError, `Expected ApiError, got ${err}`);
+          assert.strictEqual(err.code, 'workspace_not_found');
+        }
+      });
+    });
+
+    describe('workspace error handling', () => {
+      it('dataflowExecute returns error for non-existent workspace', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        try {
+          await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'no_such_ws', { force: true }, opts);
+          assert.fail('Should have thrown an ApiError');
+        } catch (err) {
+          assert.ok(err instanceof ApiError, `Expected ApiError, got ${err}`);
+          assert.ok(
+            err.code === 'workspace_not_found' || err.code === 'workspace_not_deployed',
+            `Expected workspace_not_found or workspace_not_deployed, got ${err.code}`
+          );
+        }
+      });
+
+      it('dataflowGraph returns error for non-existent workspace', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        try {
+          await dataflowGraph(ctx.config.baseUrl, ctx.repoName, 'no_such_ws', opts);
+          assert.fail('Should have thrown an ApiError');
+        } catch (err) {
+          assert.ok(err instanceof ApiError, `Expected ApiError, got ${err}`);
+          assert.ok(
+            err.code === 'workspace_not_found' || err.code === 'workspace_not_deployed',
+            `Expected workspace_not_found or workspace_not_deployed, got ${err.code}`
+          );
+        }
+      });
+
+      it('workspaceStatus returns error for non-existent workspace', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        try {
+          await workspaceStatus(ctx.config.baseUrl, ctx.repoName, 'no_such_ws', opts);
+          assert.fail('Should have thrown an ApiError');
+        } catch (err) {
+          assert.ok(err instanceof ApiError, `Expected ApiError, got ${err}`);
+          assert.ok(
+            err.code === 'workspace_not_found' || err.code === 'workspace_not_deployed',
+            `Expected workspace_not_found or workspace_not_deployed, got ${err.code}`
+          );
+        }
+      });
+    });
+
+    describe('cache behavior', () => {
+      beforeEach(async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        const zipPath = await createPackageZip(ctx.tempDir, 'cache-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'cache-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'cache-ws', 'cache-pkg@1.0.0', opts);
+      });
+
+      it('second execution uses cached results', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // First execution - should execute the task
+        const result1 = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'cache-ws', { force: false }, opts);
+        assert.strictEqual(result1.success, true);
+        assert.strictEqual(result1.executed, 1n);
+
+        // Second execution without force - should use cache
+        const result2 = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'cache-ws', { force: false }, opts);
+        assert.strictEqual(result2.success, true);
+        assert.ok(result2.cached > 0n, `Expected cached > 0, got ${result2.cached}`);
+        assert.strictEqual(result2.executed, 0n);
+      });
+
+      it('force bypasses cache', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // First execution
+        await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'cache-ws', { force: false }, opts);
+
+        // Force execution - should re-execute despite cache
+        const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'cache-ws', { force: true }, opts);
+        assert.strictEqual(result.success, true);
+        assert.ok(result.executed > 0n, `Expected executed > 0, got ${result.executed}`);
+      });
+    });
+
+    describe('task filter', () => {
+      beforeEach(async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        const zipPath = await createDiamondPackageZip(ctx.tempDir, 'filter-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'filter-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'filter-ws', 'filter-pkg@1.0.0', opts);
+      });
+
+      it('filter runs only the specified task', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        const result = await dataflowExecute(
+          ctx.config.baseUrl, ctx.repoName, 'filter-ws',
+          { force: true, filter: 'left' },
+          opts
+        );
+
+        assert.strictEqual(result.success, true);
+
+        // Only the filtered task should have executed
+        const executedTasks = result.tasks.filter(t => t.state.type === 'success' && !t.cached);
+        assert.strictEqual(executedTasks.length, 1, `Expected 1 executed task, got ${executedTasks.length}`);
+        assert.strictEqual(executedTasks[0].name, 'left');
+      });
+
+      it('filter with non-existent task returns error', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        try {
+          await dataflowExecute(
+            ctx.config.baseUrl, ctx.repoName, 'filter-ws',
+            { force: true, filter: 'no_such_task' },
+            opts
+          );
+          assert.fail('Should have thrown an ApiError');
+        } catch (err) {
+          assert.ok(err instanceof ApiError, `Expected ApiError, got ${err}`);
+          assert.strictEqual(err.code, 'task_not_found');
+        }
+      });
+    });
+
+    describe('dependency graph', () => {
+      beforeEach(async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        const zipPath = await createDiamondPackageZip(ctx.tempDir, 'graph-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'graph-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'graph-ws', 'graph-pkg@1.0.0', opts);
+      });
+
+      it('dataflowGraph returns correct structure', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        const graph = await dataflowGraph(ctx.config.baseUrl, ctx.repoName, 'graph-ws', opts);
+
+        // Should have 3 tasks: left, right, merge
+        assert.strictEqual(graph.tasks.length, 3);
+
+        const left = graph.tasks.find(t => t.name === 'left');
+        const right = graph.tasks.find(t => t.name === 'right');
+        const merge = graph.tasks.find(t => t.name === 'merge');
+
+        assert.ok(left, 'left task should be in graph');
+        assert.ok(right, 'right task should be in graph');
+        assert.ok(merge, 'merge task should be in graph');
+
+        // left and right have no dependencies
+        assert.deepStrictEqual(left.dependsOn, []);
+        assert.deepStrictEqual(right.dependsOn, []);
+
+        // merge depends on both left and right
+        assert.ok(merge.dependsOn.includes('left'), 'merge should depend on left');
+        assert.ok(merge.dependsOn.includes('right'), 'merge should depend on right');
+        assert.strictEqual(merge.dependsOn.length, 2);
+      });
+    });
+
+    describe('log pagination', () => {
+      beforeEach(async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        const zipPath = await createPackageZip(ctx.tempDir, 'logpag-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'logpag-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'logpag-ws', 'logpag-pkg@1.0.0', opts);
+      });
+
+      it('taskLogs supports offset and limit', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Execute to generate logs
+        await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'logpag-ws', { force: true }, opts);
+
+        // Get full logs
+        const full = await taskLogs(ctx.config.baseUrl, ctx.repoName, 'logpag-ws', 'compute', { stream: 'stdout' }, opts);
+
+        // Skip test if log is too short for meaningful pagination
+        if (full.totalSize < 5n) {
+          return;
+        }
+
+        // Get first 5 bytes
+        const chunk1 = await taskLogs(
+          ctx.config.baseUrl, ctx.repoName, 'logpag-ws', 'compute',
+          { stream: 'stdout', offset: 0, limit: 5 },
+          opts
+        );
+        assert.strictEqual(chunk1.data, full.data.slice(0, 5));
+        assert.strictEqual(chunk1.offset, 0n);
+
+        // Get from byte 5 onwards
+        const chunk2 = await taskLogs(
+          ctx.config.baseUrl, ctx.repoName, 'logpag-ws', 'compute',
+          { stream: 'stdout', offset: 5 },
+          opts
+        );
+        assert.strictEqual(chunk2.offset, 5n);
+        assert.strictEqual(chunk2.data, full.data.slice(5));
+      });
+    });
+
+    describe('event pagination', () => {
+      beforeEach(async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        const zipPath = await createDiamondPackageZip(ctx.tempDir, 'evtpag-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'evtpag-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'evtpag-ws', 'evtpag-pkg@1.0.0', opts);
+      });
+
+      it('dataflowExecution supports event offset and limit', async () => {
+        const ctx = getContext();
+        const opts = await ctx.opts();
+
+        // Execute and wait for completion
+        await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'evtpag-ws', { force: true }, opts);
+
+        // Get first event only
+        const page1 = await dataflowExecution(
+          ctx.config.baseUrl, ctx.repoName, 'evtpag-ws',
+          { offset: 0, limit: 1 },
+          opts
+        );
+        assert.strictEqual(page1.events.length, 1, 'Should return exactly 1 event');
+        assert.ok(page1.totalEvents >= 3n, `Expected at least 3 total events, got ${page1.totalEvents}`);
+
+        // Get second event
+        const page2 = await dataflowExecution(
+          ctx.config.baseUrl, ctx.repoName, 'evtpag-ws',
+          { offset: 1, limit: 1 },
+          opts
+        );
+        assert.strictEqual(page2.events.length, 1, 'Should return exactly 1 event');
+
+        // Events should be different
+        const event1 = page1.events[0];
+        const event2 = page2.events[0];
+        const event1Key = `${event1.type}:${'value' in event1 ? (event1.value as { task: string }).task : ''}`;
+        const event2Key = `${event2.type}:${'value' in event2 ? (event2.value as { task: string }).task : ''}`;
+        assert.notStrictEqual(event1Key, event2Key, 'Paginated events should be different');
       });
     });
   });

@@ -47,6 +47,9 @@ export {
   createMultiInputPackageZip,
   createStringPackageZip,
   createDiamondPackageZip,
+  createParallelMixedPackageZip,
+  createFailingDiamondPackageZip,
+  createWideParallelPackageZip,
 } from './fixtures.js';
 
 // CLI utilities

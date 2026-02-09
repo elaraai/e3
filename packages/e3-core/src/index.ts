@@ -275,6 +275,7 @@ export {
   ObjectCorruptError,
   // Execution
   ExecutionCorruptError,
+  ExecutionNotFoundError,
   // Dataflow
   DataflowError,
   DataflowAbortedError,

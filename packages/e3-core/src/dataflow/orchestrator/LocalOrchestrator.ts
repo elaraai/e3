@@ -454,7 +454,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         // Wait for at least one task to complete if we can't launch more
         if (execution.runningTasks.size > 0) {
           await Promise.race(execution.runningTasks.values());
-        } else if (readyTasks.length === 0 || checkAborted()) {
+        } else if (readyTasks.length === 0 || checkAborted() || hasFailure) {
           break;
         }
       }

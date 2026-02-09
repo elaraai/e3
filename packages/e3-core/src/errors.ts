@@ -224,6 +224,12 @@ export class ExecutionCorruptError extends E3Error {
   }
 }
 
+export class ExecutionNotFoundError extends E3Error {
+  constructor(public readonly task: string) {
+    super(`No execution found for task '${task}'`);
+  }
+}
+
 // =============================================================================
 // Dataflow Errors
 // =============================================================================
