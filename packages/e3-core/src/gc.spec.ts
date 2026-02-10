@@ -10,38 +10,42 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { StringType, encodeBeast2For, variant } from '@elaraai/east';
+import { join, dirname } from 'node:path';
+import { StringType, StructType, encodeBeast2For, variant } from '@elaraai/east';
 import e3 from '@elaraai/e3';
-import { WorkspaceStateType } from '@elaraai/e3-types';
-import type { WorkspaceState } from '@elaraai/e3-types';
-import { repoGc } from './storage/local/gc.js';
+import { WorkspaceStateType, PackageObjectType, TaskObjectType, DataRefType } from '@elaraai/e3-types';
+import type { WorkspaceState, PackageObject, TaskObject } from '@elaraai/e3-types';
+import { repoGc, collectAllRoots, markReachable, sweepBatch } from './storage/local/gc.js';
 import { objectWrite, objectRead } from './storage/local/LocalObjectStore.js';
 import { packageImport, packageRemove } from './packages.js';
 import { ObjectNotFoundError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
 import { LocalStorage } from './storage/local/index.js';
 import type { StorageBackend } from './storage/interfaces.js';
+import type { GcObjectEntry } from './storage/interfaces.js';
 
 describe('gc', () => {
-  let testRepo: string;
+  let testRepoPath: string;
   let tempDir: string;
   let storage: StorageBackend;
 
   beforeEach(() => {
-    testRepo = createTestRepo();
+    testRepoPath = createTestRepo();
     tempDir = createTempDir();
-    storage = new LocalStorage();
+    // Create LocalStorage with the parent of testRepo as reposDir.
+    // This allows repoGc to use repoName for repos.* operations,
+    // while objects/refs still use testRepoPath (full path).
+    storage = new LocalStorage(dirname(testRepoPath));
   });
 
   afterEach(() => {
-    removeTestRepo(testRepo);
+    removeTestRepo(testRepoPath);
     removeTempDir(tempDir);
   });
 
   describe('with no objects', () => {
     it('returns zero counts for empty repository', async () => {
-      const result = await repoGc(storage, testRepo);
+      const result = await repoGc(storage, testRepoPath);
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.strictEqual(result.deletedPartials, 0);
@@ -54,14 +58,14 @@ describe('gc', () => {
     it('deletes orphaned objects', async () => {
       // Store an object directly without any ref
       const data = new Uint8Array([1, 2, 3, 4, 5]);
-      const hash = await objectWrite(testRepo, data);
+      const hash = await objectWrite(testRepoPath, data);
 
       // Verify object exists
-      const loaded = await objectRead(testRepo, hash);
+      const loaded = await objectRead(testRepoPath, hash);
       assert.deepStrictEqual(new Uint8Array(loaded), data);
 
       // Run gc with minAge=0 to delete immediately
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 1);
       assert.strictEqual(result.retainedObjects, 0);
@@ -69,18 +73,18 @@ describe('gc', () => {
 
       // Verify object is gone
       await assert.rejects(
-        async () => await objectRead(testRepo, hash),
+        async () => await objectRead(testRepoPath, hash),
         ObjectNotFoundError
       );
     });
 
     it('deletes multiple orphaned objects', async () => {
       // Store several objects
-      await objectWrite(testRepo, new Uint8Array([1]));
-      await objectWrite(testRepo, new Uint8Array([2]));
-      await objectWrite(testRepo, new Uint8Array([3]));
+      await objectWrite(testRepoPath, new Uint8Array([1]));
+      await objectWrite(testRepoPath, new Uint8Array([2]));
+      await objectWrite(testRepoPath, new Uint8Array([3]));
 
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 3);
       assert.strictEqual(result.retainedObjects, 0);
@@ -95,16 +99,16 @@ describe('gc', () => {
       const zipPath = join(tempDir, 'gc-test.zip');
       await e3.export(pkg, zipPath);
 
-      const importResult = await packageImport(storage, testRepo, zipPath);
+      const importResult = await packageImport(storage, testRepoPath, zipPath);
 
       // Run gc - should not delete anything
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.ok(result.retainedObjects >= 3, `Expected at least 3 retained objects, got ${result.retainedObjects}`);
 
       // Verify package object still exists
-      const packageData = await objectRead(testRepo, importResult.packageHash);
+      const packageData = await objectRead(testRepoPath, importResult.packageHash);
       assert.ok(packageData.length > 0);
     });
 
@@ -114,14 +118,14 @@ describe('gc', () => {
       const zipPath = join(tempDir, 'remove-gc.zip');
       await e3.export(pkg, zipPath);
 
-      const importResult = await packageImport(storage, testRepo, zipPath);
+      const importResult = await packageImport(storage, testRepoPath, zipPath);
       const objectCount = importResult.objectCount;
 
       // Remove the package
-      await packageRemove(storage, testRepo, 'remove-gc', '1.0.0');
+      await packageRemove(storage, testRepoPath, 'remove-gc', '1.0.0');
 
       // Run gc - should delete all package objects
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, objectCount);
       assert.strictEqual(result.retainedObjects, 0);
@@ -138,14 +142,14 @@ describe('gc', () => {
       await e3.export(pkg1, zip1);
       await e3.export(pkg2, zip2);
 
-      await packageImport(storage, testRepo, zip1);
-      await packageImport(storage, testRepo, zip2);
+      await packageImport(storage, testRepoPath, zip1);
+      await packageImport(storage, testRepoPath, zip2);
 
       // Remove one package
-      await packageRemove(storage, testRepo, 'shared-a', '1.0.0');
+      await packageRemove(storage, testRepoPath, 'shared-a', '1.0.0');
 
       // Run gc
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       // Some objects may be deleted, but shared-b's objects are retained
       assert.ok(result.retainedObjects >= 2);
@@ -155,7 +159,7 @@ describe('gc', () => {
   describe('with staging files', () => {
     it('deletes orphaned .partial files', async () => {
       // Create a fake .partial staging file
-      const partialDir = join(testRepo, 'objects', 'ab');
+      const partialDir = join(testRepoPath, 'objects', 'ab');
       mkdirSync(partialDir, { recursive: true });
       const partialPath = join(partialDir, 'cdef.beast2.123456.abc123.partial');
       writeFileSync(partialPath, 'orphaned staging data');
@@ -163,7 +167,7 @@ describe('gc', () => {
       assert.ok(existsSync(partialPath));
 
       // Run gc
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedPartials, 1);
       assert.ok(!existsSync(partialPath));
@@ -171,13 +175,13 @@ describe('gc', () => {
 
     it('skips young .partial files', async () => {
       // Create a .partial file
-      const partialDir = join(testRepo, 'objects', 'cd');
+      const partialDir = join(testRepoPath, 'objects', 'cd');
       mkdirSync(partialDir, { recursive: true });
       const partialPath = join(partialDir, 'efgh.beast2.123456.xyz789.partial');
       writeFileSync(partialPath, 'in-progress data');
 
       // Run gc with default minAge (60s) - file is brand new
-      const result = await repoGc(storage, testRepo, { minAge: 60000 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 60000 });
 
       assert.strictEqual(result.deletedPartials, 0);
       assert.strictEqual(result.skippedYoung, 1);
@@ -188,29 +192,29 @@ describe('gc', () => {
   describe('minAge option', () => {
     it('skips young objects', async () => {
       // Store an object
-      const hash = await objectWrite(testRepo, new Uint8Array([42]));
+      const hash = await objectWrite(testRepoPath, new Uint8Array([42]));
 
       // Run gc with high minAge - object is too young
-      const result = await repoGc(storage, testRepo, { minAge: 60000 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 60000 });
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.strictEqual(result.skippedYoung, 1);
 
       // Object should still exist
-      const data = await objectRead(testRepo, hash);
+      const data = await objectRead(testRepoPath, hash);
       assert.deepStrictEqual(new Uint8Array(data), new Uint8Array([42]));
     });
 
     it('deletes old objects with minAge=0', async () => {
-      const hash = await objectWrite(testRepo, new Uint8Array([99]));
+      const hash = await objectWrite(testRepoPath, new Uint8Array([99]));
 
       // Run gc with minAge=0
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 1);
 
       await assert.rejects(
-        async () => await objectRead(testRepo, hash),
+        async () => await objectRead(testRepoPath, hash),
         ObjectNotFoundError
       );
     });
@@ -220,26 +224,26 @@ describe('gc', () => {
     it('reports but does not delete in dry run mode', async () => {
       // Store an orphaned object
       const data = new Uint8Array([10, 20, 30]);
-      const hash = await objectWrite(testRepo, data);
+      const hash = await objectWrite(testRepoPath, data);
 
       // Run gc in dry run mode
-      const result = await repoGc(storage, testRepo, { minAge: 0, dryRun: true });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0, dryRun: true });
 
       assert.strictEqual(result.deletedObjects, 1);
       assert.ok(result.bytesFreed > 0);
 
       // Object should still exist
-      const loaded = await objectRead(testRepo, hash);
+      const loaded = await objectRead(testRepoPath, hash);
       assert.deepStrictEqual(new Uint8Array(loaded), data);
     });
 
     it('reports partials but does not delete in dry run mode', async () => {
-      const partialDir = join(testRepo, 'objects', 'ef');
+      const partialDir = join(testRepoPath, 'objects', 'ef');
       mkdirSync(partialDir, { recursive: true });
       const partialPath = join(partialDir, 'ghij.beast2.999999.dry123.partial');
       writeFileSync(partialPath, 'dry run test');
 
-      const result = await repoGc(storage, testRepo, { minAge: 0, dryRun: true });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0, dryRun: true });
 
       assert.strictEqual(result.deletedPartials, 1);
       assert.ok(existsSync(partialPath)); // Still exists
@@ -247,67 +251,97 @@ describe('gc', () => {
   });
 
   describe('object graph traversal', () => {
-    it('retains transitively referenced objects', async () => {
-      // Create a chain: A references B, B references C
-      // Only A is a root - B and C should still be retained
+    // Helper: create a tree type with DataRef fields
+    const makeTreeType = (fieldNames: string[]) => {
+      const fields: Record<string, typeof DataRefType> = {};
+      for (const name of fieldNames) {
+        fields[name] = DataRefType;
+      }
+      return StructType(fields);
+    };
 
-      // Create object C (leaf)
-      const dataC = new Uint8Array([100, 101, 102]);
-      const hashC = await objectWrite(testRepo, dataC);
+    it('retains transitively referenced objects via tree → value chain', async () => {
+      // Create a chain: Package → Tree → Value (leaf)
+      // Tree has a 'data' field pointing to a value object
 
-      // Create object B that contains hashC in its data
-      const dataB = Buffer.from(`data with ref: ${hashC}`);
-      const hashB = await objectWrite(testRepo, dataB);
+      // Create value leaf object (some arbitrary beast2 data)
+      const valueEncoder = encodeBeast2For(StringType);
+      const hashValue = await objectWrite(testRepoPath, valueEncoder('hello world'));
 
-      // Create object A that contains hashB in its data
-      const dataA = Buffer.from(`root with ref: ${hashB}`);
-      const hashA = await objectWrite(testRepo, dataA);
+      // Create a tree object with one field pointing to the value
+      const treeType = makeTreeType(['data']);
+      const treeEncoder = encodeBeast2For(treeType);
+      const hashTree = await objectWrite(testRepoPath, treeEncoder({
+        data: variant('value', hashValue),
+      }));
 
-      // Create a package ref pointing to A
-      const refDir = join(testRepo, 'packages', 'transitive');
+      // Create a package object referencing the tree as its root
+      const pkgEncoder = encodeBeast2For(PackageObjectType);
+      const hashPkg = await objectWrite(testRepoPath, pkgEncoder({
+        tasks: new Map(),
+        data: {
+          structure: variant('struct', new Map()),
+          value: hashTree,
+        },
+      } as PackageObject));
+
+      // Create a package ref pointing to the package
+      const refDir = join(testRepoPath, 'packages', 'transitive');
       mkdirSync(refDir, { recursive: true });
-      writeFileSync(join(refDir, '1.0.0'), hashA + '\n');
+      writeFileSync(join(refDir, '1.0.0'), hashPkg + '\n');
 
       // Run gc
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
-      assert.strictEqual(result.retainedObjects, 3); // A, B, C all retained
+      assert.strictEqual(result.retainedObjects, 3); // pkg, tree, value all retained
 
       // All objects should still exist
-      await objectRead(testRepo, hashA);
-      await objectRead(testRepo, hashB);
-      await objectRead(testRepo, hashC);
+      await objectRead(testRepoPath, hashPkg);
+      await objectRead(testRepoPath, hashTree);
+      await objectRead(testRepoPath, hashValue);
     });
 
     it('deletes unreachable objects in graph', async () => {
-      // Create reachable chain: A -> B
-      const dataB = new Uint8Array([200, 201]);
-      const hashB = await objectWrite(testRepo, dataB);
+      // Create a reachable package → tree chain, plus an unreachable orphan
 
-      const dataA = Buffer.from(`root: ${hashB}`);
-      const hashA = await objectWrite(testRepo, dataA);
+      // Reachable tree (leaf - no children)
+      const treeType = makeTreeType(['x']);
+      const treeEncoder = encodeBeast2For(treeType);
+      const hashTree = await objectWrite(testRepoPath, treeEncoder({
+        x: variant('unassigned', null),
+      }));
 
-      // Create unreachable object D
-      const dataD = new Uint8Array([77, 88, 99]);
-      const hashD = await objectWrite(testRepo, dataD);
+      // Reachable package referencing the tree
+      const pkgEncoder = encodeBeast2For(PackageObjectType);
+      const hashPkg = await objectWrite(testRepoPath, pkgEncoder({
+        tasks: new Map(),
+        data: {
+          structure: variant('struct', new Map()),
+          value: hashTree,
+        },
+      } as PackageObject));
 
-      // Only A is a root
-      const refDir = join(testRepo, 'packages', 'graph-test');
+      // Unreachable orphan object
+      const orphanData = new Uint8Array([77, 88, 99]);
+      const hashOrphan = await objectWrite(testRepoPath, orphanData);
+
+      // Only package is a root
+      const refDir = join(testRepoPath, 'packages', 'graph-test');
       mkdirSync(refDir, { recursive: true });
-      writeFileSync(join(refDir, '1.0.0'), hashA + '\n');
+      writeFileSync(join(refDir, '1.0.0'), hashPkg + '\n');
 
       // Run gc
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
-      assert.strictEqual(result.deletedObjects, 1); // D deleted
-      assert.strictEqual(result.retainedObjects, 2); // A, B retained
+      assert.strictEqual(result.deletedObjects, 1); // orphan deleted
+      assert.strictEqual(result.retainedObjects, 2); // pkg, tree retained
 
-      // A and B exist, D is gone
-      await objectRead(testRepo, hashA);
-      await objectRead(testRepo, hashB);
+      // Package and tree exist, orphan is gone
+      await objectRead(testRepoPath, hashPkg);
+      await objectRead(testRepoPath, hashTree);
       await assert.rejects(
-        async () => await objectRead(testRepo, hashD),
+        async () => await objectRead(testRepoPath, hashOrphan),
         ObjectNotFoundError
       );
     });
@@ -317,23 +351,37 @@ describe('gc', () => {
     it('retains objects referenced by execution refs', async () => {
       // Store an object
       const data = new Uint8Array([11, 22, 33]);
-      const hash = await objectWrite(testRepo, data);
+      const hash = await objectWrite(testRepoPath, data);
 
-      // Create an execution ref at executions/<taskHash>/<inputsHash>/output
+      // Create an execution ref using the new schema:
+      // executions/<taskHash>/<inputsHash>/<executionId>/status.beast2
       const taskHash = 'a'.repeat(64);
       const inputsHash = 'b'.repeat(64);
-      const execDir = join(testRepo, 'executions', taskHash, inputsHash);
+      const executionId = '01900000-0000-7000-8000-000000000001';
+      const execDir = join(testRepoPath, 'executions', taskHash, inputsHash, executionId);
       mkdirSync(execDir, { recursive: true });
-      writeFileSync(join(execDir, 'output'), hash + '\n');
+
+      // Write a success execution status with outputHash
+      const { encodeBeast2For: encodeFor } = await import('@elaraai/east');
+      const { ExecutionStatusType } = await import('@elaraai/e3-types');
+      const encoder = encodeFor(ExecutionStatusType);
+      const status = variant('success', {
+        executionId,
+        inputHashes: [inputsHash],
+        outputHash: hash,
+        startedAt: new Date(),
+        completedAt: new Date(),
+      });
+      writeFileSync(join(execDir, 'status.beast2'), encoder(status));
 
       // Run gc
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.strictEqual(result.retainedObjects, 1);
 
       // Object still exists
-      const loaded = await objectRead(testRepo, hash);
+      const loaded = await objectRead(testRepoPath, hash);
       assert.deepStrictEqual(new Uint8Array(loaded), data);
     });
   });
@@ -342,12 +390,12 @@ describe('gc', () => {
     it('retains objects referenced by workspace state', async () => {
       // Store objects for root and package
       const rootData = new Uint8Array([44, 55, 66]);
-      const rootHash = await objectWrite(testRepo, rootData);
+      const rootHash = await objectWrite(testRepoPath, rootData);
       const pkgData = new Uint8Array([77, 88, 99]);
-      const pkgHash = await objectWrite(testRepo, pkgData);
+      const pkgHash = await objectWrite(testRepoPath, pkgData);
 
       // Create workspace state file at workspaces/<name>.beast2
-      const wsDir = join(testRepo, 'workspaces');
+      const wsDir = join(testRepoPath, 'workspaces');
       mkdirSync(wsDir, { recursive: true });
 
       const state: WorkspaceState = {
@@ -363,31 +411,265 @@ describe('gc', () => {
       writeFileSync(join(wsDir, 'myworkspace.beast2'), encoder(state));
 
       // Run gc
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
       assert.strictEqual(result.retainedObjects, 2); // both rootHash and pkgHash
 
       // Objects still exist
-      await objectRead(testRepo, rootHash);
-      await objectRead(testRepo, pkgHash);
+      await objectRead(testRepoPath, rootHash);
+      await objectRead(testRepoPath, pkgHash);
     });
 
     it('ignores undeployed workspaces', async () => {
       // Store an orphaned object
       const data = new Uint8Array([11, 22, 33]);
-      await objectWrite(testRepo, data);
+      await objectWrite(testRepoPath, data);
 
       // Create empty workspace file (undeployed)
-      const wsDir = join(testRepo, 'workspaces');
+      const wsDir = join(testRepoPath, 'workspaces');
       mkdirSync(wsDir, { recursive: true });
       writeFileSync(join(wsDir, 'undeployed.beast2'), '');
 
       // Run gc - orphaned object should be deleted
-      const result = await repoGc(storage, testRepo, { minAge: 0 });
+      const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 1);
       assert.strictEqual(result.retainedObjects, 0);
+    });
+  });
+
+  // ==========================================================================
+  // Unit tests for shared algorithm functions
+  // ==========================================================================
+
+  describe('collectAllRoots', () => {
+    it('collects roots from all root types', async () => {
+      const roots = await collectAllRoots(storage.repos, testRepoPath);
+      // Empty repo has no roots
+      assert.strictEqual(roots.size, 0);
+    });
+
+    it('collects package roots', async () => {
+      // Create a package ref
+      const hash = 'a'.repeat(64);
+      const refDir = join(testRepoPath, 'packages', 'test-pkg');
+      mkdirSync(refDir, { recursive: true });
+      writeFileSync(join(refDir, '1.0.0'), hash + '\n');
+
+      const roots = await collectAllRoots(storage.repos, testRepoPath);
+      assert.ok(roots.has(hash));
+    });
+  });
+
+  describe('markReachable', () => {
+    // Helper: create a tree type with DataRef fields
+    const makeTreeType = (fieldNames: string[]) => {
+      const fields: Record<string, typeof DataRefType> = {};
+      for (const name of fieldNames) {
+        fields[name] = DataRefType;
+      }
+      return StructType(fields);
+    };
+
+    it('follows PackageObject → TaskObject → IR chain', async () => {
+      const irHash = 'c'.repeat(64);
+      const treeHash = 'd'.repeat(64);
+
+      // Encode a TaskObject referencing the IR hash
+      const taskEncoder = encodeBeast2For(TaskObjectType);
+      const taskData = taskEncoder({
+        commandIr: irHash,
+        inputs: [[variant('field', 'x')]],
+        output: [variant('field', 'y')],
+      } as TaskObject);
+      const taskHash = 'b'.repeat(64);
+
+      // Encode a PackageObject referencing the task and a root tree
+      const pkgEncoder = encodeBeast2For(PackageObjectType);
+      const pkgData = pkgEncoder({
+        tasks: new Map([['myTask', taskHash]]),
+        data: {
+          structure: variant('struct', new Map()),
+          value: treeHash,
+        },
+      } as PackageObject);
+      const pkgHash = 'a'.repeat(64);
+
+      const objects = new Map<string, Uint8Array>();
+      objects.set(pkgHash, pkgData);
+      objects.set(taskHash, taskData);
+      // treeHash and irHash are NOT in the object store — they are leaves
+
+      const readObject = async (hash: string) => objects.get(hash) ?? null;
+      const reachable = await markReachable(readObject, new Set([pkgHash]));
+
+      // Package (read) + task (read) + IR leaf (not read) + tree (not in store, pushed to stack but not found)
+      assert.ok(reachable.has(pkgHash), 'package should be reachable');
+      assert.ok(reachable.has(taskHash), 'task should be reachable');
+      assert.ok(reachable.has(irHash), 'IR leaf should be reachable (marked without reading)');
+      // treeHash was pushed to stack but readObject returns null — not added to reachable
+      assert.ok(!reachable.has(treeHash), 'tree hash should not be reachable when object is missing');
+      assert.strictEqual(reachable.size, 3);
+    });
+
+    it('follows TreeObject DataRef children', async () => {
+      const subtreeHash = 'b'.repeat(64);
+      const valueHash = 'c'.repeat(64);
+
+      // Encode a tree with both a tree ref and a value ref
+      const treeType = makeTreeType(['subtree', 'leaf']);
+      const treeEncoder = encodeBeast2For(treeType);
+      const treeData = treeEncoder({
+        subtree: variant('tree', subtreeHash),
+        leaf: variant('value', valueHash),
+      });
+      const treeHash = 'a'.repeat(64);
+
+      const objects = new Map<string, Uint8Array>();
+      objects.set(treeHash, treeData);
+      // subtreeHash and valueHash not in store
+
+      const readObject = async (hash: string) => objects.get(hash) ?? null;
+      const reachable = await markReachable(readObject, new Set([treeHash]));
+
+      assert.ok(reachable.has(treeHash), 'tree should be reachable');
+      assert.ok(reachable.has(valueHash), 'value leaf should be reachable (marked without reading)');
+      // subtreeHash pushed to stack, readObject returns null
+      assert.ok(!reachable.has(subtreeHash), 'subtree should not be reachable when object is missing');
+      assert.strictEqual(reachable.size, 2);
+    });
+
+    it('skips unassigned and null DataRefs', async () => {
+      // Tree with only unassigned/null refs — no children to follow
+      const treeType = makeTreeType(['pending', 'empty']);
+      const treeEncoder = encodeBeast2For(treeType);
+      const treeData = treeEncoder({
+        pending: variant('unassigned', null),
+        empty: variant('null', null),
+      });
+      const treeHash = 'a'.repeat(64);
+
+      const objects = new Map<string, Uint8Array>();
+      objects.set(treeHash, treeData);
+
+      const readObject = async (hash: string) => objects.get(hash) ?? null;
+      const reachable = await markReachable(readObject, new Set([treeHash]));
+
+      assert.strictEqual(reachable.size, 1); // Only the tree itself
+      assert.ok(reachable.has(treeHash));
+    });
+
+    it('handles non-BEAST2 data gracefully', async () => {
+      const hashA = 'a'.repeat(64);
+
+      const objects = new Map<string, Uint8Array>();
+      objects.set(hashA, new Uint8Array([1, 2, 3, 4, 5])); // Not BEAST2
+
+      const readObject = async (hash: string) => objects.get(hash) ?? null;
+      const reachable = await markReachable(readObject, new Set([hashA]));
+
+      // Object is reachable but treated as leaf (no children)
+      assert.strictEqual(reachable.size, 1);
+      assert.ok(reachable.has(hashA));
+    });
+
+    it('handles missing objects gracefully', async () => {
+      const hashA = 'a'.repeat(64);
+      const readObject = async (_hash: string) => null;
+      const reachable = await markReachable(readObject, new Set([hashA]));
+
+      // Root was not reachable because the object doesn't exist
+      assert.strictEqual(reachable.size, 0);
+    });
+
+    it('handles DAG deduplication (shared objects)', async () => {
+      // Two trees both reference the same value
+      const sharedValueHash = 'c'.repeat(64);
+
+      const treeType = makeTreeType(['data']);
+      const treeEncoder = encodeBeast2For(treeType);
+
+      const tree1Data = treeEncoder({ data: variant('value', sharedValueHash) });
+      const tree1Hash = 'a'.repeat(64);
+
+      const tree2Data = treeEncoder({ data: variant('value', sharedValueHash) });
+      const tree2Hash = 'b'.repeat(64);
+
+      const objects = new Map<string, Uint8Array>();
+      objects.set(tree1Hash, tree1Data);
+      objects.set(tree2Hash, tree2Data);
+
+      const readObject = async (hash: string) => objects.get(hash) ?? null;
+      const reachable = await markReachable(readObject, new Set([tree1Hash, tree2Hash]));
+
+      assert.strictEqual(reachable.size, 3); // tree1, tree2, shared value
+      assert.ok(reachable.has(sharedValueHash));
+    });
+
+    it('marks value leaves without reading them', async () => {
+      const valueHash = 'b'.repeat(64);
+
+      const treeType = makeTreeType(['data']);
+      const treeEncoder = encodeBeast2For(treeType);
+      const treeData = treeEncoder({ data: variant('value', valueHash) });
+      const treeHash = 'a'.repeat(64);
+
+      const readCalls: string[] = [];
+      const objects = new Map<string, Uint8Array>();
+      objects.set(treeHash, treeData);
+      objects.set(valueHash, new Uint8Array([99])); // exists but should not be read
+
+      const readObject = async (hash: string) => {
+        readCalls.push(hash);
+        return objects.get(hash) ?? null;
+      };
+      const reachable = await markReachable(readObject, new Set([treeHash]));
+
+      assert.ok(reachable.has(valueHash), 'value should be reachable');
+      assert.ok(!readCalls.includes(valueHash), 'value hash should NOT have been read');
+      assert.ok(readCalls.includes(treeHash), 'tree hash should have been read');
+    });
+  });
+
+  describe('sweepBatch', () => {
+    it('marks unreachable old objects for deletion', () => {
+      const objects: GcObjectEntry[] = [
+        { hash: 'a'.repeat(64), lastModified: 0, size: 100 },
+        { hash: 'b'.repeat(64), lastModified: 0, size: 200 },
+      ];
+      const reachable = new Set<string>();
+
+      const result = sweepBatch(objects, reachable, 0);
+
+      assert.strictEqual(result.toDelete.length, 2);
+      assert.strictEqual(result.retained, 0);
+      assert.strictEqual(result.bytesFreed, 300);
+    });
+
+    it('retains reachable objects', () => {
+      const hashA = 'a'.repeat(64);
+      const objects: GcObjectEntry[] = [
+        { hash: hashA, lastModified: 0, size: 100 },
+      ];
+      const reachable = new Set([hashA]);
+
+      const result = sweepBatch(objects, reachable, 0);
+
+      assert.strictEqual(result.toDelete.length, 0);
+      assert.strictEqual(result.retained, 1);
+    });
+
+    it('skips young objects', () => {
+      const objects: GcObjectEntry[] = [
+        { hash: 'a'.repeat(64), lastModified: Date.now(), size: 100 },
+      ];
+      const reachable = new Set<string>();
+
+      const result = sweepBatch(objects, reachable, 60000);
+
+      assert.strictEqual(result.toDelete.length, 0);
+      assert.strictEqual(result.skippedYoung, 1);
     });
   });
 });

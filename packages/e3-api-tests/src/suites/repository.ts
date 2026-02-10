@@ -20,6 +20,7 @@ import {
   repoRemove,
   repoList,
   packageRemove,
+  dataflowExecute,
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
@@ -54,10 +55,11 @@ export function repositoryTests(getContext: () => TestContext): void {
         opts
       );
 
-      // Empty repo - nothing to delete
+      // Empty repo - nothing to delete or skip
       assert.strictEqual(result.deletedObjects, 0n);
       assert.strictEqual(result.deletedPartials, 0n);
       assert.ok(result.retainedObjects >= 0n);
+      assert.ok(result.skippedYoung >= 0n, 'skippedYoung should be reported');
       assert.ok(result.bytesFreed >= 0n);
     });
 
@@ -80,9 +82,48 @@ export function repositoryTests(getContext: () => TestContext): void {
         opts
       );
 
-      // Should return valid stats
+      // Should return valid stats (objects may be skipped due to default minAge)
       assert.ok(typeof result.deletedObjects === 'bigint');
       assert.ok(typeof result.retainedObjects === 'bigint');
+      assert.ok(typeof result.skippedYoung === 'bigint', 'skippedYoung should be reported');
+    });
+
+    it('repoGc retains execution outputs after dataflow', async () => {
+      const ctx = getContext();
+      const opts = await ctx.opts();
+
+      // Import package, create workspace, deploy, run dataflow
+      const zipPath = await ctx.createPackage('gc-exec-pkg', '1.0.0');
+      await ctx.importPackage(zipPath);
+      await ctx.createWorkspace('gc-exec-ws');
+      await ctx.deployPackage('gc-exec-ws', 'gc-exec-pkg@1.0.0');
+
+      // Run dataflow to create execution records with output hashes
+      await dataflowExecute(
+        ctx.config.baseUrl, ctx.repoName, 'gc-exec-ws',
+        { force: true }, opts, { pollInterval: 1000, timeout: 120000 }
+      );
+
+      // Get status before GC to record object count
+      const statusBefore = await repoStatus(ctx.config.baseUrl, ctx.repoName, opts);
+      assert.ok(statusBefore.objectCount > 0n, 'repo should have objects after dataflow');
+
+      // Run GC with minAge=0 to force immediate sweep (default skips young objects)
+      const result = await repoGc(
+        ctx.config.baseUrl, ctx.repoName,
+        { dryRun: false, minAge: variant('some', 0n) },
+        opts, { pollInterval: 2000 }
+      );
+
+      // Verify: nothing deleted, all retained, none skipped (minAge=0)
+      assert.strictEqual(result.deletedObjects, 0n, 'GC should not delete any objects');
+      assert.ok(result.retainedObjects > 0n, 'GC should retain objects');
+      assert.strictEqual(result.skippedYoung, 0n, 'no objects should be skipped with minAge=0');
+
+      // Verify repo still functional — object count unchanged
+      const statusAfter = await repoStatus(ctx.config.baseUrl, ctx.repoName, opts);
+      assert.strictEqual(statusAfter.objectCount, statusBefore.objectCount,
+        'object count should be unchanged after GC');
     });
 
     it('repoCreate creates a new repository', async () => {

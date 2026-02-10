@@ -64,32 +64,41 @@ export interface BatchResult {
   deleted: number;
 }
 
+// =============================================================================
+// GC Primitives
+// =============================================================================
+
+
 /**
- * Result from GC mark phase.
+ * A single object entry returned by gcScanObjects.
  */
-export interface GcMarkResult {
-  /** Number of reachable objects found */
-  reachableCount: number;
-  /** Number of root references traced */
-  rootCount: number;
-  /** Opaque reference to the reachable set (memory ID for local, S3 key for cloud) */
-  reachableSetRef: string;
+export interface GcObjectEntry {
+  /** SHA256 hash of the object */
+  hash: string;
+  /** Last modification time (epoch ms) */
+  lastModified: number;
+  /** Size of the object in bytes */
+  size: number;
 }
 
 /**
- * Result from GC sweep phase.
+ * Result from scanning root hashes for GC (paginated).
  */
-export interface GcSweepResult {
-  /** 'continue' if more batches remain, 'done' if complete */
-  status: 'continue' | 'done';
-  /** Opaque cursor for next batch (only present if status='continue') */
-  cursor?: string;
-  /** Number of objects deleted in this batch */
-  deleted: number;
-  /** Total bytes freed in this batch */
-  bytesFreed: number;
-  /** Number of objects skipped due to being too young */
-  skippedYoung: number;
+export interface GcRootScanResult {
+  /** Root object hashes in this batch */
+  roots: string[];
+  /** Opaque cursor for next batch; undefined means scan is complete */
+  cursor?: unknown;
+}
+
+/**
+ * Result from scanning objects for GC.
+ */
+export interface GcObjectScanResult {
+  /** Object entries in this batch */
+  objects: GcObjectEntry[];
+  /** Opaque cursor for next batch; undefined means scan is complete */
+  cursor?: unknown;
 }
 
 // =============================================================================
@@ -561,35 +570,47 @@ export interface RepoStore {
   deleteObjectsBatch(repo: string, cursor?: string): Promise<BatchResult>;
 
   // -------------------------------------------------------------------------
-  // GC Phases (Resumable)
+  // GC Primitives (data-access only; algorithm lives in e3-core gc.ts)
   // -------------------------------------------------------------------------
 
   /**
-   * Mark phase: Collect roots, trace reachable objects.
+   * Scan package references for root hashes.
    * @param repo - Repository name
-   * @returns Mark result with reachable set reference
+   * @param cursor - Opaque cursor from previous call (undefined for first call)
+   * @returns Root hashes and optional cursor for next batch
    */
-  gcMark(repo: string): Promise<GcMarkResult>;
+  gcScanPackageRoots(repo: string, cursor?: unknown): Promise<GcRootScanResult>;
 
   /**
-   * Sweep phase: Delete unreachable objects in batches.
+   * Scan workspace state for root hashes.
    * @param repo - Repository name
-   * @param reachableSetRef - Reference from gcMark
-   * @param options - Sweep options (minAge to skip young objects, cursor for pagination)
-   * @returns Sweep result with status and optional cursor
+   * @param cursor - Opaque cursor from previous call (undefined for first call)
+   * @returns Root hashes and optional cursor for next batch
    */
-  gcSweep(
-    repo: string,
-    reachableSetRef: string,
-    options?: { minAge?: number; cursor?: string }
-  ): Promise<GcSweepResult>;
+  gcScanWorkspaceRoots(repo: string, cursor?: unknown): Promise<GcRootScanResult>;
 
   /**
-   * Cleanup phase: Remove temporary files (reachable set, etc.).
+   * Scan execution history for root hashes.
    * @param repo - Repository name
-   * @param reachableSetRef - Reference from gcMark
+   * @param cursor - Opaque cursor from previous call (undefined for first call)
+   * @returns Root hashes and optional cursor for next batch
    */
-  gcCleanup(repo: string, reachableSetRef: string): Promise<void>;
+  gcScanExecutionRoots(repo: string, cursor?: unknown): Promise<GcRootScanResult>;
+
+  /**
+   * Scan object catalogue entries for GC.
+   * @param repo - Repository name
+   * @param cursor - Opaque cursor from previous call (undefined for first call)
+   * @returns Object entries and optional cursor for next batch
+   */
+  gcScanObjects(repo: string, cursor?: unknown): Promise<GcObjectScanResult>;
+
+  /**
+   * Delete objects by hash. Idempotent — safe to retry on failure.
+   * @param repo - Repository name
+   * @param hashes - Object hashes to delete
+   */
+  gcDeleteObjects(repo: string, hashes: string[]): Promise<void>;
 }
 
 // =============================================================================

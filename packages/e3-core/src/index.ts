@@ -36,8 +36,16 @@ export {
   type InitRepositoryResult,
 } from './storage/local/repository.js';
 
-// Garbage collection (local filesystem)
-export { repoGc, type GcOptions, type GcResult } from './storage/local/gc.js';
+// Garbage collection
+export {
+  repoGc,
+  collectAllRoots,
+  markReachable,
+  sweepBatch,
+  type GcOptions,
+  type GcResult,
+  type SweepBatchResult,
+} from './storage/local/gc.js';
 
 // Object storage
 export { computeHash } from './objects.js';

@@ -33,8 +33,10 @@ export {
   type RepoStatus,
   type RepoMetadata,
   type BatchResult,
-  type GcMarkResult,
-  type GcSweepResult,
+  // GC primitives
+  type GcRootScanResult,
+  type GcObjectEntry,
+  type GcObjectScanResult,
   // Combined backend
   type StorageBackend,
 } from './interfaces.js';
@@ -48,8 +50,6 @@ export {
   LocalLockService,
   LocalLogStore,
   LocalRepoStore,
-  collectRoots,
-  sweep,
 } from './local/index.js';
 
 // In-memory implementation (for testing)

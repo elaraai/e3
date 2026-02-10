@@ -8,8 +8,8 @@ import type {
   RepoStatus,
   RepoMetadata,
   BatchResult,
-  GcMarkResult,
-  GcSweepResult,
+  GcObjectScanResult,
+  GcRootScanResult,
 } from '../interfaces.js';
 import {
   RepoNotFoundError,
@@ -109,25 +109,27 @@ export class InMemoryRepoStore implements RepoStore {
   }
 
   // ===========================================================================
-  // GC Phases
+  // GC Primitives
   // ===========================================================================
 
-  async gcMark(_repo: string): Promise<GcMarkResult> {
-    // In-memory doesn't need GC
-    return { reachableCount: 0, rootCount: 0, reachableSetRef: 'mem' };
+  async gcScanPackageRoots(_repo: string, _cursor?: unknown): Promise<GcRootScanResult> {
+    return { roots: [] };
   }
 
-  async gcSweep(
-    _repo: string,
-    _reachableSetRef: string,
-    _options?: { minAge?: number; cursor?: string }
-  ): Promise<GcSweepResult> {
-    // In-memory doesn't need GC
-    return { status: 'done', deleted: 0, bytesFreed: 0, skippedYoung: 0 };
+  async gcScanWorkspaceRoots(_repo: string, _cursor?: unknown): Promise<GcRootScanResult> {
+    return { roots: [] };
   }
 
-  async gcCleanup(_repo: string, _reachableSetRef: string): Promise<void> {
-    // Nothing to clean up
+  async gcScanExecutionRoots(_repo: string, _cursor?: unknown): Promise<GcRootScanResult> {
+    return { roots: [] };
+  }
+
+  async gcScanObjects(_repo: string, _cursor?: unknown): Promise<GcObjectScanResult> {
+    return { objects: [] };
+  }
+
+  async gcDeleteObjects(_repo: string, _hashes: string[]): Promise<void> {
+    // Nothing to delete
   }
 
   // ===========================================================================

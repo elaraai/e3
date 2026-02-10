@@ -65,7 +65,7 @@ export class LocalStorage implements StorageBackend {
     // repos requires reposDir for multi-repo operations
     // If not provided, create a RepoStore that throws on all operations
     this.repos = reposDir
-      ? new LocalRepoStore(reposDir, this)
+      ? new LocalRepoStore(reposDir, this.refs)
       : new NoOpRepoStore();
   }
 
@@ -134,19 +134,23 @@ class NoOpRepoStore implements RepoStore {
     return this.error();
   }
 
-  gcMark(_repo: string): Promise<import('../interfaces.js').GcMarkResult> {
+  gcScanPackageRoots(_repo: string, _cursor?: unknown): Promise<import('../interfaces.js').GcRootScanResult> {
     return this.error();
   }
 
-  gcSweep(
-    _repo: string,
-    _reachableSetRef: string,
-    _options?: { minAge?: number; cursor?: string }
-  ): Promise<import('../interfaces.js').GcSweepResult> {
+  gcScanWorkspaceRoots(_repo: string, _cursor?: unknown): Promise<import('../interfaces.js').GcRootScanResult> {
     return this.error();
   }
 
-  gcCleanup(_repo: string, _reachableSetRef: string): Promise<void> {
+  gcScanExecutionRoots(_repo: string, _cursor?: unknown): Promise<import('../interfaces.js').GcRootScanResult> {
+    return this.error();
+  }
+
+  gcScanObjects(_repo: string, _cursor?: unknown): Promise<import('../interfaces.js').GcObjectScanResult> {
+    return this.error();
+  }
+
+  gcDeleteObjects(_repo: string, _hashes: string[]): Promise<void> {
     return this.error();
   }
 }
