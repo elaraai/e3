@@ -267,32 +267,71 @@ describe('LocalRepoStore', () => {
     });
   });
 
-  describe('GC lifecycle', () => {
-    it('completes full GC cycle', async () => {
+  describe('GC primitives', () => {
+    // GC primitives receive the full repo path (same as ObjectStore/RefStore),
+    // not a repo name relative to reposDir.
+
+    it('gcScanPackageRoots returns empty for empty repo', async () => {
       await store.create('my-repo');
+      const repoPath = join(testDir, 'my-repo');
 
-      // Mark phase
-      const markResult = await store.gcMark('my-repo');
-      assert.ok(markResult.reachableSetRef);
-      assert.ok(markResult.reachableCount >= 0);
-      assert.ok(markResult.rootCount >= 0);
-
-      // Sweep phase
-      const sweepResult = await store.gcSweep('my-repo', markResult.reachableSetRef);
-      assert.strictEqual(sweepResult.status, 'done');
-
-      // Cleanup phase
-      await store.gcCleanup('my-repo', markResult.reachableSetRef);
-      // Should not throw
+      const result = await store.gcScanPackageRoots(repoPath);
+      assert.deepStrictEqual(result.roots, []);
+      assert.strictEqual(result.cursor, undefined);
     });
 
-    it('gcSweep throws if reachableSetRef is invalid', async () => {
+    it('gcScanWorkspaceRoots returns empty for empty repo', async () => {
       await store.create('my-repo');
+      const repoPath = join(testDir, 'my-repo');
 
-      await assert.rejects(
-        () => store.gcSweep('my-repo', 'invalid-ref'),
-        /Reachable set not found/
-      );
+      const result = await store.gcScanWorkspaceRoots(repoPath);
+      assert.deepStrictEqual(result.roots, []);
+    });
+
+    it('gcScanExecutionRoots returns empty for empty repo', async () => {
+      await store.create('my-repo');
+      const repoPath = join(testDir, 'my-repo');
+
+      const result = await store.gcScanExecutionRoots(repoPath);
+      assert.deepStrictEqual(result.roots, []);
+    });
+
+    it('gcScanObjects returns empty for empty repo', async () => {
+      await store.create('my-repo');
+      const repoPath = join(testDir, 'my-repo');
+
+      const result = await store.gcScanObjects(repoPath);
+      assert.deepStrictEqual(result.objects, []);
+      assert.strictEqual(result.cursor, undefined);
+    });
+
+    it('gcScanObjects enumerates objects', async () => {
+      await store.create('my-repo');
+      const repoPath = join(testDir, 'my-repo');
+
+      // Create a fake object file
+      const objDir = join(repoPath, 'objects', 'ab');
+      mkdirSync(objDir, { recursive: true });
+      writeFileSync(join(objDir, 'cd' + '0'.repeat(60) + '.beast2'), 'data');
+
+      const result = await store.gcScanObjects(repoPath);
+      assert.strictEqual(result.objects.length, 1);
+      assert.strictEqual(result.objects[0].hash, 'ab' + 'cd' + '0'.repeat(60));
+    });
+
+    it('gcDeleteObjects removes objects', async () => {
+      await store.create('my-repo');
+      const repoPath = join(testDir, 'my-repo');
+
+      const hash = 'ab' + 'cd' + '0'.repeat(60);
+      const objDir = join(repoPath, 'objects', 'ab');
+      mkdirSync(objDir, { recursive: true });
+      writeFileSync(join(objDir, 'cd' + '0'.repeat(60) + '.beast2'), 'data');
+
+      await store.gcDeleteObjects(repoPath, [hash]);
+
+      const result = await store.gcScanObjects(repoPath);
+      assert.strictEqual(result.objects.length, 0);
     });
   });
 });

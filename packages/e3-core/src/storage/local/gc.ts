@@ -4,20 +4,23 @@
  */
 
 /**
- * Garbage collection for local e3 repositories.
+ * Shared garbage collection algorithm for e3 repositories.
  *
- * Uses mark-and-sweep algorithm:
- * 1. Mark: Find all root refs (packages, executions, workspaces) and trace reachable objects
- * 2. Sweep: Delete unreachable objects and orphaned staging files
+ * Uses mark-and-sweep:
+ * 1. collectAllRoots: Collect root hashes from all root scan methods
+ * 2. markReachable: DFS through object graph via BEAST2 schema-aware traversal
+ * 3. sweepBatch: Pure decision function — identify unreachable objects to delete
+ * 4. repoGc: Driver that calls all phases in sequence
  *
- * Note: This is a local-only operation. Cloud backends would use different
- * GC strategies (e.g., S3 lifecycle policies, TTL-based expiration).
+ * These functions work with any StorageBackend — no instanceof checks.
+ * Cloud-specific concerns (S3 reachable set persistence, orphaned version cleanup)
+ * are handled in the cloud Lambda handlers.
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { StorageBackend } from '../interfaces.js';
-import { LocalStorage, collectRoots, sweep } from './index.js';
+import { decodeBeast2 } from '@elaraai/east';
+import type { RepoStore, GcObjectEntry, GcRootScanResult, StorageBackend } from '../interfaces.js';
 
 /**
  * Options for garbage collection
@@ -41,191 +44,369 @@ export interface GcOptions {
  * Result of garbage collection
  */
 export interface GcResult {
-  /**
-   * Number of objects deleted
-   */
+  /** Number of objects deleted */
   deletedObjects: number;
-
-  /**
-   * Number of orphaned staging files deleted
-   */
+  /** Number of orphaned staging files deleted */
   deletedPartials: number;
-
-  /**
-   * Number of objects retained
-   */
+  /** Number of objects retained */
   retainedObjects: number;
-
-  /**
-   * Number of files skipped due to being too young
-   */
+  /** Number of files skipped due to being too young */
   skippedYoung: number;
-
-  /**
-   * Total bytes freed
-   */
+  /** Total bytes freed */
   bytesFreed: number;
 }
 
 /**
+ * Result from sweepBatch — pure decision, no side effects.
+ */
+export interface SweepBatchResult {
+  /** Hashes of objects to delete */
+  toDelete: string[];
+  /** Number of objects retained (reachable) */
+  retained: number;
+  /** Number of objects skipped due to being too young */
+  skippedYoung: number;
+  /** Total bytes that would be freed */
+  bytesFreed: number;
+}
+
+// =============================================================================
+// Shared Algorithm Functions
+// =============================================================================
+
+/**
+ * Collect all root hashes from packages, workspaces, and executions.
+ *
+ * Calls each gcScan*Roots method with pagination support.
+ * Adding a new root scan method to RepoStore requires updating this function.
+ */
+export async function collectAllRoots(store: RepoStore, repo: string): Promise<Set<string>> {
+  const roots = new Set<string>();
+
+  const scanAll = async (scan: (repo: string, cursor?: unknown) => Promise<GcRootScanResult>) => {
+    let cursor: unknown;
+    do {
+      const result = await scan(repo, cursor);
+      for (const hash of result.roots) {
+        roots.add(hash);
+      }
+      cursor = result.cursor;
+    } while (cursor !== undefined);
+  };
+
+  await scanAll(store.gcScanPackageRoots.bind(store));
+  await scanAll(store.gcScanWorkspaceRoots.bind(store));
+  await scanAll(store.gcScanExecutionRoots.bind(store));
+
+  return roots;
+}
+
+/**
+ * Trace the object graph from roots using iterative DFS with schema-aware traversal.
+ *
+ * Decodes each object using BEAST2 self-describing format and extracts child
+ * hashes based on the detected object type (Package, Task, or Tree). Objects
+ * known to be leaves (values, IR blobs) are marked reachable without reading.
+ *
+ * @param readObject - Function to read an object by hash (returns null if missing)
+ * @param roots - Set of root hashes to start from
+ * @returns Set of all reachable hashes
+ */
+export async function markReachable(
+  readObject: (hash: string) => Promise<Uint8Array | null>,
+  roots: Set<string>
+): Promise<Set<string>> {
+  const reachable = new Set<string>();
+  const stack = [...roots];
+
+  while (stack.length > 0) {
+    const hash = stack.pop()!;
+    if (reachable.has(hash)) continue;
+
+    const data = await readObject(hash);
+    if (!data) continue;
+    reachable.add(hash);
+
+    // Schema-aware child extraction
+    let children: { hash: string; isLeaf: boolean }[];
+    try {
+      const decoded = decodeBeast2(Buffer.from(data));
+      children = extractChildren(decoded.type, decoded.value);
+    } catch {
+      continue; // Not valid BEAST2 or unknown format — treat as leaf
+    }
+
+    for (const child of children) {
+      if (reachable.has(child.hash)) continue;
+      if (child.isLeaf) {
+        reachable.add(child.hash); // Mark without reading
+      } else {
+        stack.push(child.hash);
+      }
+    }
+  }
+
+  return reachable;
+}
+
+// =============================================================================
+// Type Detection Helpers
+// =============================================================================
+
+// EastTypeValue is a variant object: { type: string, value: any }
+// For Struct: type.type === "Struct", type.value is Array<{ name: string, type: EastTypeValue }>
+// For Variant: type.type === "Variant", type.value is Array<{ name: string, type: EastTypeValue }>
+
+/**
+ * Check if a decoded EastTypeValue represents a PackageObject.
+ * PackageObject is a Struct with fields: tasks (Dict<String,String>), data (Struct)
+ */
+function isPackageObjectShape(type: any): boolean {
+  if (type.type !== 'Struct') return false;
+  const fields = type.value as { name: string; type: any }[];
+  const names = new Set(fields.map(f => f.name));
+  return names.has('tasks') && names.has('data');
+}
+
+/**
+ * Check if a decoded EastTypeValue represents a TaskObject.
+ * TaskObject is a Struct with fields: commandIr, inputs, output
+ */
+function isTaskObjectShape(type: any): boolean {
+  if (type.type !== 'Struct') return false;
+  const fields = type.value as { name: string; type: any }[];
+  const names = new Set(fields.map(f => f.name));
+  return names.has('commandIr') && names.has('inputs') && names.has('output');
+}
+
+/**
+ * Check if a field type is a DataRef (Variant with cases: unassigned, null, value, tree).
+ */
+function isDataRefFieldType(fieldType: any): boolean {
+  if (fieldType.type !== 'Variant') return false;
+  const cases = fieldType.value as { name: string; type: any }[];
+  const names = new Set(cases.map(c => c.name));
+  return names.has('tree') && names.has('value') && names.has('unassigned') && names.has('null');
+}
+
+/**
+ * Check if a decoded EastTypeValue represents a TreeObject.
+ * A tree is a Struct where every field is a DataRef variant.
+ */
+function isTreeObjectShape(type: any): boolean {
+  if (type.type !== 'Struct') return false;
+  const fields = type.value as { name: string; type: any }[];
+  return fields.length > 0 && fields.every(f => isDataRefFieldType(f.type));
+}
+
+/**
+ * Extract child hashes from a decoded BEAST2 object based on its type.
+ * Returns children with isLeaf flag to avoid reading leaf objects.
+ */
+function extractChildren(
+  type: unknown,
+  value: unknown
+): { hash: string; isLeaf: boolean }[] {
+  const t = type as any;
+  const children: { hash: string; isLeaf: boolean }[] = [];
+
+  if (isPackageObjectShape(t)) {
+    const pkg = value as { tasks: Map<string, string>; data: { value: string } };
+    for (const taskHash of pkg.tasks.values()) {
+      children.push({ hash: taskHash, isLeaf: false });
+    }
+    children.push({ hash: pkg.data.value, isLeaf: false }); // root tree
+    return children;
+  }
+
+  if (isTaskObjectShape(t)) {
+    const task = value as { commandIr: string };
+    children.push({ hash: task.commandIr, isLeaf: true }); // IR is a leaf
+    return children;
+  }
+
+  if (isTreeObjectShape(t)) {
+    const tree = value as Record<string, { type: string; value: any }>;
+    for (const ref of Object.values(tree)) {
+      if (ref.type === 'tree') {
+        children.push({ hash: ref.value as string, isLeaf: false }); // subtree needs traversal
+      } else if (ref.type === 'value') {
+        children.push({ hash: ref.value as string, isLeaf: true }); // value is a leaf
+      }
+      // 'unassigned' and 'null': no hash to follow
+    }
+    return children;
+  }
+
+  return []; // Unknown type: leaf, no children
+}
+
+/**
+ * Pure decision function: determine which objects to delete.
+ *
+ * No side effects — trivially testable. Caller decides whether to
+ * actually delete (supports dry-run by skipping gcDeleteObjects).
+ *
+ * @param objects - Object entries from gcScanObjects
+ * @param reachable - Set of reachable hashes from markReachable
+ * @param minAge - Minimum age in ms; objects younger than this are skipped
+ * @returns Decision result with toDelete list and stats
+ */
+export function sweepBatch(
+  objects: GcObjectEntry[],
+  reachable: Set<string>,
+  minAge: number
+): SweepBatchResult {
+  const now = Date.now();
+  const toDelete: string[] = [];
+  let retained = 0;
+  let skippedYoung = 0;
+  let bytesFreed = 0;
+
+  for (const obj of objects) {
+    if (reachable.has(obj.hash)) {
+      retained++;
+      continue;
+    }
+    const age = now - obj.lastModified;
+    if (minAge > 0 && age < minAge) {
+      skippedYoung++;
+      continue;
+    }
+    toDelete.push(obj.hash);
+    bytesFreed += obj.size;
+  }
+
+  return { toDelete, retained, skippedYoung, bytesFreed };
+}
+
+// =============================================================================
+// Local Driver
+// =============================================================================
+
+/**
  * Run garbage collection on an e3 repository.
  *
- * Note: GC currently requires LocalStorage as it needs direct filesystem access
- * to enumerate and delete unreachable objects. Cloud backends will need their
- * own GC implementation (e.g., using S3 lifecycle policies).
+ * Works with any StorageBackend — no instanceof checks.
  *
- * @param storage - Storage backend (must be LocalStorage)
- * @param repo - Repository identifier (for local storage, the path to e3 repository directory)
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
  * @param options - GC options
  * @returns GC result with statistics
- * @throws Error if storage is not a LocalStorage
  */
 export async function repoGc(
   storage: StorageBackend,
   repo: string,
   options: GcOptions = {}
 ): Promise<GcResult> {
-  // GC requires direct filesystem access - verify we have LocalStorage
-  if (!(storage instanceof LocalStorage)) {
-    throw new Error('GC is only supported with LocalStorage storage');
-  }
-
-  const minAge = options.minAge ?? 60000; // Default 1 minute
+  const minAge = options.minAge ?? 60000;
   const dryRun = options.dryRun ?? false;
 
   // Step 1: Collect all root hashes
-  const roots = await collectRoots(repo);
+  const roots = await collectAllRoots(storage.repos, repo);
 
-  // Step 2: Mark all reachable objects starting from roots
-  const reachable = new Set<string>();
-  for (const root of roots) {
-    await markReachable(storage, repo, root, reachable);
+  // Step 2: Mark all reachable objects
+  const readObject = async (hash: string): Promise<Uint8Array | null> => {
+    try {
+      return await storage.objects.read(repo, hash);
+    } catch {
+      return null;
+    }
+  };
+  const reachable = await markReachable(readObject, roots);
+
+  // Step 3: Scan and sweep objects
+  let totalDeleted = 0;
+  let totalRetained = 0;
+  let totalSkippedYoung = 0;
+  let totalBytesFreed = 0;
+  let cursor: unknown;
+
+  do {
+    const scan = await storage.repos.gcScanObjects(repo, cursor);
+    const result = sweepBatch(scan.objects, reachable, minAge);
+
+    totalRetained += result.retained;
+    totalSkippedYoung += result.skippedYoung;
+    totalBytesFreed += result.bytesFreed;
+
+    if (!dryRun && result.toDelete.length > 0) {
+      await storage.repos.gcDeleteObjects(repo, result.toDelete);
+    }
+    totalDeleted += result.toDelete.length;
+
+    cursor = scan.cursor;
+  } while (cursor !== undefined);
+
+  // Step 4: Clean up orphaned .partial files (local-only concern)
+  let deletedPartials = 0;
+  let partialSkippedYoung = 0;
+  try {
+    const partialResult = await cleanupPartials(repo, minAge, dryRun);
+    deletedPartials = partialResult.deleted;
+    partialSkippedYoung = partialResult.skippedYoung;
+  } catch {
+    // Not a fatal error
   }
 
-  // Step 3: Sweep - enumerate all objects and delete unreachable ones
-  if (dryRun) {
-    // For dry run, we need to count without deleting
-    const result = await sweepDryRun(repo, reachable, minAge);
-    return result;
-  }
-
-  const result = await sweep(repo, reachable, minAge);
   return {
-    deletedObjects: result.deletedObjects,
-    deletedPartials: result.deletedPartials,
-    retainedObjects: result.retainedObjects,
-    skippedYoung: result.skippedYoung,
-    bytesFreed: result.bytesFreed,
+    deletedObjects: totalDeleted,
+    deletedPartials,
+    retainedObjects: totalRetained,
+    skippedYoung: totalSkippedYoung + partialSkippedYoung,
+    bytesFreed: totalBytesFreed,
   };
 }
 
 /**
- * Mark all objects reachable from a root hash.
- *
- * Traverses the object graph by scanning for hash patterns in the data.
+ * Clean up orphaned .partial staging files in the objects directory.
+ * This is a local-only concern — cloud storage doesn't use .partial files.
  */
-async function markReachable(
-  storage: StorageBackend,
-  repo: string,
-  hash: string,
-  reachable: Set<string>
-): Promise<void> {
-  // Already visited?
-  if (reachable.has(hash)) {
-    return;
-  }
-
-  // Try to load the object
-  try {
-    const data = await storage.objects.read(repo, hash);
-    reachable.add(hash);
-
-    // Scan for hash patterns in the data
-    const dataStr = Buffer.from(data).toString('latin1');
-    const hashPattern = /[a-f0-9]{64}/g;
-    const matches = dataStr.matchAll(hashPattern);
-
-    for (const match of matches) {
-      const potentialHash = match[0];
-      if (!reachable.has(potentialHash)) {
-        // Recursively mark if it exists
-        await markReachable(storage, repo, potentialHash, reachable);
-      }
-    }
-  } catch {
-    // Object doesn't exist - not an error, just means this hash
-    // wasn't actually a reference to an object
-  }
-}
-
-/**
- * Dry-run sweep: count what would be deleted without actually deleting.
- */
-async function sweepDryRun(
+async function cleanupPartials(
   repoPath: string,
-  reachable: Set<string>,
-  minAge: number
-): Promise<GcResult> {
+  minAge: number,
+  dryRun: boolean
+): Promise<{ deleted: number; skippedYoung: number }> {
   const objectsDir = path.join(repoPath, 'objects');
   const now = Date.now();
-  const result: GcResult = {
-    deletedObjects: 0,
-    deletedPartials: 0,
-    retainedObjects: 0,
-    skippedYoung: 0,
-    bytesFreed: 0,
-  };
+  let deleted = 0;
+  let skippedYoung = 0;
 
   try {
     const subdirs = await fs.readdir(objectsDir);
-
     for (const subdir of subdirs) {
-      if (!/^[a-f0-9]{2}$/.test(subdir)) {
-        continue;
-      }
-
+      if (!/^[a-f0-9]{2}$/.test(subdir)) continue;
       const subdirPath = path.join(objectsDir, subdir);
-      const stat = await fs.stat(subdirPath);
-      if (!stat.isDirectory()) {
+      try {
+        const stat = await fs.stat(subdirPath);
+        if (!stat.isDirectory()) continue;
+      } catch {
         continue;
       }
 
       const files = await fs.readdir(subdirPath);
-
       for (const file of files) {
+        if (!file.endsWith('.partial')) continue;
         const filePath = path.join(subdirPath, file);
-
         try {
           const fileStat = await fs.stat(filePath);
           const age = now - fileStat.mtimeMs;
           if (minAge > 0 && age < minAge) {
-            result.skippedYoung++;
+            skippedYoung++;
             continue;
           }
-
-          if (file.endsWith('.partial')) {
-            result.deletedPartials++;
-            result.bytesFreed += fileStat.size;
-            continue;
+          if (!dryRun) {
+            await fs.unlink(filePath);
           }
-
-          if (file.endsWith('.beast2')) {
-            const hash = subdir + file.slice(0, -7);
-            if (reachable.has(hash)) {
-              result.retainedObjects++;
-            } else {
-              result.deletedObjects++;
-              result.bytesFreed += fileStat.size;
-            }
-          }
+          deleted++;
         } catch {
-          // Skip files we can't stat
+          // Skip files we can't stat or delete
         }
       }
     }
   } catch {
-    // Objects directory doesn't exist or can't be read
+    // Objects directory doesn't exist
   }
 
-  return result;
+  return { deleted, skippedYoung };
 }

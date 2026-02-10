@@ -10,15 +10,18 @@ import type {
   RepoStatus,
   RepoMetadata,
   BatchResult,
-  GcMarkResult,
-  GcSweepResult,
-  StorageBackend,
+  GcObjectEntry,
+  GcObjectScanResult,
+  GcRootScanResult,
 } from '../interfaces.js';
+import type { RefStore } from '../interfaces.js';
 import {
   RepoNotFoundError,
   RepoAlreadyExistsError,
   RepoStatusConflictError,
 } from '../../errors.js';
+import { decodeBeast2For } from '@elaraai/east';
+import { WorkspaceStateType } from '@elaraai/e3-types';
 
 /**
  * Metadata file format stored in each repository.
@@ -40,19 +43,13 @@ const METADATA_FILENAME = '.e3-metadata.json';
  */
 export class LocalRepoStore implements RepoStore {
   /**
-   * In-memory cache for reachable sets during GC.
-   * Key: reachableSetRef, Value: Set of reachable hashes
-   */
-  private gcReachableSets = new Map<string, Set<string>>();
-
-  /**
    * Create a new LocalRepoStore.
    * @param reposDir - Parent directory containing repositories
-   * @param storage - Storage backend (for GC that needs object access)
+   * @param refs - RefStore for reading package/workspace/execution refs
    */
   constructor(
     private readonly reposDir: string,
-    private readonly storage: StorageBackend
+    private readonly refs: RefStore
   ) {}
 
   /**
@@ -290,273 +287,115 @@ export class LocalRepoStore implements RepoStore {
   }
 
   // ===========================================================================
-  // GC Phases
+  // GC Primitives
   // ===========================================================================
 
-  async gcMark(repo: string): Promise<GcMarkResult> {
-    const repoPath = this.getRepoPath(repo);
+  // Note: GC primitives receive `repo` as a full path (same as ObjectStore/RefStore),
+  // NOT as a repo name relative to reposDir. This is consistent with how all
+  // storage interfaces work in the local implementation.
 
-    // Collect roots from packages, executions, workspaces
-    const roots = await collectRoots(repoPath);
-
-    // Mark all reachable objects
-    const reachable = new Set<string>();
-    for (const root of roots) {
-      await this.markReachable(repo, root, reachable);
+  async gcScanPackageRoots(repo: string, _cursor?: unknown): Promise<GcRootScanResult> {
+    const roots: string[] = [];
+    const packages = await this.refs.packageList(repo);
+    for (const { name, version } of packages) {
+      const hash = await this.refs.packageResolve(repo, name, version);
+      if (hash) {
+        roots.push(hash);
+      }
     }
-
-    // Store reachable set in memory
-    const refId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    this.gcReachableSets.set(refId, reachable);
-
-    return {
-      reachableCount: reachable.size,
-      rootCount: roots.size,
-      reachableSetRef: refId,
-    };
+    return { roots };
   }
 
-  async gcSweep(
-    repo: string,
-    reachableSetRef: string,
-    options?: { minAge?: number; cursor?: string }
-  ): Promise<GcSweepResult> {
-    const reachable = this.gcReachableSets.get(reachableSetRef);
-    if (!reachable) {
-      throw new Error('Reachable set not found - call gcMark first');
+  async gcScanWorkspaceRoots(repo: string, _cursor?: unknown): Promise<GcRootScanResult> {
+    const roots: string[] = [];
+    const decoder = decodeBeast2For(WorkspaceStateType);
+    const names = await this.refs.workspaceList(repo);
+    for (const name of names) {
+      const data = await this.refs.workspaceRead(repo, name);
+      if (!data || data.length === 0) continue;
+      try {
+        const state = decoder(data);
+        roots.push(state.packageHash);
+        roots.push(state.rootHash);
+      } catch {
+        // Corrupt workspace state - skip
+      }
     }
-
-    const repoPath = this.getRepoPath(repo);
-    const result = await sweep(repoPath, reachable, options?.minAge);
-
-    return {
-      status: 'done',
-      deleted: result.deletedObjects + result.deletedPartials,
-      bytesFreed: result.bytesFreed,
-      skippedYoung: result.skippedYoung,
-    };
+    return { roots };
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async gcCleanup(_repo: string, reachableSetRef: string): Promise<void> {
-    this.gcReachableSets.delete(reachableSetRef);
+  async gcScanExecutionRoots(repo: string, _cursor?: unknown): Promise<GcRootScanResult> {
+    const roots: string[] = [];
+    const entries = await this.refs.executionList(repo);
+    for (const { taskHash, inputsHash } of entries) {
+      const ids = await this.refs.executionListIds(repo, taskHash, inputsHash);
+      for (const executionId of ids) {
+        const status = await this.refs.executionGet(repo, taskHash, inputsHash, executionId);
+        if (!status) continue;
+        // ExecutionStatus is a variant; extract outputHash from success
+        const raw = status as unknown as { type: string; value: { outputHash?: string } };
+        if (raw.type === 'success' && raw.value.outputHash && /^[a-f0-9]{64}$/.test(raw.value.outputHash)) {
+          roots.push(raw.value.outputHash);
+        }
+      }
+    }
+    return { roots };
   }
 
-  /**
-   * Mark all objects reachable from a root hash.
-   */
-  private async markReachable(
-    repo: string,
-    hash: string,
-    reachable: Set<string>
-  ): Promise<void> {
-    if (reachable.has(hash)) {
-      return;
-    }
+  async gcScanObjects(repo: string, _cursor?: unknown): Promise<GcObjectScanResult> {
+    const objectsDir = path.join(repo, 'objects');
+    const objects: GcObjectEntry[] = [];
 
     try {
-      const repoPath = this.getRepoPath(repo);
-      const data = await this.storage.objects.read(repoPath, hash);
-      reachable.add(hash);
-
-      // Scan for hash patterns in the data
-      const dataStr = Buffer.from(data).toString('latin1');
-      const hashPattern = /[a-f0-9]{64}/g;
-      const matches = dataStr.matchAll(hashPattern);
-
-      for (const match of matches) {
-        const potentialHash = match[0];
-        if (!reachable.has(potentialHash)) {
-          await this.markReachable(repo, potentialHash, reachable);
+      const subdirs = await fs.readdir(objectsDir);
+      for (const subdir of subdirs) {
+        if (!/^[a-f0-9]{2}$/.test(subdir)) continue;
+        const subdirPath = path.join(objectsDir, subdir);
+        try {
+          const stat = await fs.stat(subdirPath);
+          if (!stat.isDirectory()) continue;
+        } catch {
+          continue;
+        }
+        const files = await fs.readdir(subdirPath);
+        for (const file of files) {
+          if (file.endsWith('.partial')) continue;
+          if (!file.endsWith('.beast2')) continue;
+          const hash = subdir + file.slice(0, -7); // remove .beast2
+          try {
+            const fileStat = await fs.stat(path.join(subdirPath, file));
+            objects.push({ hash, lastModified: fileStat.mtimeMs, size: fileStat.size });
+          } catch {
+            // Skip files we can't stat
+          }
         }
       }
     } catch {
-      // Object doesn't exist
+      // Objects directory doesn't exist
     }
+
+    // Local returns all in one batch (no cursor)
+    return { objects };
   }
-}
 
-// =============================================================================
-// Helper Functions (extracted from gc.ts for reuse)
-// =============================================================================
+  async gcDeleteObjects(repo: string, hashes: string[]): Promise<void> {
+    const objectsDir = path.join(repo, 'objects');
 
-import { decodeBeast2For } from '@elaraai/east';
-import { WorkspaceStateType } from '@elaraai/e3-types';
-
-/**
- * Collect all root hashes from refs in packages, executions, and workspaces.
- */
-export async function collectRoots(repoPath: string): Promise<Set<string>> {
-  const roots = new Set<string>();
-
-  // Collect from packages/<name>/<version> files
-  const packagesDir = path.join(repoPath, 'packages');
-  await collectRefsFromDir(packagesDir, roots, 2);
-
-  // Collect from executions/<taskHash>/<inputsHash>/output files
-  const executionsDir = path.join(repoPath, 'executions');
-  await collectRefsFromDir(executionsDir, roots, 3);
-
-  // Collect from workspaces/<name>.beast2 files
-  const workspacesDir = path.join(repoPath, 'workspaces');
-  await collectWorkspaceRoots(workspacesDir, roots);
-
-  return roots;
-}
-
-/**
- * Collect root hashes from workspace state files.
- */
-async function collectWorkspaceRoots(
-  workspacesDir: string,
-  roots: Set<string>
-): Promise<void> {
-  try {
-    const entries = await fs.readdir(workspacesDir);
-    for (const entry of entries) {
-      if (!entry.endsWith('.beast2')) continue;
-
-      const stateFile = path.join(workspacesDir, entry);
+    for (const hash of hashes) {
+      const subdir = hash.slice(0, 2);
+      const rest = hash.slice(2);
+      const filePath = path.join(objectsDir, subdir, `${rest}.beast2`);
       try {
-        const data = await fs.readFile(stateFile);
-        if (data.length === 0) continue;
-
-        const decoder = decodeBeast2For(WorkspaceStateType);
-        const state = decoder(data);
-
-        roots.add(state.packageHash);
-        roots.add(state.rootHash);
+        await fs.unlink(filePath);
       } catch {
-        // State file can't be parsed - skip
+        // File doesn't exist
       }
-    }
-  } catch {
-    // Workspaces directory doesn't exist
-  }
-}
-
-/**
- * Recursively collect hashes from ref files in a directory.
- */
-async function collectRefsFromDir(
-  dir: string,
-  roots: Set<string>,
-  maxDepth: number,
-  currentDepth: number = 0
-): Promise<void> {
-  try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const entryPath = path.join(dir, entry.name);
-
-      if (entry.isDirectory() && currentDepth < maxDepth) {
-        await collectRefsFromDir(entryPath, roots, maxDepth, currentDepth + 1);
-      } else if (entry.isFile()) {
-        try {
-          const content = await fs.readFile(entryPath, 'utf-8');
-          const hash = content.trim();
-          if (/^[a-f0-9]{64}$/.test(hash)) {
-            roots.add(hash);
-          }
-        } catch {
-          // Skip files we can't read
-        }
-      }
-    }
-  } catch {
-    // Directory doesn't exist or can't be read
-  }
-}
-
-/**
- * Result of a sweep operation.
- */
-interface SweepResult {
-  deletedObjects: number;
-  deletedPartials: number;
-  retainedObjects: number;
-  skippedYoung: number;
-  bytesFreed: number;
-}
-
-/**
- * Sweep unreachable objects and orphaned staging files.
- */
-export async function sweep(
-  repoPath: string,
-  reachable: Set<string>,
-  minAge: number = 60000
-): Promise<SweepResult> {
-  const objectsDir = path.join(repoPath, 'objects');
-  const now = Date.now();
-  const result: SweepResult = {
-    deletedObjects: 0,
-    deletedPartials: 0,
-    retainedObjects: 0,
-    skippedYoung: 0,
-    bytesFreed: 0,
-  };
-
-  try {
-    const subdirs = await fs.readdir(objectsDir);
-
-    for (const subdir of subdirs) {
-      if (!/^[a-f0-9]{2}$/.test(subdir)) {
-        continue;
-      }
-
-      const subdirPath = path.join(objectsDir, subdir);
-      const stat = await fs.stat(subdirPath);
-      if (!stat.isDirectory()) {
-        continue;
-      }
-
-      const files = await fs.readdir(subdirPath);
-
-      for (const file of files) {
-        const filePath = path.join(subdirPath, file);
-
-        try {
-          const fileStat = await fs.stat(filePath);
-          const age = now - fileStat.mtimeMs;
-          if (minAge > 0 && age < minAge) {
-            result.skippedYoung++;
-            continue;
-          }
-
-          if (file.endsWith('.partial')) {
-            await fs.unlink(filePath);
-            result.deletedPartials++;
-            result.bytesFreed += fileStat.size;
-            continue;
-          }
-
-          if (file.endsWith('.beast2')) {
-            const hash = subdir + file.slice(0, -7);
-            if (reachable.has(hash)) {
-              result.retainedObjects++;
-            } else {
-              await fs.unlink(filePath);
-              result.deletedObjects++;
-              result.bytesFreed += fileStat.size;
-            }
-          }
-        } catch {
-          // Skip files we can't stat or delete
-        }
-      }
-
       // Try to remove empty subdirectory
       try {
-        await fs.rmdir(subdirPath);
+        await fs.rmdir(path.join(objectsDir, subdir));
       } catch {
-        // Directory not empty
+        // Directory not empty or doesn't exist
       }
     }
-  } catch {
-    // Objects directory doesn't exist or can't be read
   }
-
-  return result;
 }

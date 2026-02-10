@@ -192,33 +192,44 @@ describe('InMemoryRepoStore', () => {
     });
   });
 
-  describe('gcMark', () => {
-    it('returns empty mark result (no-op for in-memory)', async () => {
+  describe('gcScanPackageRoots', () => {
+    it('returns empty for in-memory store', async () => {
       await store.create('my-repo');
-      const result = await store.gcMark('my-repo');
-
-      assert.strictEqual(result.reachableCount, 0);
-      assert.strictEqual(result.rootCount, 0);
-      assert.ok(result.reachableSetRef);
+      const result = await store.gcScanPackageRoots('my-repo');
+      assert.deepStrictEqual(result.roots, []);
+      assert.strictEqual(result.cursor, undefined);
     });
   });
 
-  describe('gcSweep', () => {
-    it('returns done immediately (no-op for in-memory)', async () => {
+  describe('gcScanWorkspaceRoots', () => {
+    it('returns empty for in-memory store', async () => {
       await store.create('my-repo');
-      const result = await store.gcSweep('my-repo', 'any-ref');
-
-      assert.strictEqual(result.status, 'done');
-      assert.strictEqual(result.deleted, 0);
-      assert.strictEqual(result.bytesFreed, 0);
-      assert.strictEqual(result.skippedYoung, 0);
+      const result = await store.gcScanWorkspaceRoots('my-repo');
+      assert.deepStrictEqual(result.roots, []);
     });
   });
 
-  describe('gcCleanup', () => {
+  describe('gcScanExecutionRoots', () => {
+    it('returns empty for in-memory store', async () => {
+      await store.create('my-repo');
+      const result = await store.gcScanExecutionRoots('my-repo');
+      assert.deepStrictEqual(result.roots, []);
+    });
+  });
+
+  describe('gcScanObjects', () => {
+    it('returns empty for in-memory store', async () => {
+      await store.create('my-repo');
+      const result = await store.gcScanObjects('my-repo');
+      assert.deepStrictEqual(result.objects, []);
+      assert.strictEqual(result.cursor, undefined);
+    });
+  });
+
+  describe('gcDeleteObjects', () => {
     it('succeeds (no-op for in-memory)', async () => {
       await store.create('my-repo');
-      await store.gcCleanup('my-repo', 'any-ref');
+      await store.gcDeleteObjects('my-repo', ['a'.repeat(64)]);
       // Should not throw
     });
   });
