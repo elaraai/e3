@@ -73,6 +73,10 @@ class InMemoryObjectStore implements ObjectStore {
     return [...this.getRepoObjects(repo).keys()];
   }
 
+  async count(repo: string): Promise<number> {
+    return this.getRepoObjects(repo).size;
+  }
+
   clear(): void {
     this.objects.clear();
   }

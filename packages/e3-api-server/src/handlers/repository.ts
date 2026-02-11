@@ -3,8 +3,6 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import { variant } from '@elaraai/east';
 import { repoGc, packageList, workspaceList } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
@@ -32,19 +30,7 @@ export async function getStatus(
 ): Promise<Response> {
   try {
     // Count objects
-    const objectsDir = path.join(repoPath, 'objects');
-    let objectCount = 0;
-    try {
-      const subdirs = await fs.readdir(objectsDir);
-      for (const subdir of subdirs) {
-        if (subdir.length === 2) {
-          const files = await fs.readdir(path.join(objectsDir, subdir));
-          objectCount += files.length;
-        }
-      }
-    } catch {
-      // objects dir doesn't exist
-    }
+    const objectCount = await storage.objects.count(repoPath);
 
     // Count packages and workspaces
     const packages = await packageList(storage, repoPath);

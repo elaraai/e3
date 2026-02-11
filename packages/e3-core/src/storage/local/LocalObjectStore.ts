@@ -303,4 +303,31 @@ export class LocalObjectStore implements ObjectStore {
 
     return hashes;
   }
+
+  async count(repo: string): Promise<number> {
+    const objectsDir = path.join(repo, 'objects');
+    let count = 0;
+
+    try {
+      const prefixDirs = await fs.readdir(objectsDir);
+
+      for (const prefix of prefixDirs) {
+        if (!/^[a-f0-9]{2}$/.test(prefix)) continue;
+
+        const prefixPath = path.join(objectsDir, prefix);
+        const files = await fs.readdir(prefixPath);
+        for (const file of files) {
+          if (file.endsWith('.beast2') && !file.includes('.partial')) {
+            count++;
+          }
+        }
+      }
+    } catch (err) {
+      if (!isNotFoundError(err)) {
+        throw err;
+      }
+    }
+
+    return count;
+  }
 }

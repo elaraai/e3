@@ -156,6 +156,14 @@ export interface ObjectStore {
    * @returns Array of hashes
    */
   list(repo: string): Promise<string[]>;
+
+  /**
+   * Count objects in the store.
+   * More efficient than list() when only the count is needed.
+   * @param repo - Repository identifier
+   * @returns Number of objects
+   */
+  count(repo: string): Promise<number>;
 }
 
 // =============================================================================
