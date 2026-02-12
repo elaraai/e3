@@ -5,7 +5,7 @@
 
 import { variant, some, none } from '@elaraai/east';
 import {
-  RepositoryNotFoundError,
+  RepoNotFoundError,
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
   WorkspaceExistsError,
@@ -27,8 +27,8 @@ import type { Error } from './types.js';
  * Convert an e3-core error to an API error variant.
  */
 export function errorToVariant(err: unknown): Error {
-  if (err instanceof RepositoryNotFoundError) {
-    return variant('repository_not_found', { repo: err.path });
+  if (err instanceof RepoNotFoundError) {
+    return variant('repository_not_found', { repo: err.repo });
   }
   if (err instanceof WorkspaceNotFoundError) {
     return variant('workspace_not_found', { workspace: err.workspace });

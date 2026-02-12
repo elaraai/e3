@@ -28,15 +28,9 @@ export class E3Error extends Error {
 // Repository Errors
 // =============================================================================
 
-export class RepositoryNotFoundError extends E3Error {
-  constructor(public readonly path: string) {
-    super(`Repository not found at '${path}'`);
-  }
-}
-
 /**
- * Thrown when a repository is not found by name.
- * Used by RepoStore operations (as opposed to RepositoryNotFoundError which uses path).
+ * Thrown when a repository is not found.
+ * Used by StorageBackend.validateRepository() and RepoStore operations.
  */
 export class RepoNotFoundError extends E3Error {
   constructor(public readonly repo: string) {

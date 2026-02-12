@@ -182,14 +182,14 @@ export function coreStatusToApiStatus(status: DataflowExecutionStatus): ApiExecu
  *
  * @param state - The e3-core execution state
  * @param events - Events to include (already filtered by offset/limit)
- * @param totalEvents - Total number of events for pagination
+ * @param totalApiEvents - Total number of API-visible events (for pagination)
  * @param duration - Total execution duration in milliseconds
  * @returns API-compatible execution state
  */
 export function coreStateToApiState(
   state: DataflowExecutionState,
   events: ExecutionEvent[],
-  totalEvents: number,
+  totalApiEvents: number,
   duration: number
 ): ApiExecutionState {
   // Convert events, filtering out those without API equivalents
@@ -224,6 +224,6 @@ export function coreStateToApiState(
     completedAt: completedAtValue,
     summary,
     events: apiEvents,
-    totalEvents: BigInt(totalEvents),
+    totalEvents: BigInt(totalApiEvents),
   };
 }

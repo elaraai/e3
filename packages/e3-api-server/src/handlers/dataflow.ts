@@ -287,23 +287,28 @@ export async function getDataflowExecution(
   // Find the latest execution for this workspace
   const handle = await getLatestExecution(repoPath, workspace);
   if (!handle) {
-    return sendError(DataflowExecutionStateType, variant('internal', {
-      message: 'No execution found for this workspace',
+    return sendError(DataflowExecutionStateType, variant('execution_not_found', {
+      task: workspace,
     }));
   }
 
   // Read execution state
   const coreState = await stateStore.read(repoPath, workspace, handle.id);
   if (!coreState) {
-    return sendError(DataflowExecutionStateType, variant('internal', {
-      message: 'No execution found for this workspace',
+    return sendError(DataflowExecutionStateType, variant('execution_not_found', {
+      task: workspace,
     }));
   }
 
-  // Get events with offset/limit from inline events array
+  // Count total API-visible events, then slice for pagination
   const offset = options.offset ?? 0;
   const allEvents = coreState.events;
-  const totalEvents = allEvents.length;
+  let totalApiEvents = 0;
+  for (const event of allEvents) {
+    if (coreEventToApiEvent(event) !== null) {
+      totalApiEvents++;
+    }
+  }
 
   // Apply offset and limit
   let events = allEvents.slice(offset);
@@ -311,7 +316,7 @@ export async function getDataflowExecution(
     events = events.slice(0, options.limit);
   }
 
-  // Convert events to API format
+  // Convert page events to API format
   const apiEvents: DataflowExecutionState['events'] = [];
   for (const event of events) {
     const apiEvent = coreEventToApiEvent(event);
@@ -410,7 +415,7 @@ export async function getDataflowExecution(
     completedAt: completedAtValue,
     summary,
     events: apiEvents,
-    totalEvents: BigInt(totalEvents),
+    totalEvents: BigInt(totalApiEvents),
   };
 
   return sendSuccess(DataflowExecutionStateType, state);

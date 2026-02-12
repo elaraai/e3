@@ -5,7 +5,7 @@
 
 import { none } from '@elaraai/east';
 import { computeHash } from '../../objects.js';
-import { ObjectNotFoundError, RepositoryNotFoundError } from '../../errors.js';
+import { ObjectNotFoundError, RepoNotFoundError } from '../../errors.js';
 import type { ExecutionStatus, DataflowRun } from '@elaraai/e3-types';
 import type {
   StorageBackend,
@@ -417,7 +417,7 @@ export class InMemoryStorage implements StorageBackend {
 
   async validateRepository(repo: string): Promise<void> {
     if (!(await this.repos.exists(repo))) {
-      throw new RepositoryNotFoundError(repo);
+      throw new RepoNotFoundError(repo);
     }
   }
 

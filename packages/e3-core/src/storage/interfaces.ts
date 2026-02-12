@@ -651,7 +651,7 @@ export interface StorageBackend {
   /**
    * Validate that a repository exists and is properly structured.
    * @param repo - Repository identifier (path to e3 repository directory for local storage)
-   * @throws {RepositoryNotFoundError} If repository doesn't exist or is invalid
+   * @throws {RepoNotFoundError} If repository doesn't exist or is invalid
    */
   validateRepository(repo: string): Promise<void>;
 }

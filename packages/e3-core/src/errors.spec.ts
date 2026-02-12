@@ -11,7 +11,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
   E3Error,
-  RepositoryNotFoundError,
+  RepoNotFoundError,
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
   WorkspaceExistsError,
@@ -52,15 +52,15 @@ describe('errors', () => {
     });
   });
 
-  describe('RepositoryNotFoundError', () => {
-    it('includes path in message', () => {
-      const err = new RepositoryNotFoundError('/path/to/repo');
-      assert.ok(err.message.includes('/path/to/repo'));
-      assert.strictEqual(err.path, '/path/to/repo');
+  describe('RepoNotFoundError', () => {
+    it('includes repo name in message', () => {
+      const err = new RepoNotFoundError('my-repo');
+      assert.ok(err.message.includes('my-repo'));
+      assert.strictEqual(err.repo, 'my-repo');
     });
 
     it('is instanceof E3Error', () => {
-      const err = new RepositoryNotFoundError('/path');
+      const err = new RepoNotFoundError('my-repo');
       assert.ok(err instanceof E3Error);
     });
   });

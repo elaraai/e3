@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve, type ServerType } from '@hono/node-server';
-import { LocalStorage, RepositoryNotFoundError, RepoAlreadyExistsError, RepoNotFoundError } from '@elaraai/e3-core';
+import { LocalStorage, RepoAlreadyExistsError, RepoNotFoundError } from '@elaraai/e3-core';
 import type { StorageBackend } from '@elaraai/e3-core';
 import { createAuthMiddleware, type AuthConfig } from './middleware/auth.js';
 import { createOidcProvider, type OidcProvider, type OidcConfig } from './auth/index.js';
@@ -215,7 +215,7 @@ export async function createServer(config: ServerConfig): Promise<Server> {
       try {
         await storage.validateRepository(repoPath);
       } catch (err) {
-        if (err instanceof RepositoryNotFoundError) {
+        if (err instanceof RepoNotFoundError) {
           return sendError(NullType, variant('repository_not_found', { repo }));
         }
         throw err;

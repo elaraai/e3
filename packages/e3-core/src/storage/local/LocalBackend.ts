@@ -11,7 +11,17 @@ import { LocalRefStore } from './LocalRefStore.js';
 import { LocalLockService } from './LocalLockService.js';
 import { LocalLogStore } from './LocalLogStore.js';
 import { LocalRepoStore } from './LocalRepoStore.js';
-import { RepositoryNotFoundError } from '../../errors.js';
+import { RepoNotFoundError } from '../../errors.js';
+
+/**
+ * Thrown when a local repository directory is not found or is missing required structure.
+ * This is an internal error for LocalStorage — external consumers see RepoNotFoundError.
+ */
+class RepoDirNotFoundError extends RepoNotFoundError {
+  constructor(public readonly path: string) {
+    super(path);
+  }
+}
 
 /**
  * Local filesystem implementation of StorageBackend.
@@ -72,7 +82,7 @@ export class LocalStorage implements StorageBackend {
   /**
    * Validate that a repository exists and is properly structured.
    * @param repo - Path to the e3 repository directory
-   * @throws {RepositoryNotFoundError} If repository doesn't exist or is invalid
+   * @throws {RepoNotFoundError} If repository doesn't exist or is invalid
    */
   async validateRepository(repo: string): Promise<void> {
     const requiredDirs = ['objects', 'packages', 'workspaces', 'executions'];
@@ -80,7 +90,7 @@ export class LocalStorage implements StorageBackend {
       try {
         await fs.access(path.join(repo, dir));
       } catch {
-        throw new RepositoryNotFoundError(repo);
+        throw new RepoDirNotFoundError(repo);
       }
     }
   }

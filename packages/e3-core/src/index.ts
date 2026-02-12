@@ -260,7 +260,6 @@ export {
   // Base
   E3Error,
   // Repository
-  RepositoryNotFoundError,
   RepoNotFoundError,
   RepoAlreadyExistsError,
   RepoStatusConflictError,
