@@ -34,10 +34,10 @@
     "directory": "packages/e3-cli"
   },
   "dependencies": {
-    "@elaraai/e3": "^0.0.2-beta.28",
-    "@elaraai/e3-api-client": "^0.0.2-beta.28",
-    "@elaraai/e3-core": "^0.0.2-beta.28",
-    "@elaraai/e3-types": "^0.0.2-beta.28",
+    "@elaraai/e3": "*",
+    "@elaraai/e3-api-client": "*",
+    "@elaraai/e3-core": "*",
+    "@elaraai/e3-types": "*",
     "commander": "^12.0.0",
     "esbuild": "^0.27.2"
   },

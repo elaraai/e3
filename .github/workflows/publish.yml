@@ -213,52 +213,6 @@ jobs:
           fi
           echo "new_version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
-      # Update workspace dependencies before publish
-      - name: Update workspace dependencies
-        run: |
-          E3_TYPES_VERSION=$(node -p "require('./packages/e3-types/package.json').version")
-          E3_VERSION=$(node -p "require('./packages/e3/package.json').version")
-          E3_CORE_VERSION=$(node -p "require('./packages/e3-core/package.json').version")
-          E3_API_CLIENT_VERSION=$(node -p "require('./packages/e3-api-client/package.json').version")
-          E3_CLI_VERSION=$(node -p "require('./packages/e3-cli/package.json').version")
-
-          # e3 depends on e3-types
-          cd packages/e3
-          npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
-          cd ../..
-
-          # e3-core depends on e3 and e3-types
-          cd packages/e3-core
-          npm pkg set "dependencies.@elaraai/e3=^${E3_VERSION}"
-          npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
-          cd ../..
-
-          # e3-api-client depends on e3-types
-          cd packages/e3-api-client
-          npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
-          cd ../..
-
-          # e3-cli depends on e3, e3-core, e3-api-client and e3-types
-          cd packages/e3-cli
-          npm pkg set "dependencies.@elaraai/e3=^${E3_VERSION}"
-          npm pkg set "dependencies.@elaraai/e3-core=^${E3_CORE_VERSION}"
-          npm pkg set "dependencies.@elaraai/e3-api-client=^${E3_API_CLIENT_VERSION}"
-          npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
-          cd ../..
-
-          # e3-api-server depends on e3-core and e3-types
-          cd packages/e3-api-server
-          npm pkg set "dependencies.@elaraai/e3-core=^${E3_CORE_VERSION}"
-          npm pkg set "dependencies.@elaraai/e3-types=^${E3_TYPES_VERSION}"
-          cd ../..
-
-          # e3-api-tests depends on e3-api-client, e3-cli and e3
-          cd packages/e3-api-tests
-          npm pkg set "dependencies.@elaraai/e3-api-client=^${E3_API_CLIENT_VERSION}"
-          npm pkg set "dependencies.@elaraai/e3-cli=^${E3_CLI_VERSION}"
-          npm pkg set "dependencies.@elaraai/e3=^${E3_VERSION}"
-          cd ../..
-
       # Commit all version bumps
       - name: Commit version bumps
         run: |
