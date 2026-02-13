@@ -39,10 +39,10 @@
     "@elaraai/e3-types": "^0.0.2-beta.28"
   },
   "peerDependencies": {
-    "@elaraai/east": "^0.0.1-beta.31"
+    "@elaraai/east": "beta"
   },
   "devDependencies": {
-    "@elaraai/east-node-std": "^0.0.1-beta.23",
+    "@elaraai/east-node-std": "beta",
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.47.0",
     "@typescript-eslint/parser": "^8.47.0",

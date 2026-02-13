@@ -2,6 +2,8 @@ name: Update Dependencies
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1' # weekly Monday
 
 jobs:
   update-deps:
@@ -38,102 +40,48 @@ jobs:
         with:
           node-version: 22.x
           registry-url: 'https://registry.npmjs.org'
-          # Note: npm caching disabled - we need fresh install after version updates
 
-      - name: Check for @elaraai/east updates
-        id: check_east
+      - name: Update dependencies
+        id: update
         run: |
-          # Get current version from e3 package (canonical source)
-          CURRENT_VERSION=$(node -p "require('./packages/e3/package.json').peerDependencies['@elaraai/east']" | sed 's/\^//')
-          echo "current_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          EAST_BEFORE=$(node -p "require('./package-lock.json').packages['node_modules/@elaraai/east'].version")
+          STD_BEFORE=$(node -p "try { require('./package-lock.json').packages['node_modules/@elaraai/east-node-std'].version } catch { 'N/A' }")
 
-          # Get latest version from npm (check both latest and beta tags)
-          LATEST_STABLE=$(npm view @elaraai/east version 2>/dev/null || echo "")
-          LATEST_BETA=$(npm view @elaraai/east dist-tags.beta 2>/dev/null || echo "")
+          npm update @elaraai/east @elaraai/east-node-std
 
-          # Determine which version to use based on current version
-          if [[ "$CURRENT_VERSION" == *"beta"* ]]; then
-            LATEST_VERSION="${LATEST_BETA}"
-          else
-            LATEST_VERSION="${LATEST_STABLE}"
-          fi
+          EAST_AFTER=$(node -p "require('./package-lock.json').packages['node_modules/@elaraai/east'].version")
+          STD_AFTER=$(node -p "try { require('./package-lock.json').packages['node_modules/@elaraai/east-node-std'].version } catch { 'N/A' }")
 
-          echo "latest_version=${LATEST_VERSION}" >> $GITHUB_OUTPUT
+          echo "east_before=${EAST_BEFORE}" >> $GITHUB_OUTPUT
+          echo "east_after=${EAST_AFTER}" >> $GITHUB_OUTPUT
+          echo "std_before=${STD_BEFORE}" >> $GITHUB_OUTPUT
+          echo "std_after=${STD_AFTER}" >> $GITHUB_OUTPUT
 
-          if [[ -n "$LATEST_VERSION" && "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
-            echo "has_updates=true" >> $GITHUB_OUTPUT
-            echo "@elaraai/east: $CURRENT_VERSION -> $LATEST_VERSION"
-          else
+          if git diff --quiet package-lock.json; then
             echo "has_updates=false" >> $GITHUB_OUTPUT
-            echo "@elaraai/east: already on $CURRENT_VERSION"
-          fi
-
-      - name: Check for @elaraai/east-node-std updates
-        id: check_east_node_std
-        run: |
-          # Get current version from e3-api-client (uses east-node-std for testing)
-          CURRENT_VERSION=$(node -p "require('./packages/e3-api-client/package.json').devDependencies['@elaraai/east-node-std']" | sed 's/\^//')
-          echo "current_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
-
-          # Get latest version from npm
-          LATEST_STABLE=$(npm view @elaraai/east-node-std version 2>/dev/null || echo "")
-          LATEST_BETA=$(npm view @elaraai/east-node-std dist-tags.beta 2>/dev/null || echo "")
-
-          if [[ "$CURRENT_VERSION" == *"beta"* ]]; then
-            LATEST_VERSION="${LATEST_BETA}"
+            echo "Already on latest: east=${EAST_BEFORE}, east-node-std=${STD_BEFORE}"
           else
-            LATEST_VERSION="${LATEST_STABLE}"
-          fi
-
-          echo "latest_version=${LATEST_VERSION}" >> $GITHUB_OUTPUT
-
-          if [[ -n "$LATEST_VERSION" && "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
             echo "has_updates=true" >> $GITHUB_OUTPUT
-            echo "@elaraai/east-node-std: $CURRENT_VERSION -> $LATEST_VERSION"
-          else
-            echo "has_updates=false" >> $GITHUB_OUTPUT
-            echo "@elaraai/east-node-std: already on $CURRENT_VERSION"
-          fi
-
-      - name: Check if any updates available
-        id: has_any_updates
-        run: |
-          if [[ "${{ steps.check_east.outputs.has_updates }}" == "true" || "${{ steps.check_east_node_std.outputs.has_updates }}" == "true" ]]; then
-            echo "has_updates=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_updates=false" >> $GITHUB_OUTPUT
-            echo "No updates available"
+            echo "Updates available: east ${EAST_BEFORE} -> ${EAST_AFTER}, east-node-std ${STD_BEFORE} -> ${STD_AFTER}"
           fi
 
       - name: Create update branch
-        if: steps.has_any_updates.outputs.has_updates == 'true'
+        if: steps.update.outputs.has_updates == 'true'
         run: |
-          BRANCH_NAME="deps/east-updates-$(date +%Y%m%d)"
+          BRANCH_NAME="deps/east-${{ steps.update.outputs.east_after }}"
           git checkout -b "$BRANCH_NAME"
           echo "branch_name=${BRANCH_NAME}" >> $GITHUB_ENV
 
-      - name: Update @elaraai/east
-        if: steps.check_east.outputs.has_updates == 'true'
-        run: make set-east-version VERSION=${{ steps.check_east.outputs.latest_version }}
-
-      - name: Update @elaraai/east-node-std
-        if: steps.check_east_node_std.outputs.has_updates == 'true'
-        run: make set-east-node-std-version VERSION=${{ steps.check_east_node_std.outputs.latest_version }}
-
-      - name: Install dependencies
-        if: steps.has_any_updates.outputs.has_updates == 'true'
-        run: npm install
-
       - name: Build
-        if: steps.has_any_updates.outputs.has_updates == 'true'
+        if: steps.update.outputs.has_updates == 'true'
         run: npm run build
 
       - name: Link e3 CLI
-        if: steps.has_any_updates.outputs.has_updates == 'true'
+        if: steps.update.outputs.has_updates == 'true'
         run: make link
 
       - name: Install East runners
-        if: steps.has_any_updates.outputs.has_updates == 'true'
+        if: steps.update.outputs.has_updates == 'true'
         run: |
           npm install -g @elaraai/east-node-cli
           curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -141,19 +89,19 @@ jobs:
           cd east-py && make install-cli
 
       - name: Run linter
-        if: steps.has_any_updates.outputs.has_updates == 'true'
+        if: steps.update.outputs.has_updates == 'true'
         id: lint
         run: npm run lint
         continue-on-error: true
 
       - name: Run tests
-        if: steps.has_any_updates.outputs.has_updates == 'true'
+        if: steps.update.outputs.has_updates == 'true'
         id: test
         run: npm test
         continue-on-error: true
 
       - name: Determine test status
-        if: steps.has_any_updates.outputs.has_updates == 'true'
+        if: steps.update.outputs.has_updates == 'true'
         id: test_status
         run: |
           if [[ "${{ steps.lint.outcome }}" == "success" && "${{ steps.test.outcome }}" == "success" ]]; then
@@ -167,59 +115,39 @@ jobs:
           fi
 
       - name: Commit and push
-        if: steps.has_any_updates.outputs.has_updates == 'true'
+        if: steps.update.outputs.has_updates == 'true'
         run: |
-          git add -A
-
-          # Build commit message
-          MSG="deps: update elaraai packages"
-          DETAILS=""
-          if [[ "${{ steps.check_east.outputs.has_updates }}" == "true" ]]; then
-            DETAILS="${DETAILS}\n- @elaraai/east: ${{ steps.check_east.outputs.current_version }} -> ${{ steps.check_east.outputs.latest_version }}"
-          fi
-          if [[ "${{ steps.check_east_node_std.outputs.has_updates }}" == "true" ]]; then
-            DETAILS="${DETAILS}\n- @elaraai/east-node-std: ${{ steps.check_east_node_std.outputs.current_version }} -> ${{ steps.check_east_node_std.outputs.latest_version }}"
-          fi
-
-          git commit -m "$MSG" -m "$(echo -e "$DETAILS")"
+          git add package-lock.json
+          git commit -m "deps: update @elaraai packages (east ${{ steps.update.outputs.east_after }}, east-node-std ${{ steps.update.outputs.std_after }})"
           git push -u --force origin "${{ env.branch_name }}"
 
       - name: Create Pull Request
-        if: steps.has_any_updates.outputs.has_updates == 'true'
+        if: steps.update.outputs.has_updates == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          # Create label if it doesn't exist
           gh label create dependencies --color 0366d6 --description "Dependency updates" 2>/dev/null || true
 
-          # Check if PR already exists for this branch
           EXISTING_PR=$(gh pr list --head "${{ env.branch_name }}" --json number --jq '.[0].number' 2>/dev/null || echo "")
 
           PR_TITLE="${{ steps.test_status.outputs.emoji }} deps: update @elaraai packages"
           PR_BODY="## Dependency Updates
 
-          | Package | Current | Latest |
-          |---------|---------|--------|
-          | \`@elaraai/east\` | \`${{ steps.check_east.outputs.current_version }}\` | \`${{ steps.check_east.outputs.latest_version }}\` |
-          | \`@elaraai/east-node-std\` | \`${{ steps.check_east_node_std.outputs.current_version }}\` | \`${{ steps.check_east_node_std.outputs.latest_version }}\` |
+          | Package | Before | After |
+          |---------|--------|-------|
+          | \`@elaraai/east\` | \`${{ steps.update.outputs.east_before }}\` | \`${{ steps.update.outputs.east_after }}\` |
+          | \`@elaraai/east-node-std\` | \`${{ steps.update.outputs.std_before }}\` | \`${{ steps.update.outputs.std_after }}\` |
 
-          ### Test Status: ${{ steps.test_status.outputs.emoji }} ${{ steps.test_status.outputs.message }}
+          ### Status: ${{ steps.test_status.outputs.emoji }} ${{ steps.test_status.outputs.message }}
 
           - Lint: ${{ steps.lint.outcome }}
           - Tests: ${{ steps.test.outcome }}
-
-          ### Checklist
-          - [${{ steps.test_status.outputs.passed == 'true' && 'x' || ' ' }}] CI tests pass
-          - [ ] Manual testing if needed
-          - [ ] Ready to merge
 
           ---
           *This PR was automatically generated by the update-deps workflow.*"
 
           if [[ -n "$EXISTING_PR" ]]; then
-            echo "Updating existing PR #${EXISTING_PR}"
             gh pr edit "$EXISTING_PR" --title "$PR_TITLE" --body "$PR_BODY"
           else
-            echo "Creating new PR"
             gh pr create --title "$PR_TITLE" --body "$PR_BODY" --label "dependencies" --head "${{ env.branch_name }}"
           fi

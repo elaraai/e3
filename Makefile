@@ -1,7 +1,7 @@
 # e3 - East Execution Engine
 # Top-level Makefile for building all components
 
-.PHONY: all build test clean install dev help lint link unlink fuzz fuzz-quick fuzz-stress fuzz-build set-east-version
+.PHONY: all build test clean install dev help lint link unlink fuzz fuzz-quick fuzz-stress fuzz-build
 
 # Default target
 all: build
@@ -106,23 +106,3 @@ fuzz-stress: fuzz-build
 	@echo "Running stress fuzz tests..."
 	npm run fuzz:stress --workspace=e3-fuzz
 
-
-# Update @elaraai/east version across all packages
-# Usage: make set-east-version VERSION=0.0.1-beta.1
-set-east-version:
-ifndef VERSION
-	$(error VERSION is required. Usage: make set-east-version VERSION=0.0.1-beta.1)
-endif
-	@echo "Updating @elaraai/east to version $(VERSION)..."
-	@find . -name "package.json" -exec sed -i 's/"@elaraai\/east": "[^"]*"/"@elaraai\/east": "^$(VERSION)"/g' {} \;
-	@echo "Done. Run 'npm install' to update dependencies."
-
-# Update @elaraai/east-node-std version across all packages
-# Usage: make set-east-node-std-version VERSION=0.0.1-beta.1
-set-east-node-std-version:
-ifndef VERSION
-	$(error VERSION is required. Usage: make set-east-node-std-version VERSION=0.0.1-beta.1)
-endif
-	@echo "Updating @elaraai/east-node-std to version $(VERSION)..."
-	@find . -name "package.json" -exec sed -i 's/"@elaraai\/east-node-std": "[^"]*"/"@elaraai\/east-node-std": "^$(VERSION)"/g' {} \;
-	@echo "Done. Run 'npm install' to update dependencies."
