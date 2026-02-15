@@ -1,6 +1,6 @@
 {
   "name": "@elaraai/e3-api-server",
-  "version": "0.0.2-beta.29",
+  "version": "0.0.2-beta.30",
   "type": "module",
   "description": "East Execution Engine API Server - HTTP server exposing e3-core operations",
   "main": "dist/src/index.js",
