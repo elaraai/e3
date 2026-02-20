@@ -9,7 +9,7 @@
  * Tests: import, list, get, export, remove
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
@@ -22,38 +22,37 @@ import {
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
+import type { TestSetup } from '../setup.js';
 import { createPackageZip } from '../fixtures.js';
 
 /**
  * Register package operation tests.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  */
-export function packageTests(getContext: () => TestContext): void {
-  describe('packages', () => {
-    let packageZipPath: string;
-    let packageZip: Uint8Array;
+export function packageTests(setup: TestSetup<TestContext>): void {
+  const withPackageZip: TestSetup<TestContext & { packageZip: Uint8Array }> = async (t) => {
+    const ctx = await setup(t);
+    const zipPath = await createPackageZip(ctx.tempDir, 'test-pkg', '1.0.0');
+    const packageZip = readFileSync(zipPath);
+    return Object.assign(ctx, { packageZip });
+  };
 
-    beforeEach(async () => {
-      const ctx = getContext();
-      packageZipPath = await createPackageZip(ctx.tempDir, 'test-pkg', '1.0.0');
-      packageZip = readFileSync(packageZipPath);
-    });
-
-    it('packageList returns empty initially', async () => {
-      const ctx = getContext();
+  describe('packages', { concurrency: true }, () => {
+    it('packageList returns empty initially', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
 
       const packages = await packageList(ctx.config.baseUrl, ctx.repoName, opts);
       assert.deepStrictEqual(packages, []);
     });
 
-    it('packageImport and packageList round-trip', async () => {
-      const ctx = getContext();
+    it('packageImport and packageList round-trip', async (t) => {
+      const ctx = await withPackageZip(t);
       const opts = await ctx.opts();
 
       // Import
-      const result = await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+      const result = await packageImport(ctx.config.baseUrl, ctx.repoName, ctx.packageZip, opts);
       assert.strictEqual(result.name, 'test-pkg');
       assert.strictEqual(result.version, '1.0.0');
       assert.strictEqual(result.packageHash.length, 64); // SHA256 hex
@@ -66,11 +65,11 @@ export function packageTests(getContext: () => TestContext): void {
       assert.strictEqual(packages[0].version, '1.0.0');
     });
 
-    it('packageGet returns package object', async () => {
-      const ctx = getContext();
+    it('packageGet returns package object', async (t) => {
+      const ctx = await withPackageZip(t);
       const opts = await ctx.opts();
 
-      await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+      await packageImport(ctx.config.baseUrl, ctx.repoName, ctx.packageZip, opts);
 
       const pkg = await packageGet(ctx.config.baseUrl, ctx.repoName, 'test-pkg', '1.0.0', opts);
       // PackageObject has tasks Map with our 'compute' task
@@ -79,11 +78,11 @@ export function packageTests(getContext: () => TestContext): void {
       assert.ok(pkg.tasks.has('compute'));
     });
 
-    it('packageExport returns zip bytes', async () => {
-      const ctx = getContext();
+    it('packageExport returns zip bytes', async (t) => {
+      const ctx = await withPackageZip(t);
       const opts = await ctx.opts();
 
-      await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+      await packageImport(ctx.config.baseUrl, ctx.repoName, ctx.packageZip, opts);
 
       const exported = await packageExport(ctx.config.baseUrl, ctx.repoName, 'test-pkg', '1.0.0', opts);
       assert.ok(exported instanceof Uint8Array);
@@ -93,11 +92,11 @@ export function packageTests(getContext: () => TestContext): void {
       assert.strictEqual(exported[1], 0x4b); // 'K'
     });
 
-    it('packageRemove deletes package', async () => {
-      const ctx = getContext();
+    it('packageRemove deletes package', async (t) => {
+      const ctx = await withPackageZip(t);
       const opts = await ctx.opts();
 
-      await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+      await packageImport(ctx.config.baseUrl, ctx.repoName, ctx.packageZip, opts);
 
       // Verify exists
       let packages = await packageList(ctx.config.baseUrl, ctx.repoName, opts);

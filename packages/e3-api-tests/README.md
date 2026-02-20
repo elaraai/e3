@@ -10,31 +10,31 @@ npm install @elaraai/e3-api-tests
 
 ## Usage
 
+Each test receives a fresh, isolated context via a `TestSetup<T>` factory, enabling concurrent execution:
+
 ```typescript
-import { describe, before, after } from 'node:test';
+import { describe, after } from 'node:test';
 import { createServer } from '@elaraai/e3-api-server';
-import { allApiTests, createTestContext, type TestContext } from '@elaraai/e3-api-tests';
+import { allApiTests, createTestContext, type TestSetup, type TestContext } from '@elaraai/e3-api-tests';
 
-describe('API compliance', () => {
-  let server: Server;
-  let context: TestContext;
+// Shared server (one per test run)
+const server = await createServer({ reposDir: tempDir, port: 0 });
+await server.start();
 
-  before(async () => {
-    server = await createServer({ reposDir: tempDir, port: 0 });
-    await server.start();
-    context = await createTestContext({
-      baseUrl: `http://localhost:${server.port}`,
-      getToken: async () => '',  // No auth for local server
-    });
+// Per-test setup: creates a fresh repo + context
+const setup: TestSetup<TestContext> = async (t) => {
+  const ctx = await createTestContext({
+    baseUrl: `http://localhost:${server.port}`,
+    getToken: async () => '',
+    cleanup: true,
   });
+  t.after(() => ctx.cleanup());
+  return ctx;
+};
 
-  after(async () => {
-    await context.cleanup();
-    await server.stop();
-  });
-
-  // Registers all API test suites
-  allApiTests(() => context);
+describe('API compliance', { concurrency: true }, () => {
+  after(() => server.stop());
+  allApiTests(setup);
 });
 ```
 
@@ -42,6 +42,7 @@ describe('API compliance', () => {
 
 | Export | Description |
 |--------|-------------|
+| `TestSetup<T>` | Type for per-test context factory: `(t: TestContext) => Promise<T>` |
 | `createTestContext` | Create test context with helpers for setup/teardown |
 | `allApiTests` | Register all API test suites (repository, packages, workspaces, datasets, dataflow) |
 | `allTests` | Register all tests including CLI tests (requires credentials env) |
@@ -52,6 +53,7 @@ describe('API compliance', () => {
 | `dataflowTests` | Dataflow execution tests |
 | `platformTests` | Platform capability tests |
 | `cliTests` | CLI integration tests |
+| `transferTests` | Cross-repository transfer tests |
 | `createPackageZip` | Create a test package zip file |
 | `runE3Command` | Run an e3 CLI command |
 

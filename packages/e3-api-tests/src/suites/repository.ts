@@ -24,16 +24,17 @@ import {
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
+import type { TestSetup } from '../setup.js';
 
 /**
  * Register repository operation tests.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  */
-export function repositoryTests(getContext: () => TestContext): void {
-  describe('repository', () => {
-    it('repoStatus returns repository info', async () => {
-      const ctx = getContext();
+export function repositoryTests(setup: TestSetup<TestContext>): void {
+  describe('repository', { concurrency: true }, () => {
+    it('repoStatus returns repository info', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
 
       const status = await repoStatus(ctx.config.baseUrl, ctx.repoName, opts);
@@ -44,8 +45,8 @@ export function repositoryTests(getContext: () => TestContext): void {
       assert.ok(typeof status.workspaceCount === 'bigint');
     });
 
-    it('repoGc with dryRun returns stats', async () => {
-      const ctx = getContext();
+    it('repoGc with dryRun returns stats', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
 
       const result = await repoGc(
@@ -63,8 +64,8 @@ export function repositoryTests(getContext: () => TestContext): void {
       assert.ok(result.bytesFreed >= 0n);
     });
 
-    it('repoGc runs garbage collection', async () => {
-      const ctx = getContext();
+    it('repoGc runs garbage collection', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
 
       // Import a package then remove it to create garbage
@@ -88,8 +89,8 @@ export function repositoryTests(getContext: () => TestContext): void {
       assert.ok(typeof result.skippedYoung === 'bigint', 'skippedYoung should be reported');
     });
 
-    it('repoGc retains execution outputs after dataflow', async () => {
-      const ctx = getContext();
+    it('repoGc retains execution outputs after dataflow', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
 
       // Import package, create workspace, deploy, run dataflow
@@ -126,8 +127,8 @@ export function repositoryTests(getContext: () => TestContext): void {
         'object count should be unchanged after GC');
     });
 
-    it('repoCreate creates a new repository', async () => {
-      const ctx = getContext();
+    it('repoCreate creates a new repository', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
       const newRepoName = `create-test-${Date.now()}`;
 
@@ -149,8 +150,8 @@ export function repositoryTests(getContext: () => TestContext): void {
       }
     });
 
-    it('repoRemove removes an existing repository', async () => {
-      const ctx = getContext();
+    it('repoRemove removes an existing repository', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
       const tempRepoName = `remove-test-${Date.now()}`;
 
@@ -169,8 +170,8 @@ export function repositoryTests(getContext: () => TestContext): void {
       await repoRemove(ctx.config.baseUrl, tempRepoName, opts); // Clean up
     });
 
-    it('repoList returns array containing test repository', async () => {
-      const ctx = getContext();
+    it('repoList returns array containing test repository', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
 
       const repos = await repoList(ctx.config.baseUrl, opts);
@@ -186,8 +187,8 @@ export function repositoryTests(getContext: () => TestContext): void {
       assert.ok(repos.includes(ctx.repoName), `test repo '${ctx.repoName}' should be in the list`);
     });
 
-    it('repoList includes newly created repository', async () => {
-      const ctx = getContext();
+    it('repoList includes newly created repository', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
       const newRepoName = `list-test-${Date.now()}`;
 

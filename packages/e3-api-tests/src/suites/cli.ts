@@ -9,12 +9,13 @@
  * Tests CLI commands against remote URLs.
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { TestContext } from '../context.js';
+import type { TestSetup } from '../setup.js';
 import { runE3Command } from '../cli.js';
 import { createPackageZip } from '../fixtures.js';
 
@@ -23,26 +24,31 @@ import { createPackageZip } from '../fixtures.js';
  *
  * These tests run CLI commands against a remote URL and verify output.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  * @param getCredentialsEnv - Function that returns env vars for auth (E3_CREDENTIALS_PATH, etc.)
  */
 export function cliTests(
-  getContext: () => TestContext,
+  setup: TestSetup<TestContext>,
   getCredentialsEnv: () => Record<string, string>
 ): void {
-  describe('cli', () => {
-    let remoteUrl: string;
-    let workDir: string;
+  const withCli: TestSetup<TestContext & { remoteUrl: string; workDir: string }> = async (t) => {
+    const ctx = await setup(t);
+    const remoteUrl = `${ctx.config.baseUrl}/repos/${ctx.repoName}`;
+    const workDir = join(ctx.tempDir, 'cli-work');
+    mkdirSync(workDir, { recursive: true });
+    return Object.assign(ctx, { remoteUrl, workDir });
+  };
 
-    beforeEach(async () => {
-      const ctx = getContext();
-      remoteUrl = `${ctx.config.baseUrl}/repos/${ctx.repoName}`;
-      workDir = join(ctx.tempDir, 'cli-work');
-      mkdirSync(workDir, { recursive: true });
-    });
+  const withCliPackage: TestSetup<TestContext & { remoteUrl: string; workDir: string; packageZipPath: string }> = async (t) => {
+    const c = await withCli(t);
+    const packageZipPath = await createPackageZip(c.tempDir, 'cli-test-pkg', '1.0.0');
+    return Object.assign(c, { packageZipPath });
+  };
 
-    describe('repo commands', () => {
-      it('repo status via remote URL', async () => {
+  describe('cli', { concurrency: true }, () => {
+    describe('repo commands', { concurrency: true }, () => {
+      it('repo status via remote URL', async (t) => {
+        const { remoteUrl, workDir } = await withCli(t);
         const result = await runE3Command(['repo', 'status', remoteUrl], workDir, { env: getCredentialsEnv() });
 
         assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
@@ -52,7 +58,8 @@ export function cliTests(
         assert.match(result.stdout, /Workspaces:/);
       });
 
-      it('repo gc via remote URL', async () => {
+      it('repo gc via remote URL', async (t) => {
+        const { remoteUrl, workDir } = await withCli(t);
         const result = await runE3Command(['repo', 'gc', remoteUrl], workDir, { env: getCredentialsEnv() });
 
         assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
@@ -60,17 +67,18 @@ export function cliTests(
         assert.match(result.stdout, /Garbage collection complete/);
       });
 
-      it('repo gc --dry-run via remote URL', async () => {
+      it('repo gc --dry-run via remote URL', async (t) => {
+        const { remoteUrl, workDir } = await withCli(t);
         const result = await runE3Command(['repo', 'gc', remoteUrl, '--dry-run'], workDir, { env: getCredentialsEnv() });
 
         assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
         assert.match(result.stdout, /Dry run/);
       });
 
-      it('repo list via server URL', async () => {
-        const ctx = getContext();
+      it('repo list via server URL', async (t) => {
+        const ctx = await withCli(t);
         // repo list takes server URL, not repo URL
-        const result = await runE3Command(['repo', 'list', ctx.config.baseUrl], workDir, { env: getCredentialsEnv() });
+        const result = await runE3Command(['repo', 'list', ctx.config.baseUrl], ctx.workDir, { env: getCredentialsEnv() });
 
         assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
         assert.match(result.stdout, /Repositories:/);
@@ -79,8 +87,9 @@ export function cliTests(
       });
     });
 
-    describe('workspace commands', () => {
-      it('workspace list via remote URL', async () => {
+    describe('workspace commands', { concurrency: true }, () => {
+      it('workspace list via remote URL', async (t) => {
+        const { remoteUrl, workDir } = await withCli(t);
         const result = await runE3Command(['workspace', 'list', remoteUrl], workDir, { env: getCredentialsEnv() });
 
         assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
@@ -88,7 +97,8 @@ export function cliTests(
         assert.ok(result.stdout.length > 0);
       });
 
-      it('workspace create via remote URL', async () => {
+      it('workspace create via remote URL', async (t) => {
+        const { remoteUrl, workDir } = await withCli(t);
         const wsName = `cli-test-ws-${Date.now()}`;
         const result = await runE3Command(['workspace', 'create', remoteUrl, wsName], workDir, { env: getCredentialsEnv() });
 
@@ -99,7 +109,8 @@ export function cliTests(
         await runE3Command(['workspace', 'remove', remoteUrl, wsName], workDir, { env: getCredentialsEnv() });
       });
 
-      it('workspace remove via remote URL', async () => {
+      it('workspace remove via remote URL', async (t) => {
+        const { remoteUrl, workDir } = await withCli(t);
         const wsName = `cli-remove-ws-${Date.now()}`;
 
         // Create first
@@ -113,15 +124,9 @@ export function cliTests(
       });
     });
 
-    describe('package commands', () => {
-      let packageZipPath: string;
-
-      beforeEach(async () => {
-        const ctx = getContext();
-        packageZipPath = await createPackageZip(ctx.tempDir, 'cli-test-pkg', '1.0.0');
-      });
-
-      it('package list via remote URL', async () => {
+    describe('package commands', { concurrency: true }, () => {
+      it('package list via remote URL', async (t) => {
+        const { remoteUrl, workDir } = await withCliPackage(t);
         const result = await runE3Command(['package', 'list', remoteUrl], workDir, { env: getCredentialsEnv() });
 
         assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
@@ -129,14 +134,16 @@ export function cliTests(
         assert.ok(result.stdout.length > 0);
       });
 
-      it('package import via remote URL', async () => {
+      it('package import via remote URL', async (t) => {
+        const { remoteUrl, workDir, packageZipPath } = await withCliPackage(t);
         const result = await runE3Command(['package', 'import', remoteUrl, packageZipPath], workDir, { env: getCredentialsEnv() });
 
         assert.strictEqual(result.exitCode, 0, `Failed: ${result.stderr}`);
         assert.match(result.stdout, /Imported cli-test-pkg@1.0.0/);
       });
 
-      it('package remove via remote URL', async () => {
+      it('package remove via remote URL', async (t) => {
+        const { remoteUrl, workDir, packageZipPath } = await withCliPackage(t);
         // Import first
         await runE3Command(['package', 'import', remoteUrl, packageZipPath], workDir, { env: getCredentialsEnv() });
 
@@ -148,9 +155,10 @@ export function cliTests(
       });
     });
 
-    describe('full workflow via CLI', () => {
-      it('imports package, creates workspace, deploys, and shows tree', async () => {
-        const ctx = getContext();
+    describe('full workflow via CLI', { concurrency: true }, () => {
+      it('imports package, creates workspace, deploys, and shows tree', async (t) => {
+        const ctx = await withCli(t);
+        const { remoteUrl, workDir } = ctx;
         const packageZipPath = await createPackageZip(ctx.tempDir, 'workflow-pkg', '1.0.0');
         const wsName = `workflow-ws-${Date.now()}`;
         const env = getCredentialsEnv();
@@ -178,8 +186,9 @@ export function cliTests(
         await runE3Command(['workspace', 'remove', remoteUrl, wsName], workDir, { env });
       });
 
-      it('executes dataflow via CLI and shows logs', async () => {
-        const ctx = getContext();
+      it('executes dataflow via CLI and shows logs', async (t) => {
+        const ctx = await withCli(t);
+        const { remoteUrl, workDir } = ctx;
         const packageZipPath = await createPackageZip(ctx.tempDir, 'exec-cli-pkg', '1.0.0');
         const wsName = `exec-cli-ws-${Date.now()}`;
         const env = getCredentialsEnv();

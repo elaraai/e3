@@ -7,9 +7,10 @@
  * API Compliance Tests
  *
  * Runs the shared e3-api-tests suites against the local server.
+ * One shared server, per-test context for full isolation and concurrency.
  */
 
-import { describe, beforeEach, afterEach } from 'node:test';
+import { describe, after } from 'node:test';
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -20,31 +21,26 @@ import {
   allApiTests,
   cliTests,
   transferTests,
+  type TestSetup,
   type TestContext,
 } from '@elaraai/e3-api-tests';
 
-describe('API compliance', () => {
-  let tempDir: string;
-  let parentDir: string;
-  let reposDir: string;
-  let server: Server;
-  let context: TestContext;
-  let credentialsPath: string;
+// Shared server (lazy-initialized, one per test run)
+let server: Server;
+let baseUrl: string;
+let credentialsPath: string;
+let parentDir: string;
 
-  beforeEach(async () => {
-    // Create temp directory structure
+const getServerConfig = (() => {
+  let cached: Promise<void> | null = null;
+  return () => (cached ??= (async () => {
     parentDir = mkdtempSync(join(tmpdir(), 'e3-compliance-'));
-    tempDir = join(parentDir, 'test');
+    const tempDir = join(parentDir, 'test');
     mkdirSync(tempDir, { recursive: true });
 
-    // Create repos directory for multi-repo server
-    reposDir = join(tempDir, 'repos');
+    const reposDir = join(tempDir, 'repos');
     mkdirSync(reposDir, { recursive: true });
 
-    // Credentials file path (populated after server starts)
-    credentialsPath = join(tempDir, 'credentials.json');
-
-    // Start server on random port with OIDC disabled (no auth)
     server = await createServer({
       reposDir,
       port: 0,
@@ -52,31 +48,35 @@ describe('API compliance', () => {
     });
     await server.start();
 
-    // Create credentials file with mock token for the test server
-    // The server doesn't validate tokens when OIDC is disabled, but CLI needs credentials to exist
-    const baseUrl = `http://localhost:${server.port}`;
-    const credentialsFile = {
+    baseUrl = `http://localhost:${server.port}`;
+    credentialsPath = join(tempDir, 'credentials.json');
+    writeFileSync(credentialsPath, JSON.stringify({
       version: 1,
       credentials: {
         [baseUrl]: {
           accessToken: 'mock-test-token',
           refreshToken: 'mock-refresh-token',
-          expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
         },
       },
-    };
-    writeFileSync(credentialsPath, JSON.stringify(credentialsFile, null, 2));
+    }, null, 2));
+  })());
+})();
 
-    // Create test context
-    context = await createTestContext({
-      baseUrl,
-      getToken: async () => '', // No auth for local server
-      cleanup: true,
-    });
+// Per-test setup: creates a fresh repo + context
+const setup: TestSetup<TestContext> = async (t) => {
+  await getServerConfig();
+  const ctx = await createTestContext({
+    baseUrl,
+    getToken: async () => '',
+    cleanup: true,
   });
+  t.after(() => ctx.cleanup());
+  return ctx;
+};
 
-  afterEach(async () => {
-    await context?.cleanup?.();
+describe('API compliance', { timeout: 300_000, concurrency: true }, () => {
+  after(async () => {
     await server?.stop();
     try {
       rmSync(parentDir, { recursive: true, force: true });
@@ -86,11 +86,11 @@ describe('API compliance', () => {
   });
 
   // Run all API test suites
-  allApiTests(() => context);
+  allApiTests(setup);
 
   // Run CLI test suite with credentials env
   cliTests(
-    () => context,
+    setup,
     () => ({
       E3_CREDENTIALS_PATH: credentialsPath,
       E3_AUTH_AUTO_APPROVE: 'true',
@@ -99,7 +99,7 @@ describe('API compliance', () => {
 
   // Run cross-repository transfer tests
   transferTests(
-    () => context,
+    setup,
     () => ({
       E3_CREDENTIALS_PATH: credentialsPath,
       E3_AUTH_AUTO_APPROVE: 'true',

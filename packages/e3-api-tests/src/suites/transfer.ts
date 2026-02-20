@@ -11,12 +11,13 @@
  * (e3-api-server) transfers.
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { TestContext } from '../context.js';
+import type { TestSetup } from '../setup.js';
 import { runE3Command } from '../cli.js';
 import { createPackageZip, createDiamondPackageZip } from '../fixtures.js';
 
@@ -46,27 +47,26 @@ async function createLocalTestRepo(tempDir: string): Promise<{
  * repository and imported into another, covering both local-to-remote and
  * remote-to-local scenarios.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  * @param getCredentialsEnv - Function that returns env vars for auth (E3_CREDENTIALS_PATH, etc.)
  */
 export function transferTests(
-  getContext: () => TestContext,
+  setup: TestSetup<TestContext>,
   getCredentialsEnv: () => Record<string, string>
 ): void {
-  describe('transfer', () => {
-    let remoteUrl: string;
-    let workDir: string;
+  const withTransfer: TestSetup<TestContext & { remoteUrl: string; workDir: string }> = async (t) => {
+    const ctx = await setup(t);
+    const remoteUrl = `${ctx.config.baseUrl}/repos/${ctx.repoName}`;
+    const workDir = join(ctx.tempDir, 'transfer-work');
+    mkdirSync(workDir, { recursive: true });
+    return Object.assign(ctx, { remoteUrl, workDir });
+  };
 
-    beforeEach(async () => {
-      const ctx = getContext();
-      remoteUrl = `${ctx.config.baseUrl}/repos/${ctx.repoName}`;
-      workDir = join(ctx.tempDir, 'transfer-work');
-      mkdirSync(workDir, { recursive: true });
-    });
-
-    describe('package transfer', () => {
-      it('exports package from local repo and imports to remote', async () => {
-        const ctx = getContext();
+  describe('transfer', { concurrency: true }, () => {
+    describe('package transfer', { concurrency: true }, () => {
+      it('exports package from local repo and imports to remote', async (t) => {
+        const ctx = await withTransfer(t);
+        const { remoteUrl, workDir } = ctx;
         const env = getCredentialsEnv();
         const { path: localRepo, cleanup } = await createLocalTestRepo(ctx.tempDir);
         const exportZip = join(ctx.tempDir, `export-local-to-remote-${Date.now()}.zip`);
@@ -109,8 +109,9 @@ export function transferTests(
         }
       });
 
-      it('exports package from remote repo and imports to local', async () => {
-        const ctx = getContext();
+      it('exports package from remote repo and imports to local', async (t) => {
+        const ctx = await withTransfer(t);
+        const { remoteUrl, workDir } = ctx;
         const env = getCredentialsEnv();
         const { path: localRepo, cleanup } = await createLocalTestRepo(ctx.tempDir);
         const exportZip = join(ctx.tempDir, `export-remote-to-local-${Date.now()}.zip`);
@@ -151,9 +152,10 @@ export function transferTests(
       });
     });
 
-    describe('workspace transfer', () => {
-      it('exports workspace from local repo and imports as package to remote', async () => {
-        const ctx = getContext();
+    describe('workspace transfer', { concurrency: true }, () => {
+      it('exports workspace from local repo and imports as package to remote', async (t) => {
+        const ctx = await withTransfer(t);
+        const { remoteUrl, workDir } = ctx;
         const env = getCredentialsEnv();
         const { path: localRepo, cleanup } = await createLocalTestRepo(ctx.tempDir);
         const exportZip = join(ctx.tempDir, `export-ws-local-to-remote-${Date.now()}.zip`);
@@ -242,10 +244,11 @@ export function transferTests(
         }
       });
 
-      it('exports workspace from remote repo and imports as package to local', async () => {
+      it('exports workspace from remote repo and imports as package to local', async (t) => {
         // NOTE: Remote workspace export does not support --name/--version options.
         // The version is auto-generated as <pkgVersion>-<rootHash[0:8]>.
-        const ctx = getContext();
+        const ctx = await withTransfer(t);
+        const { remoteUrl, workDir } = ctx;
         const env = getCredentialsEnv();
         const { path: localRepo, cleanup } = await createLocalTestRepo(ctx.tempDir);
         const exportZip = join(ctx.tempDir, `export-ws-remote-to-local-${Date.now()}.zip`);
@@ -318,9 +321,10 @@ export function transferTests(
       });
     });
 
-    describe('round-trip', () => {
-      it('round-trip local -> remote -> local preserves data integrity', async () => {
-        const ctx = getContext();
+    describe('round-trip', { concurrency: true }, () => {
+      it('round-trip local -> remote -> local preserves data integrity', async (t) => {
+        const ctx = await withTransfer(t);
+        const { remoteUrl, workDir } = ctx;
         const env = getCredentialsEnv();
         const { path: localRepo1, cleanup: cleanup1 } = await createLocalTestRepo(ctx.tempDir);
         const { path: localRepo2, cleanup: cleanup2 } = await createLocalTestRepo(ctx.tempDir);
@@ -432,10 +436,10 @@ export function transferTests(
       });
     });
 
-    describe('execution logs', () => {
-      it('exports workspace with execution logs and imports them', async () => {
-        const ctx = getContext();
-        const env = getCredentialsEnv();
+    describe('execution logs', { concurrency: true }, () => {
+      it('exports workspace with execution logs and imports them', async (t) => {
+        const ctx = await withTransfer(t);
+        const { workDir } = ctx;
         const { path: localRepo1, cleanup: cleanup1 } = await createLocalTestRepo(ctx.tempDir);
         const { path: localRepo2, cleanup: cleanup2 } = await createLocalTestRepo(ctx.tempDir);
         const exportZip = join(ctx.tempDir, `export-with-logs-${Date.now()}.zip`);
@@ -500,8 +504,9 @@ export function transferTests(
         }
       });
 
-      it('preserves execution logs through remote transfer', async () => {
-        const ctx = getContext();
+      it('preserves execution logs through remote transfer', async (t) => {
+        const ctx = await withTransfer(t);
+        const { remoteUrl, workDir } = ctx;
         const env = getCredentialsEnv();
         const { path: localRepo, cleanup } = await createLocalTestRepo(ctx.tempDir);
         const exportZip1 = join(ctx.tempDir, `remote-logs-1-${Date.now()}.zip`);
@@ -572,9 +577,10 @@ export function transferTests(
       });
     });
 
-    describe('error handling', () => {
-      it('returns error when exporting non-existent package', async () => {
-        const ctx = getContext();
+    describe('error handling', { concurrency: true }, () => {
+      it('returns error when exporting non-existent package', async (t) => {
+        const ctx = await withTransfer(t);
+        const { remoteUrl, workDir } = ctx;
         const env = getCredentialsEnv();
         const exportZip = join(ctx.tempDir, `nonexistent-export-${Date.now()}.zip`);
 
@@ -594,8 +600,9 @@ export function transferTests(
         );
       });
 
-      it('returns error when importing invalid zip', async () => {
-        const ctx = getContext();
+      it('returns error when importing invalid zip', async (t) => {
+        const ctx = await withTransfer(t);
+        const { remoteUrl, workDir } = ctx;
         const env = getCredentialsEnv();
         const invalidZip = join(ctx.tempDir, `invalid-${Date.now()}.zip`);
 
