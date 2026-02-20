@@ -9,7 +9,7 @@
  * Tests: create, list, get, status, deploy, remove
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
@@ -27,25 +27,40 @@ import {
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
+import type { TestSetup } from '../setup.js';
 import { createPackageZip } from '../fixtures.js';
 
 /**
  * Register workspace operation tests.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  */
-export function workspaceTests(getContext: () => TestContext): void {
-  describe('workspaces', () => {
-    it('workspaceList returns empty initially', async () => {
-      const ctx = getContext();
+export function workspaceTests(setup: TestSetup<TestContext>): void {
+  const withDeployedPackage: TestSetup<TestContext> = async (t) => {
+    const ctx = await setup(t);
+    const opts = await ctx.opts();
+
+    const zipPath = await createPackageZip(ctx.tempDir, 'compute-pkg', '1.0.0');
+    const packageZip = readFileSync(zipPath);
+    await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+    await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', opts);
+    await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', 'compute-pkg@1.0.0', opts);
+
+    return ctx;
+  };
+
+  describe('workspaces', { concurrency: true }, () => {
+    it('workspaceList returns empty initially', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
 
       const workspaces = await workspaceList(ctx.config.baseUrl, ctx.repoName, opts);
       assert.deepStrictEqual(workspaces, []);
     });
 
-    it('workspaceCreate and workspaceList round-trip', async () => {
-      const ctx = getContext();
+    it('workspaceCreate and workspaceList round-trip', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
 
       const info = await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'test-ws', opts);
@@ -60,8 +75,8 @@ export function workspaceTests(getContext: () => TestContext): void {
       await workspaceRemove(ctx.config.baseUrl, ctx.repoName, 'test-ws', opts);
     });
 
-    it('workspaceRemove deletes workspace', async () => {
-      const ctx = getContext();
+    it('workspaceRemove deletes workspace', async (t) => {
+      const ctx = await setup(t);
       const opts = await ctx.opts();
 
       await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'to-delete', opts);
@@ -75,31 +90,9 @@ export function workspaceTests(getContext: () => TestContext): void {
       assert.strictEqual(workspaces.length, 0);
     });
 
-    describe('with deployed package', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        // Create and import a test package (idempotent - may already exist)
-        const zipPath = await createPackageZip(ctx.tempDir, 'compute-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        try {
-          await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-        } catch {
-          // Package may already exist from previous test
-        }
-
-        // Create workspace and deploy (idempotent - may already exist)
-        try {
-          await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', opts);
-        } catch {
-          // Workspace may already exist from previous test
-        }
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', 'compute-pkg@1.0.0', opts);
-      });
-
-      it('workspaceGet returns deployed state', async () => {
-        const ctx = getContext();
+    describe('with deployed package', { concurrency: true }, () => {
+      it('workspaceGet returns deployed state', async (t) => {
+        const ctx = await withDeployedPackage(t);
         const opts = await ctx.opts();
 
         const state = await workspaceGet(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', opts);
@@ -108,8 +101,8 @@ export function workspaceTests(getContext: () => TestContext): void {
         assert.strictEqual(state.packageVersion, '1.0.0');
       });
 
-      it('workspaceStatus returns datasets and tasks', async () => {
-        const ctx = getContext();
+      it('workspaceStatus returns datasets and tasks', async (t) => {
+        const ctx = await withDeployedPackage(t);
         const opts = await ctx.opts();
 
         const status = await workspaceStatus(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', opts);
@@ -124,8 +117,8 @@ export function workspaceTests(getContext: () => TestContext): void {
         assert.strictEqual(status.summary.tasks.total, 1n);
       });
 
-      it('taskList returns task info', async () => {
-        const ctx = getContext();
+      it('taskList returns task info', async (t) => {
+        const ctx = await withDeployedPackage(t);
         const opts = await ctx.opts();
 
         const tasks = await taskList(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', opts);
@@ -137,8 +130,8 @@ export function workspaceTests(getContext: () => TestContext): void {
         assert.ok(computeTask.hash.length > 0);
       });
 
-      it('taskGet returns task details', async () => {
-        const ctx = getContext();
+      it('taskGet returns task details', async (t) => {
+        const ctx = await withDeployedPackage(t);
         const opts = await ctx.opts();
 
         const task = await taskGet(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', 'compute', opts);
@@ -148,8 +141,8 @@ export function workspaceTests(getContext: () => TestContext): void {
         assert.ok(task.output);
       });
 
-      it('dataflowGraph returns dependency graph', async () => {
-        const ctx = getContext();
+      it('dataflowGraph returns dependency graph', async (t) => {
+        const ctx = await withDeployedPackage(t);
         const opts = await ctx.opts();
 
         const graph = await dataflowGraph(ctx.config.baseUrl, ctx.repoName, 'deployed-ws', opts);

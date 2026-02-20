@@ -9,7 +9,7 @@
  * Tests: start, execute (blocking), poll for completion, logs
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
@@ -28,6 +28,7 @@ import {
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
+import type { TestSetup } from '../setup.js';
 import {
   createPackageZip,
   createDiamondPackageZip,
@@ -38,29 +39,70 @@ import {
   createWideParallelPackageZip,
 } from '../fixtures.js';
 
+/** Helper: import package, create workspace, deploy */
+function withDeployed(
+  setup: TestSetup<TestContext>,
+  createZip: (tempDir: string, name: string, version: string, ...args: never[]) => Promise<string>,
+  pkgName: string,
+  wsName: string,
+): TestSetup<TestContext> {
+  return async (t) => {
+    const ctx = await setup(t);
+    const opts = await ctx.opts();
+
+    const zipPath = await createZip(ctx.tempDir, pkgName, '1.0.0');
+    const packageZip = readFileSync(zipPath);
+    await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+    await workspaceCreate(ctx.config.baseUrl, ctx.repoName, wsName, opts);
+    await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, wsName, `${pkgName}@1.0.0`, opts);
+
+    return ctx;
+  };
+}
+
 /**
  * Register dataflow execution tests.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  */
-export function dataflowTests(getContext: () => TestContext): void {
-  describe('dataflow', () => {
-    describe('simple execution', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
+export function dataflowTests(setup: TestSetup<TestContext>): void {
+  const withSimpleExec = withDeployed(setup, createPackageZip, 'exec-pkg', 'exec-ws');
+  const withDiamond = withDeployed(setup, createDiamondPackageZip, 'diamond-pkg', 'diamond-ws');
+  const withFailing = withDeployed(setup, createFailingPackageZip, 'fail-pkg', 'fail-ws');
+  const withMixed = withDeployed(setup, createParallelMixedPackageZip, 'mixed-pkg', 'mixed-ws');
+  const withFailingDiamond = withDeployed(setup, createFailingDiamondPackageZip, 'fdiamond-pkg', 'fdiamond-ws');
+  const withWideParallel: TestSetup<TestContext> = async (t) => {
+    const ctx = await setup(t);
+    const opts = await ctx.opts();
+    const zipPath = await createWideParallelPackageZip(ctx.tempDir, 'wide-pkg', '1.0.0', 6);
+    const packageZip = readFileSync(zipPath);
+    await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+    await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'wide-ws', opts);
+    await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'wide-ws', 'wide-pkg@1.0.0', opts);
+    return ctx;
+  };
+  const withSlow: TestSetup<TestContext> = async (t) => {
+    const ctx = await setup(t);
+    const opts = await ctx.opts();
+    const zipPath = await createSlowPackageZip(ctx.tempDir, 'slow-pkg', '1.0.0', 30);
+    const packageZip = readFileSync(zipPath);
+    await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+    await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'slow-ws', opts);
+    await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'slow-ws', 'slow-pkg@1.0.0', opts);
+    return ctx;
+  };
+  const withNoExec = withDeployed(setup, createPackageZip, 'noexec-pkg', 'noexec-ws');
+  const withCache = withDeployed(setup, createPackageZip, 'cache-pkg', 'cache-ws');
+  const withFilter = withDeployed(setup, createDiamondPackageZip, 'filter-pkg', 'filter-ws');
+  const withGraph = withDeployed(setup, createDiamondPackageZip, 'graph-pkg', 'graph-ws');
+  const withLogPag = withDeployed(setup, createPackageZip, 'logpag-pkg', 'logpag-ws');
+  const withEvtPag = withDeployed(setup, createDiamondPackageZip, 'evtpag-pkg', 'evtpag-ws');
 
-        // Create and import a simple package
-        const zipPath = await createPackageZip(ctx.tempDir, 'exec-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'exec-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'exec-ws', 'exec-pkg@1.0.0', opts);
-      });
-
-      it('dataflowExecute runs tasks and returns result (blocking)', async () => {
-        const ctx = getContext();
+  describe('dataflow', { concurrency: true }, () => {
+    describe('simple execution', { concurrency: true }, () => {
+      it('dataflowExecute runs tasks and returns result (blocking)', async (t) => {
+        const ctx = await withSimpleExec(t);
         const opts = await ctx.opts();
 
         const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'exec-ws', { force: true }, opts);
@@ -84,8 +126,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         assert.strictEqual(outputDataset.status.type, 'up-to-date');
       });
 
-      it('dataflowStart triggers execution (non-blocking)', async () => {
-        const ctx = getContext();
+      it('dataflowStart triggers execution (non-blocking)', async (t) => {
+        const ctx = await withSimpleExec(t);
         const opts = await ctx.opts();
 
         // Should return immediately
@@ -110,8 +152,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         assert.strictEqual(status.tasks[0].status.type, 'up-to-date');
       });
 
-      it('dataflowExecution returns execution state', async () => {
-        const ctx = getContext();
+      it('dataflowExecution returns execution state', async (t) => {
+        const ctx = await withSimpleExec(t);
         const opts = await ctx.opts();
 
         // Start execution
@@ -144,8 +186,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         assert.fail('Execution did not complete in time');
       });
 
-      it('taskLogs returns logs after execution', async () => {
-        const ctx = getContext();
+      it('taskLogs returns logs after execution', async (t) => {
+        const ctx = await withSimpleExec(t);
         const opts = await ctx.opts();
 
         // Execute first
@@ -163,22 +205,9 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('diamond dependency execution', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        // Create and import diamond package (left, right, merge tasks)
-        const zipPath = await createDiamondPackageZip(ctx.tempDir, 'diamond-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'diamond-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'diamond-ws', 'diamond-pkg@1.0.0', opts);
-      });
-
-      it('executes diamond dependency graph correctly', async () => {
-        const ctx = getContext();
+    describe('diamond dependency execution', { concurrency: true }, () => {
+      it('executes diamond dependency graph correctly', async (t) => {
+        const ctx = await withDiamond(t);
         const opts = await ctx.opts();
 
         const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'diamond-ws', { force: true }, opts);
@@ -195,8 +224,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         }
       });
 
-      it('tracks events during execution', async () => {
-        const ctx = getContext();
+      it('tracks events during execution', async (t) => {
+        const ctx = await withDiamond(t);
         const opts = await ctx.opts();
 
         // Start execution
@@ -236,22 +265,9 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('failed execution', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        // Create and import a package with a failing task
-        const zipPath = await createFailingPackageZip(ctx.tempDir, 'fail-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'fail-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'fail-ws', 'fail-pkg@1.0.0', opts);
-      });
-
-      it('dataflowExecute returns failure result when task fails', async () => {
-        const ctx = getContext();
+    describe('failed execution', { concurrency: true }, () => {
+      it('dataflowExecute returns failure result when task fails', async (t) => {
+        const ctx = await withFailing(t);
         const opts = await ctx.opts();
 
         const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'fail-ws', { force: true }, opts);
@@ -265,8 +281,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         assert.strictEqual(result.tasks[0].state.type, 'failed');
       });
 
-      it('dataflowExecution shows failed status after task failure', async () => {
-        const ctx = getContext();
+      it('dataflowExecution shows failed status after task failure', async (t) => {
+        const ctx = await withFailing(t);
         const opts = await ctx.opts();
 
         // Start execution
@@ -298,8 +314,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         assert.fail('Execution did not complete in time');
       });
 
-      it('can restart execution after failure', async () => {
-        const ctx = getContext();
+      it('can restart execution after failure', async (t) => {
+        const ctx = await withFailing(t);
         const opts = await ctx.opts();
 
         // First execution - should fail
@@ -313,22 +329,10 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('parallel task failures', () => {
-      describe('mixed success/failure', () => {
-        beforeEach(async () => {
-          const ctx = getContext();
-          const opts = await ctx.opts();
-
-          const zipPath = await createParallelMixedPackageZip(ctx.tempDir, 'mixed-pkg', '1.0.0');
-          const packageZip = readFileSync(zipPath);
-          await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-          await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', opts);
-          await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', 'mixed-pkg@1.0.0', opts);
-        });
-
-        it('parallel tasks with mixed success/failure complete without stalling', async () => {
-          const ctx = getContext();
+    describe('parallel task failures', { concurrency: true }, () => {
+      describe('mixed success/failure', { concurrency: true }, () => {
+        it('parallel tasks with mixed success/failure complete without stalling', async (t) => {
+          const ctx = await withMixed(t);
           const opts = await ctx.opts();
 
           const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', { force: true }, opts);
@@ -343,8 +347,6 @@ export function dataflowTests(getContext: () => TestContext): void {
           assert.strictEqual(failC.state.type, 'failed');
 
           // Tasks that did execute should have succeeded
-          // (orchestrator may stop launching new tasks after a failure,
-          //  so not all succeed tasks are guaranteed to have run)
           for (const task of result.tasks) {
             if (task.name !== 'fail_c') {
               assert.strictEqual(task.state.type, 'success', `Task ${task.name} should succeed`);
@@ -352,8 +354,8 @@ export function dataflowTests(getContext: () => TestContext): void {
           }
         });
 
-        it('failed task logs are accessible', async () => {
-          const ctx = getContext();
+        it('failed task logs are accessible', async (t) => {
+          const ctx = await withMixed(t);
           const opts = await ctx.opts();
 
           // Execute first to generate logs
@@ -366,8 +368,8 @@ export function dataflowTests(getContext: () => TestContext): void {
           assert.ok(typeof logs.complete === 'boolean', 'logs.complete should be a boolean');
         });
 
-        it('workspace status reflects failed tasks correctly', async () => {
-          const ctx = getContext();
+        it('workspace status reflects failed tasks correctly', async (t) => {
+          const ctx = await withMixed(t);
           const opts = await ctx.opts();
 
           await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'mixed-ws', { force: true }, opts);
@@ -386,21 +388,9 @@ export function dataflowTests(getContext: () => TestContext): void {
         });
       });
 
-      describe('diamond with upstream failure', () => {
-        beforeEach(async () => {
-          const ctx = getContext();
-          const opts = await ctx.opts();
-
-          const zipPath = await createFailingDiamondPackageZip(ctx.tempDir, 'fdiamond-pkg', '1.0.0');
-          const packageZip = readFileSync(zipPath);
-          await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-          await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'fdiamond-ws', opts);
-          await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'fdiamond-ws', 'fdiamond-pkg@1.0.0', opts);
-        });
-
-        it('diamond with upstream failure skips dependents', async () => {
-          const ctx = getContext();
+      describe('diamond with upstream failure', { concurrency: true }, () => {
+        it('diamond with upstream failure skips dependents', async (t) => {
+          const ctx = await withFailingDiamond(t);
           const opts = await ctx.opts();
 
           const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'fdiamond-ws', { force: true }, opts);
@@ -423,8 +413,8 @@ export function dataflowTests(getContext: () => TestContext): void {
           assert.strictEqual(mergeTask.state.type, 'skipped');
         });
 
-        it('taskLogs returns execution_not_found for skipped task', async () => {
-          const ctx = getContext();
+        it('taskLogs returns execution_not_found for skipped task', async (t) => {
+          const ctx = await withFailingDiamond(t);
           const opts = await ctx.opts();
 
           // Execute — merge will be skipped because right fails
@@ -440,21 +430,9 @@ export function dataflowTests(getContext: () => TestContext): void {
         });
       });
 
-      describe('wide parallel execution', () => {
-        beforeEach(async () => {
-          const ctx = getContext();
-          const opts = await ctx.opts();
-
-          const zipPath = await createWideParallelPackageZip(ctx.tempDir, 'wide-pkg', '1.0.0', 6);
-          const packageZip = readFileSync(zipPath);
-          await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-          await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'wide-ws', opts);
-          await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'wide-ws', 'wide-pkg@1.0.0', opts);
-        });
-
-        it('wide parallel execution completes correctly', async () => {
-          const ctx = getContext();
+      describe('wide parallel execution', { concurrency: true }, () => {
+        it('wide parallel execution completes correctly', async (t) => {
+          const ctx = await withWideParallel(t);
           const opts = await ctx.opts();
 
           const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'wide-ws', { force: true }, opts);
@@ -471,22 +449,11 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
+    // Concurrent execution tests must remain serial within their describe
+    // because they test locking behavior with timing-sensitive operations
     describe('concurrent execution', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        // Create and import a slow package
-        const zipPath = await createSlowPackageZip(ctx.tempDir, 'slow-pkg', '1.0.0', 30);
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'slow-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'slow-ws', 'slow-pkg@1.0.0', opts);
-      });
-
-      it('rejects second dataflowStart while execution is running', async () => {
-        const ctx = getContext();
+      it('rejects second dataflowStart while execution is running', async (t) => {
+        const ctx = await withSlow(t);
         const opts = await ctx.opts();
 
         // Start first execution (non-blocking)
@@ -510,8 +477,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         }
       });
 
-      it('rejects dataflowExecute while execution is running', async () => {
-        const ctx = getContext();
+      it('rejects dataflowExecute while execution is running', async (t) => {
+        const ctx = await withSlow(t);
         const opts = await ctx.opts();
 
         // Start first execution (non-blocking)
@@ -534,8 +501,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         }
       });
 
-      it('dataflowCancel stops a running execution', async () => {
-        const ctx = getContext();
+      it('dataflowCancel stops a running execution', async (t) => {
+        const ctx = await withSlow(t);
         const opts = await ctx.opts();
 
         // Start slow execution
@@ -552,8 +519,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         assert.strictEqual(state.status.type, 'aborted');
       });
 
-      it('dataflowCancel returns error when no execution is running', async () => {
-        const ctx = getContext();
+      it('dataflowCancel returns error when no execution is running', async (t) => {
+        const ctx = await withSlow(t);
         const opts = await ctx.opts();
 
         // Try to cancel when nothing is running
@@ -567,22 +534,9 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('execution not found', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        // Create and import a simple package, deploy but do NOT execute
-        const zipPath = await createPackageZip(ctx.tempDir, 'noexec-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'noexec-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'noexec-ws', 'noexec-pkg@1.0.0', opts);
-      });
-
-      it('taskLogs returns execution_not_found for never-executed task', async () => {
-        const ctx = getContext();
+    describe('execution not found', { concurrency: true }, () => {
+      it('taskLogs returns execution_not_found for never-executed task', async (t) => {
+        const ctx = await withNoExec(t);
         const opts = await ctx.opts();
 
         try {
@@ -594,8 +548,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         }
       });
 
-      it('taskLogs returns task_not_found for non-existent task', async () => {
-        const ctx = getContext();
+      it('taskLogs returns task_not_found for non-existent task', async (t) => {
+        const ctx = await withNoExec(t);
         const opts = await ctx.opts();
 
         try {
@@ -607,8 +561,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         }
       });
 
-      it('taskLogs returns workspace_not_found for non-existent workspace', async () => {
-        const ctx = getContext();
+      it('taskLogs returns workspace_not_found for non-existent workspace', async (t) => {
+        const ctx = await withNoExec(t);
         const opts = await ctx.opts();
 
         try {
@@ -621,9 +575,9 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('workspace error handling', () => {
-      it('dataflowExecute returns error for non-existent workspace', async () => {
-        const ctx = getContext();
+    describe('workspace error handling', { concurrency: true }, () => {
+      it('dataflowExecute returns error for non-existent workspace', async (t) => {
+        const ctx = await setup(t);
         const opts = await ctx.opts();
 
         try {
@@ -638,8 +592,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         }
       });
 
-      it('dataflowGraph returns error for non-existent workspace', async () => {
-        const ctx = getContext();
+      it('dataflowGraph returns error for non-existent workspace', async (t) => {
+        const ctx = await setup(t);
         const opts = await ctx.opts();
 
         try {
@@ -654,8 +608,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         }
       });
 
-      it('workspaceStatus returns error for non-existent workspace', async () => {
-        const ctx = getContext();
+      it('workspaceStatus returns error for non-existent workspace', async (t) => {
+        const ctx = await setup(t);
         const opts = await ctx.opts();
 
         try {
@@ -671,21 +625,9 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('cache behavior', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        const zipPath = await createPackageZip(ctx.tempDir, 'cache-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'cache-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'cache-ws', 'cache-pkg@1.0.0', opts);
-      });
-
-      it('second execution uses cached results', async () => {
-        const ctx = getContext();
+    describe('cache behavior', { concurrency: true }, () => {
+      it('second execution uses cached results', async (t) => {
+        const ctx = await withCache(t);
         const opts = await ctx.opts();
 
         // First execution - should execute the task
@@ -700,8 +642,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         assert.strictEqual(result2.executed, 0n);
       });
 
-      it('force bypasses cache', async () => {
-        const ctx = getContext();
+      it('force bypasses cache', async (t) => {
+        const ctx = await withCache(t);
         const opts = await ctx.opts();
 
         // First execution
@@ -714,21 +656,9 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('task filter', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        const zipPath = await createDiamondPackageZip(ctx.tempDir, 'filter-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'filter-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'filter-ws', 'filter-pkg@1.0.0', opts);
-      });
-
-      it('filter runs only the specified task', async () => {
-        const ctx = getContext();
+    describe('task filter', { concurrency: true }, () => {
+      it('filter runs only the specified task', async (t) => {
+        const ctx = await withFilter(t);
         const opts = await ctx.opts();
 
         const result = await dataflowExecute(
@@ -745,8 +675,8 @@ export function dataflowTests(getContext: () => TestContext): void {
         assert.strictEqual(executedTasks[0].name, 'left');
       });
 
-      it('filter with non-existent task returns error', async () => {
-        const ctx = getContext();
+      it('filter with non-existent task returns error', async (t) => {
+        const ctx = await withFilter(t);
         const opts = await ctx.opts();
 
         try {
@@ -763,21 +693,9 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('dependency graph', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        const zipPath = await createDiamondPackageZip(ctx.tempDir, 'graph-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'graph-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'graph-ws', 'graph-pkg@1.0.0', opts);
-      });
-
-      it('dataflowGraph returns correct structure', async () => {
-        const ctx = getContext();
+    describe('dependency graph', { concurrency: true }, () => {
+      it('dataflowGraph returns correct structure', async (t) => {
+        const ctx = await withGraph(t);
         const opts = await ctx.opts();
 
         const graph = await dataflowGraph(ctx.config.baseUrl, ctx.repoName, 'graph-ws', opts);
@@ -804,21 +722,9 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('log pagination', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        const zipPath = await createPackageZip(ctx.tempDir, 'logpag-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'logpag-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'logpag-ws', 'logpag-pkg@1.0.0', opts);
-      });
-
-      it('taskLogs supports offset and limit', async () => {
-        const ctx = getContext();
+    describe('log pagination', { concurrency: true }, () => {
+      it('taskLogs supports offset and limit', async (t) => {
+        const ctx = await withLogPag(t);
         const opts = await ctx.opts();
 
         // Execute to generate logs
@@ -852,21 +758,9 @@ export function dataflowTests(getContext: () => TestContext): void {
       });
     });
 
-    describe('event pagination', () => {
-      beforeEach(async () => {
-        const ctx = getContext();
-        const opts = await ctx.opts();
-
-        const zipPath = await createDiamondPackageZip(ctx.tempDir, 'evtpag-pkg', '1.0.0');
-        const packageZip = readFileSync(zipPath);
-        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-
-        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'evtpag-ws', opts);
-        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'evtpag-ws', 'evtpag-pkg@1.0.0', opts);
-      });
-
-      it('dataflowExecution supports event offset and limit', async () => {
-        const ctx = getContext();
+    describe('event pagination', { concurrency: true }, () => {
+      it('dataflowExecution supports event offset and limit', async (t) => {
+        const ctx = await withEvtPag(t);
         const opts = await ctx.opts();
 
         // Execute and wait for completion

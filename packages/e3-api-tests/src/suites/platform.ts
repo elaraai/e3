@@ -11,7 +11,7 @@
  * interact with the e3 API.
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
@@ -26,27 +26,29 @@ import {
 import { StringType, IntegerType, NullType, ArrayType, East } from '@elaraai/east';
 
 import type { TestContext } from '../context.js';
+import type { TestSetup } from '../setup.js';
 import { createPackageZip } from '../fixtures.js';
 
 /**
  * Register platform function integration tests.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  */
-export function platformTests(getContext: () => TestContext): void {
-  describe('platform functions', () => {
-    beforeEach(async () => {
-      const ctx = getContext();
-      const opts = await ctx.opts();
+export function platformTests(setup: TestSetup<TestContext>): void {
+  const withPackage: TestSetup<TestContext> = async (t) => {
+    const ctx = await setup(t);
+    const opts = await ctx.opts();
 
-      // Create and import a simple package for workspace tests
-      const zipPath = await createPackageZip(ctx.tempDir, 'platform-pkg', '1.0.0');
-      const packageZip = readFileSync(zipPath);
-      await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
-    });
+    const zipPath = await createPackageZip(ctx.tempDir, 'platform-pkg', '1.0.0');
+    const packageZip = readFileSync(zipPath);
+    await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
 
-    it('repoStatus platform function compiles and runs', async () => {
-      const ctx = getContext();
+    return ctx;
+  };
+
+  describe('platform functions', { concurrency: true }, () => {
+    it('repoStatus platform function compiles and runs', async (t) => {
+      const ctx = await withPackage(t);
 
       // Define an East function that uses the platform function
       const getStatus = East.asyncFunction(
@@ -70,8 +72,8 @@ export function platformTests(getContext: () => TestContext): void {
       assert.ok(typeof status.workspaceCount === 'bigint');
     });
 
-    it('workspaceList platform function compiles and runs', async () => {
-      const ctx = getContext();
+    it('workspaceList platform function compiles and runs', async (t) => {
+      const ctx = await withPackage(t);
       const opts = await ctx.opts();
 
       // Create a workspace first
@@ -100,8 +102,8 @@ export function platformTests(getContext: () => TestContext): void {
       await workspaceRemove(ctx.config.baseUrl, ctx.repoName, 'platform-test-ws', opts);
     });
 
-    it('workspace create/remove flow via platform functions', async () => {
-      const ctx = getContext();
+    it('workspace create/remove flow via platform functions', async (t) => {
+      const ctx = await withPackage(t);
       const opts = await ctx.opts();
 
       // Define East function that creates and lists workspaces
@@ -143,8 +145,8 @@ export function platformTests(getContext: () => TestContext): void {
       assert.strictEqual(finalList.length, 0);
     });
 
-    it('$.let correctly infers array type from platform function', async () => {
-      const ctx = getContext();
+    it('$.let correctly infers array type from platform function', async (t) => {
+      const ctx = await withPackage(t);
 
       // This test verifies the type inference fix - $.let should produce ArrayExpr not StructExpr
       const listAndCount = East.asyncFunction(
@@ -164,7 +166,7 @@ export function platformTests(getContext: () => TestContext): void {
       // Run the compiled function
       const count = await compiled(ctx.config.baseUrl, ctx.repoName, (await ctx.opts()).token!);
 
-      // Should have 1 package (imported in beforeEach)
+      // Should have 1 package (imported in withPackage)
       assert.strictEqual(count, 1n);
     });
   });

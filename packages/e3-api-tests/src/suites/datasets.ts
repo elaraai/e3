@@ -9,7 +9,7 @@
  * Tests: list, listAt, get, set
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
@@ -25,30 +25,32 @@ import {
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
+import type { TestSetup } from '../setup.js';
 import { createStringPackageZip } from '../fixtures.js';
 
 /**
  * Register dataset operation tests.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  */
-export function datasetTests(getContext: () => TestContext): void {
-  describe('datasets', () => {
-    beforeEach(async () => {
-      const ctx = getContext();
-      const opts = await ctx.opts();
+export function datasetTests(setup: TestSetup<TestContext>): void {
+  const withStringPackage: TestSetup<TestContext> = async (t) => {
+    const ctx = await setup(t);
+    const opts = await ctx.opts();
 
-      // Create package with string input
-      const zipPath = await createStringPackageZip(ctx.tempDir, 'dataset-pkg', '1.0.0');
-      const packageZip = readFileSync(zipPath);
-      await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+    const zipPath = await createStringPackageZip(ctx.tempDir, 'dataset-pkg', '1.0.0');
+    const packageZip = readFileSync(zipPath);
+    await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
 
-      await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', opts);
-      await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', 'dataset-pkg@1.0.0', opts);
-    });
+    await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', opts);
+    await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', 'dataset-pkg@1.0.0', opts);
 
-    it('datasetList returns field names', async () => {
-      const ctx = getContext();
+    return ctx;
+  };
+
+  describe('datasets', { concurrency: true }, () => {
+    it('datasetList returns field names', async (t) => {
+      const ctx = await withStringPackage(t);
       const opts = await ctx.opts();
 
       const fields = await datasetList(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', opts);
@@ -57,8 +59,8 @@ export function datasetTests(getContext: () => TestContext): void {
       assert.ok(fields.includes('tasks'));
     });
 
-    it('datasetListAt returns nested fields', async () => {
-      const ctx = getContext();
+    it('datasetListAt returns nested fields', async (t) => {
+      const ctx = await withStringPackage(t);
       const opts = await ctx.opts();
 
       const path = [variant('field', 'inputs')];
@@ -67,8 +69,8 @@ export function datasetTests(getContext: () => TestContext): void {
       assert.ok(fields.includes('config'), 'should have config field under inputs');
     });
 
-    it('datasetSet and datasetGet round-trip', async () => {
-      const ctx = getContext();
+    it('datasetSet and datasetGet round-trip', async (t) => {
+      const ctx = await withStringPackage(t);
       const opts = await ctx.opts();
 
       // Encode value as BEAST2
@@ -91,8 +93,8 @@ export function datasetTests(getContext: () => TestContext): void {
       assert.strictEqual(decoded, 'hello world');
     });
 
-    it('datasetSet overwrites existing value', async () => {
-      const ctx = getContext();
+    it('datasetSet overwrites existing value', async (t) => {
+      const ctx = await withStringPackage(t);
       const opts = await ctx.opts();
 
       const encode = encodeBeast2For(StringType);

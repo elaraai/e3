@@ -11,32 +11,28 @@
  *
  * @example
  * ```typescript
- * import { describe, before, after } from 'node:test';
+ * import { describe } from 'node:test';
  * import { createServer } from '@elaraai/e3-api-server';
- * import { allTests, createTestContext } from '@elaraai/e3-api-tests';
+ * import { allTests, createTestContext, type TestSetup, type TestContext } from '@elaraai/e3-api-tests';
  *
- * describe('API compliance', () => {
- *   let server: Server;
- *   let context: TestContext;
- *
- *   before(async () => {
- *     server = await createServer({ reposDir: tempDir, port: 0 });
- *     await server.start();
- *     context = await createTestContext({
- *       baseUrl: `http://localhost:${server.port}`,
- *       getToken: async () => 'test-token',
- *     });
+ * const setup: TestSetup<TestContext> = async (t) => {
+ *   const ctx = await createTestContext({
+ *     baseUrl: 'http://localhost:3000',
+ *     getToken: async () => 'test-token',
+ *     cleanup: true,
  *   });
+ *   t.after(() => ctx.cleanup());
+ *   return ctx;
+ * };
  *
- *   after(async () => {
- *     await context.cleanup();
- *     await server.stop();
- *   });
- *
- *   allTests(() => context);
+ * describe('API compliance', { concurrency: true }, () => {
+ *   allTests(setup, () => ({ E3_CREDENTIALS_PATH: '/path/to/creds' }));
  * });
  * ```
  */
+
+// Setup type
+export { type TestSetup } from './setup.js';
 
 // Context and configuration
 export { createTestContext, type TestConfig, type TestContext } from './context.js';
@@ -74,6 +70,7 @@ export { cliTests } from './suites/cli.js';
 export { transferTests } from './suites/transfer.js';
 
 import type { TestContext } from './context.js';
+import type { TestSetup } from './setup.js';
 import { repositoryTests } from './suites/repository.js';
 import { packageTests } from './suites/packages.js';
 import { workspaceTests } from './suites/workspaces.js';
@@ -88,28 +85,28 @@ import { transferTests } from './suites/transfer.js';
  *
  * CLI tests require additional credentials setup and are registered separately.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  */
-export function allApiTests(getContext: () => TestContext): void {
-  repositoryTests(getContext);
-  packageTests(getContext);
-  workspaceTests(getContext);
-  datasetTests(getContext);
-  dataflowTests(getContext);
-  platformTests(getContext);
+export function allApiTests(setup: TestSetup<TestContext>): void {
+  repositoryTests(setup);
+  packageTests(setup);
+  workspaceTests(setup);
+  datasetTests(setup);
+  dataflowTests(setup);
+  platformTests(setup);
 }
 
 /**
  * Register all test suites including CLI tests.
  *
- * @param getContext - Function that returns the current test context
+ * @param setup - Factory that creates a fresh test context per test
  * @param getCredentialsEnv - Function that returns env vars for CLI auth
  */
 export function allTests(
-  getContext: () => TestContext,
+  setup: TestSetup<TestContext>,
   getCredentialsEnv: () => Record<string, string>
 ): void {
-  allApiTests(getContext);
-  cliTests(getContext, getCredentialsEnv);
-  transferTests(getContext, getCredentialsEnv);
+  allApiTests(setup);
+  cliTests(setup, getCredentialsEnv);
+  transferTests(setup, getCredentialsEnv);
 }
