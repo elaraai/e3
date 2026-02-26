@@ -1084,17 +1084,16 @@ async function walkTree(
   }
 
   const treeObject = await treeRead(storage, repo, treeHash, structure);
-  const nodes: TreeNode[] = [];
 
-  for (const [fieldName, childRef] of Object.entries(treeObject)) {
-    const childStructure = structure.value.get(fieldName);
-    if (!childStructure) {
-      continue; // Skip unknown fields
-    }
+  // Filter to fields that exist in the structure, then process in parallel
+  const entries = Object.entries(treeObject)
+    .filter(([fieldName]) => structure.value.has(fieldName));
+
+  const nodes = await Promise.all(entries.map(async ([fieldName, childRef]): Promise<TreeNode> => {
+    const childStructure = structure.value.get(fieldName)!;
 
     if (childStructure.type === 'value') {
-      // This is a dataset (leaf node)
-      // The type is directly in the structure - no need to read the value
+      // Dataset (leaf node)
       const node: TreeLeafNode = {
         name: fieldName,
         kind: 'dataset',
@@ -1110,68 +1109,58 @@ async function walkTree(
         } else if (childRef.type === 'null') {
           node.size = 0;
         }
-        // 'unassigned': hash and size remain undefined
       }
 
-      nodes.push(node);
-    } else if (childStructure.type === 'struct') {
-      // Check if this is a task subtree - show as leaf with output type
-      if (isTaskStructure(childStructure) && childRef.type === 'tree') {
-        const node: TreeLeafNode = {
-          name: fieldName,
-          kind: 'dataset',
-          datasetType: includeTypes ? getTaskOutputTypeFromStructure(childStructure) : undefined,
-        };
+      return node;
+    }
 
-        if (includeStatus) {
-          // Read the task subtree to get the output DataRef
-          const taskTree = await treeRead(storage, repo, childRef.value, childStructure);
-          const outputRef = taskTree['output'];
-          if (outputRef) {
-            node.refType = outputRef.type;
-            if (outputRef.type === 'value') {
-              node.hash = outputRef.value;
-              const { size } = await storage.objects.stat(repo, outputRef.value);
-              node.size = size;
-            } else if (outputRef.type === 'null') {
-              node.size = 0;
-            }
-            // 'unassigned': hash and size remain undefined
-          }
-        }
+    // childStructure.type === 'struct'
 
-        nodes.push(node);
-        continue;
-      }
-
-      // Regular subtree
-      let children: TreeNode[] = [];
-
-      // Recurse if we haven't hit max depth
-      if (maxDepth === undefined || currentDepth < maxDepth) {
-        if (childRef.type === 'tree') {
-          children = await walkTree(
-            storage,
-            repo,
-            childRef.value,
-            childStructure,
-            currentDepth + 1,
-            maxDepth,
-            includeTypes,
-            includeStatus
-          );
-        }
-      }
-
-      const node: TreeBranchNode = {
+    // Task subtree — show as leaf with output type
+    if (isTaskStructure(childStructure) && childRef.type === 'tree') {
+      const node: TreeLeafNode = {
         name: fieldName,
-        kind: 'tree',
-        children,
+        kind: 'dataset',
+        datasetType: includeTypes ? getTaskOutputTypeFromStructure(childStructure) : undefined,
       };
 
-      nodes.push(node);
+      if (includeStatus) {
+        const taskTree = await treeRead(storage, repo, childRef.value, childStructure);
+        const outputRef = taskTree['output'];
+        if (outputRef) {
+          node.refType = outputRef.type;
+          if (outputRef.type === 'value') {
+            node.hash = outputRef.value;
+            const { size } = await storage.objects.stat(repo, outputRef.value);
+            node.size = size;
+          } else if (outputRef.type === 'null') {
+            node.size = 0;
+          }
+        }
+      }
+
+      return node;
     }
-  }
+
+    // Regular subtree
+    let children: TreeNode[] = [];
+    if (maxDepth === undefined || currentDepth < maxDepth) {
+      if (childRef.type === 'tree') {
+        children = await walkTree(
+          storage,
+          repo,
+          childRef.value,
+          childStructure,
+          currentDepth + 1,
+          maxDepth,
+          includeTypes,
+          includeStatus
+        );
+      }
+    }
+
+    return { name: fieldName, kind: 'tree', children } as TreeBranchNode;
+  }));
 
   // Sort alphabetically for consistent output
   nodes.sort((a, b) => a.name.localeCompare(b.name));
