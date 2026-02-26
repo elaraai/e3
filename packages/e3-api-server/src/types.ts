@@ -661,6 +661,27 @@ export const DatasetListItemType = StructType({
 });
 
 // =============================================================================
+// Dataset Status Detail Types (single dataset query)
+// =============================================================================
+
+/**
+ * Detailed status of a single dataset.
+ *
+ * @property path - Dataset path (e.g., ".inputs.config")
+ * @property type - East type of the dataset
+ * @property refType - Ref type: "unassigned", "null", or "value"
+ * @property hash - Object hash (None if unassigned/null)
+ * @property size - Size in bytes (None if unassigned)
+ */
+export const DatasetStatusDetailType = StructType({
+  path: StringType,
+  type: EastTypeType,
+  refType: StringType,
+  hash: OptionType(StringType),
+  size: OptionType(IntegerType),
+});
+
+// =============================================================================
 // Value type aliases
 // =============================================================================
 
@@ -699,6 +720,7 @@ export type DataflowExecutionState = ValueTypeOf<typeof DataflowExecutionStateTy
 export type ExecutionHistoryStatus = ValueTypeOf<typeof ExecutionHistoryStatusType>;
 export type ExecutionListItem = ValueTypeOf<typeof ExecutionListItemType>;
 export type DatasetListItem = ValueTypeOf<typeof DatasetListItemType>;
+export type DatasetStatusDetail = ValueTypeOf<typeof DatasetStatusDetailType>;
 
 // =============================================================================
 // Namespace export for convenience
@@ -789,4 +811,7 @@ export const ApiTypes = {
 
   // Dataset List (recursive)
   DatasetListItemType,
+
+  // Dataset Status Detail (single dataset)
+  DatasetStatusDetailType,
 } as const;

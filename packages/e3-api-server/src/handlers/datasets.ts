@@ -3,11 +3,12 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import { NullType, ArrayType, StringType, decodeBeast2, none, toEastTypeValue, isVariant, type EastTypeValue } from '@elaraai/east';
+import { NullType, ArrayType, StringType, decodeBeast2, some, none, toEastTypeValue, isVariant, type EastTypeValue } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
 import {
   workspaceListTree,
   workspaceGetDatasetHash,
+  workspaceGetDatasetStatus,
   workspaceSetDataset,
   workspaceGetTree,
   type TreeNode,
@@ -15,7 +16,7 @@ import {
 import type { StorageBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
-import { DatasetListItemType, type DatasetListItem } from '../types.js';
+import { DatasetListItemType, DatasetStatusDetailType, type DatasetListItem, type DatasetStatusDetail } from '../types.js';
 
 /**
  * List dataset fields at the given path.
@@ -117,8 +118,8 @@ function flattenTree(
         result.push({
           path,
           type: typeValue,
-          hash: none, // TODO: get hash from tree walk
-          size: none, // TODO: get size if needed
+          hash: node.hash ? some(node.hash) : none,
+          size: node.size !== undefined ? some(BigInt(node.size)) : none,
         });
       }
     } else if (node.kind === 'tree') {
@@ -129,7 +130,45 @@ function flattenTree(
 }
 
 /**
- * List datasets recursively (flat list with paths).
+ * Get status detail for a single dataset.
+ */
+export async function getDatasetStatus(
+  storage: StorageBackend,
+  repoPath: string,
+  workspace: string,
+  treePath: TreePath
+): Promise<Response> {
+  try {
+    if (treePath.length === 0) {
+      return sendError(DatasetStatusDetailType, errorToVariant(new Error('Path required for status')));
+    }
+
+    const result = await workspaceGetDatasetStatus(storage, repoPath, workspace, treePath);
+
+    // Build path string from treePath
+    const pathStr = '.' + treePath.map(s => s.value).join('.');
+
+    // Convert EastType to EastTypeValue if needed
+    const typeValue: EastTypeValue = isVariant(result.datasetType)
+      ? result.datasetType as EastTypeValue
+      : toEastTypeValue(result.datasetType);
+
+    const detail: DatasetStatusDetail = {
+      path: pathStr,
+      type: typeValue,
+      refType: result.refType,
+      hash: result.hash ? some(result.hash) : none,
+      size: result.size !== null ? some(BigInt(result.size)) : none,
+    };
+
+    return sendSuccess(DatasetStatusDetailType, detail);
+  } catch (err) {
+    return sendError(DatasetStatusDetailType, errorToVariant(err));
+  }
+}
+
+/**
+ * List datasets recursively (flat list with paths, types, and status).
  */
 export async function listDatasetsRecursive(
   storage: StorageBackend,
@@ -138,15 +177,85 @@ export async function listDatasetsRecursive(
   treePath: TreePath
 ): Promise<Response> {
   try {
-    // Get tree with types included
+    // Get tree with types and status included
     const nodes = await workspaceGetTree(storage, repoPath, workspace, treePath, {
       includeTypes: true,
+      includeStatus: true,
     });
 
     // Build path prefix from treePath
     const pathPrefix = treePath.map(seg => seg.value).join('.');
 
     // Flatten to list
+    const result: DatasetListItem[] = [];
+    flattenTree(nodes, pathPrefix ? `.${pathPrefix}` : '', result);
+
+    return sendSuccess(ArrayType(DatasetListItemType), result);
+  } catch (err) {
+    return sendError(ArrayType(DatasetListItemType), errorToVariant(err));
+  }
+}
+
+/**
+ * Flatten tree nodes into a list of dataset paths (no types/status).
+ */
+function flattenTreePaths(
+  nodes: TreeNode[],
+  pathPrefix: string,
+  result: string[]
+): void {
+  for (const node of nodes) {
+    const path = pathPrefix ? `${pathPrefix}.${node.name}` : `.${node.name}`;
+    if (node.kind === 'dataset') {
+      result.push(path);
+    } else if (node.kind === 'tree') {
+      flattenTreePaths(node.children, path, result);
+    }
+  }
+}
+
+/**
+ * List all descendant dataset paths (string[]).
+ */
+export async function listDatasetsRecursivePaths(
+  storage: StorageBackend,
+  repoPath: string,
+  workspace: string,
+  treePath: TreePath
+): Promise<Response> {
+  try {
+    const nodes = await workspaceGetTree(storage, repoPath, workspace, treePath, {
+      includeTypes: false,
+      includeStatus: false,
+    });
+
+    const pathPrefix = treePath.map(seg => seg.value).join('.');
+    const result: string[] = [];
+    flattenTreePaths(nodes, pathPrefix ? `.${pathPrefix}` : '', result);
+
+    return sendSuccess(ArrayType(StringType), result);
+  } catch (err) {
+    return sendError(ArrayType(StringType), errorToVariant(err));
+  }
+}
+
+/**
+ * List immediate children with types and status (DatasetListItem[]).
+ */
+export async function listDatasetsWithStatus(
+  storage: StorageBackend,
+  repoPath: string,
+  workspace: string,
+  treePath: TreePath
+): Promise<Response> {
+  try {
+    const nodes = await workspaceGetTree(storage, repoPath, workspace, treePath, {
+      maxDepth: 0,
+      includeTypes: true,
+      includeStatus: true,
+    });
+
+    const pathPrefix = treePath.map(seg => seg.value).join('.');
     const result: DatasetListItem[] = [];
     flattenTree(nodes, pathPrefix ? `.${pathPrefix}` : '', result);
 

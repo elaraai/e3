@@ -156,7 +156,7 @@ export function cliTests(
     });
 
     describe('full workflow via CLI', { concurrency: true }, () => {
-      it('imports package, creates workspace, deploys, and shows tree', async (t) => {
+      it('imports package, creates workspace, deploys, and lists recursively', async (t) => {
         const ctx = await withCli(t);
         const { remoteUrl, workDir } = ctx;
         const packageZipPath = await createPackageZip(ctx.tempDir, 'workflow-pkg', '1.0.0');
@@ -176,11 +176,17 @@ export function cliTests(
         assert.strictEqual(result.exitCode, 0, `Deploy failed: ${result.stderr}`);
         assert.match(result.stdout, new RegExp(`Deployed workflow-pkg@1.0.0 to workspace: ${wsName}`));
 
-        // Tree
-        result = await runE3Command(['tree', remoteUrl, wsName], workDir, { env });
-        assert.strictEqual(result.exitCode, 0, `Tree failed: ${result.stderr}`);
-        assert.match(result.stdout, new RegExp(wsName));
-        assert.match(result.stdout, /inputs/);
+        // List recursive with details
+        result = await runE3Command(['list', remoteUrl, wsName, '-r', '-l'], workDir, { env });
+        assert.strictEqual(result.exitCode, 0, `List -r -l failed: ${result.stderr}`);
+        assert.match(result.stdout, /inputs/, 'Should list inputs');
+        // Datasets should show status columns (set/unset)
+        assert.match(result.stdout, /unset|set/, 'Datasets should show status');
+
+        // List recursive paths only
+        result = await runE3Command(['list', remoteUrl, wsName, '-r'], workDir, { env });
+        assert.strictEqual(result.exitCode, 0, `List -r failed: ${result.stderr}`);
+        assert.match(result.stdout, /\.inputs\./, 'Should list input paths');
 
         // Clean up
         await runE3Command(['workspace', 'remove', remoteUrl, wsName], workDir, { env });

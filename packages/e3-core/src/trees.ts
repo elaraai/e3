@@ -876,6 +876,74 @@ export async function workspaceSetDatasetByHash(
   return newRootHash;
 }
 
+/**
+ * Result of querying a single dataset's status.
+ */
+export interface DatasetStatusResult {
+  /** Ref type: 'unassigned' | 'null' | 'value' */
+  refType: DataRef['type'];
+  /** Object hash (null for unassigned/null refs) */
+  hash: string | null;
+  /** East type of the dataset */
+  datasetType: EastTypeValue;
+  /** Size in bytes (null for unassigned) */
+  size: number | null;
+}
+
+/**
+ * Get the status of a single dataset at a path within a workspace.
+ *
+ * Returns the ref type, hash, East type, and size without downloading the value.
+ *
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
+ * @param ws - Workspace name
+ * @param treePath - Path to the dataset
+ * @returns Dataset status including ref type, hash, type, and size
+ * @throws If workspace not deployed, path invalid, or path points to a tree
+ */
+export async function workspaceGetDatasetStatus(
+  storage: StorageBackend,
+  repo: string,
+  ws: string,
+  treePath: TreePath
+): Promise<DatasetStatusResult> {
+  const { rootHash, rootStructure } = await getWorkspaceRootInfo(storage, repo, ws);
+
+  if (treePath.length === 0) {
+    throw new Error('Cannot get dataset status at root path - root is always a tree');
+  }
+
+  // Traverse to the path
+  const { structure, ref } = await traverse(storage, repo, rootHash, rootStructure, treePath);
+
+  // Must be a value structure
+  if (structure.type !== 'value') {
+    const pathStr = treePath.map(s => s.value).join('.');
+    throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
+  }
+
+  const datasetType = structure.value as EastTypeValue;
+
+  // Handle different ref types
+  if (ref.type === 'unassigned') {
+    return { refType: 'unassigned', hash: null, datasetType, size: null };
+  }
+
+  if (ref.type === 'null') {
+    return { refType: 'null', hash: null, datasetType, size: 0 };
+  }
+
+  if (ref.type === 'tree') {
+    const pathStr = treePath.map(s => s.value).join('.');
+    throw new Error(`Path '${pathStr}' structure says value but ref is tree`);
+  }
+
+  // value ref - get size from object store
+  const { size } = await storage.objects.stat(repo, ref.value);
+  return { refType: 'value', hash: ref.value, datasetType, size };
+}
+
 // =============================================================================
 // Tree Traversal
 // =============================================================================
@@ -902,6 +970,12 @@ export interface TreeLeafNode {
   kind: 'dataset';
   /** East type value (only present if includeTypes option was true) */
   datasetType?: EastTypeValue;
+  /** Object hash (only present if includeStatus option was true and ref is 'value') */
+  hash?: string;
+  /** Ref type: 'unassigned' | 'null' | 'value' (only present if includeStatus option was true) */
+  refType?: string;
+  /** Size in bytes (only present if includeStatus option was true and ref is 'null' or 'value') */
+  size?: number;
 }
 
 /**
@@ -917,6 +991,8 @@ export interface WorkspaceGetTreeOptions {
   maxDepth?: number;
   /** Include East types for dataset nodes */
   includeTypes?: boolean;
+  /** Include hash, refType, and size for dataset nodes */
+  includeStatus?: boolean;
 }
 
 /**
@@ -962,14 +1038,14 @@ export async function workspaceGetTree(
   options: WorkspaceGetTreeOptions = {}
 ): Promise<TreeNode[]> {
   const { rootHash, rootStructure } = await getWorkspaceRootInfo(storage, repo, ws);
-  const { maxDepth, includeTypes } = options;
+  const { maxDepth, includeTypes, includeStatus } = options;
 
   // If path is empty, start from root
   if (treePath.length === 0) {
     if (rootStructure.type !== 'struct') {
       throw new Error('Root is not a tree');
     }
-    return walkTree(storage, repo, rootHash, rootStructure, 0, maxDepth, includeTypes);
+    return walkTree(storage, repo, rootHash, rootStructure, 0, maxDepth, includeTypes, includeStatus);
   }
 
   // Traverse to the path first
@@ -987,7 +1063,7 @@ export async function workspaceGetTree(
     throw new Error(`Path '${pathStr}' has ref type '${ref.type}', expected 'tree'`);
   }
 
-  return walkTree(storage, repo, ref.value, structure, 0, maxDepth, includeTypes);
+  return walkTree(storage, repo, ref.value, structure, 0, maxDepth, includeTypes, includeStatus);
 }
 
 /**
@@ -1000,7 +1076,8 @@ async function walkTree(
   structure: Structure,
   currentDepth: number,
   maxDepth: number | undefined,
-  includeTypes: boolean | undefined
+  includeTypes: boolean | undefined,
+  includeStatus: boolean | undefined
 ): Promise<TreeNode[]> {
   if (structure.type !== 'struct') {
     throw new Error('Expected struct structure for tree walk');
@@ -1024,6 +1101,18 @@ async function walkTree(
         datasetType: includeTypes ? childStructure.value as EastTypeValue : undefined,
       };
 
+      if (includeStatus) {
+        node.refType = childRef.type;
+        if (childRef.type === 'value') {
+          node.hash = childRef.value;
+          const { size } = await storage.objects.stat(repo, childRef.value);
+          node.size = size;
+        } else if (childRef.type === 'null') {
+          node.size = 0;
+        }
+        // 'unassigned': hash and size remain undefined
+      }
+
       nodes.push(node);
     } else if (childStructure.type === 'struct') {
       // Check if this is a task subtree - show as leaf with output type
@@ -1033,6 +1122,23 @@ async function walkTree(
           kind: 'dataset',
           datasetType: includeTypes ? getTaskOutputTypeFromStructure(childStructure) : undefined,
         };
+
+        if (includeStatus) {
+          // Read the task subtree to get the output DataRef
+          const taskTree = await treeRead(storage, repo, childRef.value, childStructure);
+          const outputRef = taskTree['output'];
+          if (outputRef) {
+            node.refType = outputRef.type;
+            if (outputRef.type === 'value') {
+              node.hash = outputRef.value;
+              const { size } = await storage.objects.stat(repo, outputRef.value);
+              node.size = size;
+            } else if (outputRef.type === 'null') {
+              node.size = 0;
+            }
+            // 'unassigned': hash and size remain undefined
+          }
+        }
 
         nodes.push(node);
         continue;
@@ -1051,7 +1157,8 @@ async function walkTree(
             childStructure,
             currentDepth + 1,
             maxDepth,
-            includeTypes
+            includeTypes,
+            includeStatus
           );
         }
       }

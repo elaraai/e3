@@ -379,6 +379,147 @@ describe('end-to-end workflow', () => {
     });
   });
 
+  describe('list -r -l with status and size', () => {
+    it('shows dataset status and size in tabular output', async () => {
+      // Create a simple package with one task
+      const input_x = e3.input('x', IntegerType, 10n);
+      const task_double = e3.task(
+        'double',
+        [input_x],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.multiply(2n)
+        )
+      );
+
+      const pkg = e3.package('list-status-test', '1.0.0', task_double);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'list-status-test@1.0.0'], testDir);
+
+      // Before execution: input has a default value (set), task output is unset
+      let listResult = await runE3Command(['list', repoDir, 'ws', '-r', '-l'], testDir);
+      assert.strictEqual(listResult.exitCode, 0, `list -r -l failed: ${listResult.stderr}`);
+      assert.match(listResult.stdout, /unset/, 'Task output should show unset');
+      assert.match(listResult.stdout, /\bset\b/, 'Input should show set');
+      assert.match(listResult.stdout, /\d+ B/, 'Input should show byte size');
+
+      // Update input
+      const newValuePath = join(testDir, 'val.east');
+      writeFileSync(newValuePath, '25');
+      await runE3Command(['set', repoDir, 'ws.inputs.x', newValuePath], testDir);
+
+      // After set: input still shows set
+      listResult = await runE3Command(['list', repoDir, 'ws', '-r', '-l'], testDir);
+      assert.strictEqual(listResult.exitCode, 0, `list -r -l failed after set: ${listResult.stderr}`);
+      assert.match(listResult.stdout, /\bset\b/, 'Updated input should show set');
+
+      // -r -l should show types
+      assert.match(listResult.stdout, /Integer/, 'Should show type');
+
+      // Execute dataflow
+      const startResult = await runE3Command(['start', repoDir, 'ws'], testDir);
+      assert.strictEqual(startResult.exitCode, 0, `start failed: ${startResult.stderr}\n${startResult.stdout}`);
+
+      // After execution: all datasets should be set
+      listResult = await runE3Command(['list', repoDir, 'ws', '-r', '-l'], testDir);
+      assert.strictEqual(listResult.exitCode, 0, `list -r -l after start failed: ${listResult.stderr}`);
+      // All datasets should now show "set" (no more "unset")
+      assert.doesNotMatch(listResult.stdout, /\bunset\b/, 'No datasets should be unset after execution');
+
+      // -r (paths only) should return dot-separated paths
+      listResult = await runE3Command(['list', repoDir, 'ws', '-r'], testDir);
+      assert.strictEqual(listResult.exitCode, 0, `list -r failed: ${listResult.stderr}`);
+      assert.match(listResult.stdout, /\.inputs\.x/, 'Should show input path');
+      // Tasks are collapsed to leaves (e.g., .tasks.double, not .tasks.double.output)
+      assert.match(listResult.stdout, /\.tasks\.double/, 'Should show task path');
+    });
+  });
+
+  describe('status command', () => {
+    it('shows dataset status detail', async () => {
+      // Create a simple package with one task
+      const input_x = e3.input('x', IntegerType, 10n);
+      const task_double = e3.task(
+        'double',
+        [input_x],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.multiply(2n)
+        )
+      );
+
+      const pkg = e3.package('status-test', '1.0.0', task_double);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'status-test@1.0.0'], testDir);
+
+      // Check input status — should show set with hash and size
+      let statusResult = await runE3Command(['status', repoDir, 'ws.inputs.x'], testDir);
+      assert.strictEqual(statusResult.exitCode, 0, `status failed: ${statusResult.stderr}`);
+      assert.match(statusResult.stdout, /Status: set/, 'Input should show Status: set');
+      assert.match(statusResult.stdout, /Hash:/, 'Input should show Hash');
+      assert.match(statusResult.stdout, /Size:/, 'Input should show Size');
+      assert.match(statusResult.stdout, /Type:/, 'Should show Type');
+
+      // Check task output status — should show unset
+      statusResult = await runE3Command(['status', repoDir, 'ws.tasks.double.output'], testDir);
+      assert.strictEqual(statusResult.exitCode, 0, `status failed: ${statusResult.stderr}`);
+      assert.match(statusResult.stdout, /Status: unset/, 'Task output should show Status: unset');
+
+      // Execute dataflow
+      const startResult = await runE3Command(['start', repoDir, 'ws'], testDir);
+      assert.strictEqual(startResult.exitCode, 0, `start failed: ${startResult.stderr}\n${startResult.stdout}`);
+
+      // After execution: task output should now show set
+      statusResult = await runE3Command(['status', repoDir, 'ws.tasks.double.output'], testDir);
+      assert.strictEqual(statusResult.exitCode, 0, `status after start failed: ${statusResult.stderr}`);
+      assert.match(statusResult.stdout, /Status: set/, 'Task output should show Status: set after execution');
+      assert.match(statusResult.stdout, /Hash:/, 'Task output should show Hash after execution');
+      assert.match(statusResult.stdout, /Size:/, 'Task output should show Size after execution');
+    });
+
+    it('reports error for non-existent field', async () => {
+      const input_x = e3.input('x', IntegerType, 10n);
+      const pkg = e3.package('status-err-field', '1.0.0', input_x);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'status-err-field@1.0.0'], testDir);
+
+      // Typo in field name
+      const result = await runE3Command(['status', repoDir, 'ws.inputs.typo'], testDir);
+      assert.notStrictEqual(result.exitCode, 0, 'Should fail for non-existent field');
+      assert.match(result.stderr, /not found/i, 'Should mention field not found');
+    });
+
+    it('reports error when path points to tree', async () => {
+      const input_x = e3.input('x', IntegerType, 10n);
+      const pkg = e3.package('status-err-tree', '1.0.0', input_x);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'status-err-tree@1.0.0'], testDir);
+
+      // Path points to a tree (inputs), not a dataset
+      const result = await runE3Command(['status', repoDir, 'ws.inputs'], testDir);
+      assert.notStrictEqual(result.exitCode, 0, 'Should fail when path points to tree');
+      assert.match(result.stderr, /tree, not a dataset/, 'Should mention tree vs dataset');
+    });
+  });
+
   describe('error handling', () => {
     it('reports task failure gracefully', async () => {
       // Create a custom task that fails

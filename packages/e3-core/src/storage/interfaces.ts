@@ -150,6 +150,15 @@ export interface ObjectStore {
   exists(repo: string, hash: string): Promise<boolean>;
 
   /**
+   * Get the size of an object without reading its contents.
+   * @param repo - Repository identifier
+   * @param hash - SHA256 hash of the object
+   * @returns Object metadata including size in bytes
+   * @throws {ObjectNotFoundError} If object doesn't exist
+   */
+  stat(repo: string, hash: string): Promise<{ size: number }>;
+
+  /**
    * List all object hashes in the store.
    * Used for garbage collection.
    * @param repo - Repository identifier

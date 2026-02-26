@@ -271,6 +271,19 @@ export class LocalObjectStore implements ObjectStore {
     return objectExists(repo, hash);
   }
 
+  async stat(repo: string, hash: string): Promise<{ size: number }> {
+    const filePath = objectPath(repo, hash);
+    try {
+      const stats = await fs.stat(filePath);
+      return { size: stats.size };
+    } catch (err) {
+      if (isNotFoundError(err)) {
+        throw new ObjectNotFoundError(hash);
+      }
+      throw err;
+    }
+  }
+
   async list(repo: string): Promise<string[]> {
     const objectsDir = path.join(repo, 'objects');
     const hashes: string[] = [];

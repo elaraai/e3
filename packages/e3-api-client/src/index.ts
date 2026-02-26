@@ -42,6 +42,7 @@ export type {
   ExecutionListItem,
   ExecutionHistoryStatus,
   DatasetListItem,
+  DatasetStatusDetail,
 } from './types.js';
 
 // HTTP utilities and auth
@@ -86,7 +87,10 @@ export {
   datasetList,
   datasetListAt,
   datasetListRecursive,
+  datasetListRecursivePaths,
+  datasetListWithStatus,
   datasetGet,
+  datasetGetStatus,
   datasetSet,
 } from './datasets.js';
 

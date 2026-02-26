@@ -10,12 +10,12 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { join } from 'node:path';
-import { variant, StringType, IntegerType, StructType, ArrayType } from '@elaraai/east';
+import { variant, StringType, IntegerType, StructType, ArrayType, East } from '@elaraai/east';
 import e3 from '@elaraai/e3';
 import type { DataRef, Structure } from '@elaraai/e3-types';
-import { treeRead, treeWrite, datasetRead, datasetWrite, packageListTree, packageGetDataset, workspaceListTree, workspaceGetDataset, workspaceSetDataset } from './trees.js';
+import { treeRead, treeWrite, datasetRead, datasetWrite, packageListTree, packageGetDataset, workspaceListTree, workspaceGetDataset, workspaceGetDatasetStatus, workspaceSetDataset } from './trees.js';
 import { packageImport } from './packages.js';
-import { workspaceCreate, workspaceDeploy } from './workspaces.js';
+import { workspaceCreate, workspaceDeploy, workspaceSetRoot } from './workspaces.js';
 import { WorkspaceNotFoundError, WorkspaceNotDeployedError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
 import { LocalStorage } from './storage/local/index.js';
@@ -749,6 +749,198 @@ describe('trees', () => {
         async () => await workspaceSetDataset(storage, testRepo, 'empty', [
           variant('field', 'inputs'),
         ], 'value', StringType),
+        WorkspaceNotDeployedError
+      );
+    });
+  });
+
+  describe('workspaceGetDatasetStatus', () => {
+    it('returns status for value ref (input with default)', async () => {
+      const myInput = e3.input('count', IntegerType, 42n);
+      const pkg = e3.package('status-value', '1.0.0', myInput);
+      const zipPath = join(tempDir, 'status-value.zip');
+      await e3.export(pkg, zipPath);
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'status-value', '1.0.0');
+
+      const result = await workspaceGetDatasetStatus(storage, testRepo, 'myws', [
+        variant('field', 'inputs'),
+        variant('field', 'count'),
+      ]);
+
+      assert.strictEqual(result.refType, 'value');
+      assert.ok(result.hash !== null, 'hash should be present');
+      assert.strictEqual(result.hash!.length, 64, 'hash should be 64-char hex');
+      assert.ok(result.size !== null, 'size should be present');
+      assert.ok(result.size! > 0, 'size should be positive');
+      // datasetType should represent Integer
+      assert.ok(result.datasetType, 'datasetType should be present');
+    });
+
+    it('returns status for unassigned ref (task output)', async () => {
+      const myInput = e3.input('x', IntegerType, 10n);
+      const task = e3.task(
+        'double',
+        [myInput],
+        East.function([IntegerType], IntegerType, ($, x) => x.multiply(2n))
+      );
+      const pkg = e3.package('status-unassigned', '1.0.0', task);
+      const zipPath = join(tempDir, 'status-unassigned.zip');
+      await e3.export(pkg, zipPath);
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'status-unassigned', '1.0.0');
+
+      const result = await workspaceGetDatasetStatus(storage, testRepo, 'myws', [
+        variant('field', 'tasks'),
+        variant('field', 'double'),
+        variant('field', 'output'),
+      ]);
+
+      assert.strictEqual(result.refType, 'unassigned');
+      assert.strictEqual(result.hash, null);
+      assert.strictEqual(result.size, null);
+      assert.ok(result.datasetType, 'datasetType should be present');
+    });
+
+    it('returns status for null ref', async () => {
+      // Deploy a package, then manually rewrite the tree to include a null ref
+      const myInput = e3.input('value', IntegerType, 10n);
+      const pkg = e3.package('status-null', '1.0.0', myInput);
+      const zipPath = join(tempDir, 'status-null.zip');
+      await e3.export(pkg, zipPath);
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'status-null', '1.0.0');
+
+      // Read the current tree, replace the input ref with a null ref, rewrite
+      const rootFields = await workspaceListTree(storage, testRepo, 'myws', []);
+      assert.ok(rootFields.includes('inputs'));
+
+      // Get current root info by reading the workspace state
+      // We need to reconstruct the tree with a null ref for inputs.value
+      // Use the structure from the existing tree
+      const inputsStructure = structStructure({
+        value: valueStructure(IntegerType),
+      });
+      const rootStructure = structStructure({
+        inputs: inputsStructure,
+      });
+
+      // Write a new inputs tree with a null ref
+      const newInputsTree: Record<string, DataRef> = {
+        value: variant('null', null),
+      };
+      const newInputsHash = await treeWrite(storage, testRepo, newInputsTree, inputsStructure);
+
+      // Write a new root tree pointing to the new inputs
+      const newRootTree: Record<string, DataRef> = {
+        inputs: variant('tree', newInputsHash),
+      };
+      const newRootHash = await treeWrite(storage, testRepo, newRootTree, rootStructure);
+
+      // Update workspace root
+      await workspaceSetRoot(storage, testRepo, 'myws', newRootHash);
+
+      // Now query the status of the null ref dataset
+      const result = await workspaceGetDatasetStatus(storage, testRepo, 'myws', [
+        variant('field', 'inputs'),
+        variant('field', 'value'),
+      ]);
+
+      assert.strictEqual(result.refType, 'null');
+      assert.strictEqual(result.hash, null);
+      assert.strictEqual(result.size, 0);
+      assert.ok(result.datasetType, 'datasetType should be present');
+    });
+
+    it('returns updated status after set', async () => {
+      const myInput = e3.input('value', IntegerType, 10n);
+      const pkg = e3.package('status-update', '1.0.0', myInput);
+      const zipPath = join(tempDir, 'status-update.zip');
+      await e3.export(pkg, zipPath);
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'status-update', '1.0.0');
+
+      const path = [variant('field', 'inputs'), variant('field', 'value')];
+
+      // Get initial status
+      const before = await workspaceGetDatasetStatus(storage, testRepo, 'myws', path);
+      assert.strictEqual(before.refType, 'value');
+      const originalHash = before.hash;
+
+      // Set a new value
+      await workspaceSetDataset(storage, testRepo, 'myws', path, 99n, IntegerType);
+
+      // Get updated status
+      const after = await workspaceGetDatasetStatus(storage, testRepo, 'myws', path);
+      assert.strictEqual(after.refType, 'value');
+      assert.ok(after.hash !== null);
+      assert.notStrictEqual(after.hash, originalHash, 'hash should change after set');
+      assert.ok(after.size !== null && after.size > 0);
+    });
+
+    it('throws for empty path', async () => {
+      const myInput = e3.input('value', StringType, 'test');
+      const pkg = e3.package('status-empty', '1.0.0', myInput);
+      const zipPath = join(tempDir, 'status-empty.zip');
+      await e3.export(pkg, zipPath);
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'status-empty', '1.0.0');
+
+      await assert.rejects(
+        async () => await workspaceGetDatasetStatus(storage, testRepo, 'myws', []),
+        /root.*tree/
+      );
+    });
+
+    it('throws when path points to tree', async () => {
+      const myInput = e3.input('value', StringType, 'test');
+      const pkg = e3.package('status-tree', '1.0.0', myInput);
+      const zipPath = join(tempDir, 'status-tree.zip');
+      await e3.export(pkg, zipPath);
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'status-tree', '1.0.0');
+
+      await assert.rejects(
+        async () => await workspaceGetDatasetStatus(storage, testRepo, 'myws', [
+          variant('field', 'inputs'),
+        ]),
+        /tree, not a dataset/
+      );
+    });
+
+    it('throws for non-existent field', async () => {
+      const myInput = e3.input('value', StringType, 'test');
+      const pkg = e3.package('status-nofield', '1.0.0', myInput);
+      const zipPath = join(tempDir, 'status-nofield.zip');
+      await e3.export(pkg, zipPath);
+      await packageImport(storage, testRepo, zipPath);
+      await workspaceDeploy(storage, testRepo, 'myws', 'status-nofield', '1.0.0');
+
+      await assert.rejects(
+        async () => await workspaceGetDatasetStatus(storage, testRepo, 'myws', [
+          variant('field', 'inputs'),
+          variant('field', 'nonexistent'),
+        ]),
+        /not found/
+      );
+    });
+
+    it('throws for non-existent workspace', async () => {
+      await assert.rejects(
+        async () => await workspaceGetDatasetStatus(storage, testRepo, 'nonexistent', [
+          variant('field', 'inputs'),
+        ]),
+        WorkspaceNotFoundError
+      );
+    });
+
+    it('throws for undeployed workspace', async () => {
+      await workspaceCreate(storage, testRepo, 'empty');
+
+      await assert.rejects(
+        async () => await workspaceGetDatasetStatus(storage, testRepo, 'empty', [
+          variant('field', 'inputs'),
+        ]),
         WorkspaceNotDeployedError
       );
     });
