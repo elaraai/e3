@@ -6,7 +6,16 @@
 import { ArrayType, StringType } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
 import { get, type RequestOptions } from './http.js';
-import { DatasetListItemType, type DatasetListItem } from './types.js';
+import { DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from './types.js';
+
+function datasetEndpoint(repo: string, workspace: string, path: TreePath): string {
+  let endpoint = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`;
+  if (path.length > 0) {
+    const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
+    endpoint = `${endpoint}/${pathStr}`;
+  }
+  return endpoint;
+}
 
 /**
  * List field names at root of workspace dataset tree.
@@ -141,14 +150,14 @@ export async function datasetSet(
 }
 
 /**
- * List all datasets recursively under a path (flat list).
+ * List all entries recursively under a path (flat list of datasets and trees).
  *
  * @param url - Base URL of the e3 API server
  * @param repo - Repository name
  * @param workspace - Workspace name
  * @param path - Starting path (empty for root)
  * @param options - Request options including auth token
- * @returns Array of dataset items with path, type, hash, and size
+ * @returns Array of list entries (dataset or tree variants) with path, type, hash, and size
  * @throws {ApiError} On application-level errors
  * @throws {AuthError} On 401 Unauthorized
  */
@@ -158,13 +167,77 @@ export async function datasetListRecursive(
   workspace: string,
   path: TreePath,
   options: RequestOptions
-): Promise<DatasetListItem[]> {
-  let endpoint = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`;
-  if (path.length > 0) {
-    const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
-    endpoint = `${endpoint}/${pathStr}`;
-  }
-  endpoint = `${endpoint}?recursive=true`;
+): Promise<ListEntry[]> {
+  const endpoint = `${datasetEndpoint(repo, workspace, path)}?list=true&recursive=true&status=true`;
+  return get(url, endpoint, ArrayType(ListEntryType), options);
+}
 
-  return get(url, endpoint, ArrayType(DatasetListItemType), options);
+/**
+ * List all descendant dataset paths recursively (paths only, no types/status).
+ *
+ * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
+ * @param workspace - Workspace name
+ * @param path - Starting path (empty for root)
+ * @param options - Request options including auth token
+ * @returns Array of dataset path strings
+ */
+export async function datasetListRecursivePaths(
+  url: string,
+  repo: string,
+  workspace: string,
+  path: TreePath,
+  options: RequestOptions
+): Promise<string[]> {
+  const endpoint = `${datasetEndpoint(repo, workspace, path)}?list=true&recursive=true`;
+  return get(url, endpoint, ArrayType(StringType), options);
+}
+
+/**
+ * List immediate children with type, hash, and size details.
+ *
+ * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
+ * @param workspace - Workspace name
+ * @param path - Path to list (empty for root)
+ * @param options - Request options including auth token
+ * @returns Array of list entries (dataset or tree variants) with path, type, hash, and size
+ */
+export async function datasetListWithStatus(
+  url: string,
+  repo: string,
+  workspace: string,
+  path: TreePath,
+  options: RequestOptions
+): Promise<ListEntry[]> {
+  const endpoint = `${datasetEndpoint(repo, workspace, path)}?list=true&status=true`;
+  return get(url, endpoint, ArrayType(ListEntryType), options);
+}
+
+/**
+ * Get status detail for a single dataset.
+ *
+ * @param url - Base URL of the e3 API server
+ * @param repo - Repository name
+ * @param workspace - Workspace name
+ * @param path - Path to the dataset
+ * @param options - Request options including auth token
+ * @returns Dataset status detail including path, type, refType, hash, and size
+ * @throws {ApiError} On application-level errors
+ * @throws {AuthError} On 401 Unauthorized
+ */
+export async function datasetGetStatus(
+  url: string,
+  repo: string,
+  workspace: string,
+  path: TreePath,
+  options: RequestOptions
+): Promise<DatasetStatusDetail> {
+  const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
+  return get(
+    url,
+    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}?status=true`,
+    DatasetStatusDetailType,
+    options
+  );
 }

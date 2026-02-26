@@ -153,7 +153,9 @@ e3 workspace remove <repo> <ws>             # Remove workspace
 
 ```bash
 e3 list <repo> [path]                       # List tree contents
-e3 tree <repo> <path>                       # Show full tree structure
+e3 list <repo> <path> -r                    # List all dataset paths recursively
+e3 list <repo> <path> -l                    # Immediate children with type/status/size
+e3 list <repo> <path> -r -l                 # All datasets with type/status/size
 e3 get <repo> <path> [-f east|json|beast2]  # Get dataset value
 e3 set <repo> <path> <file> [--type <spec>] # Set dataset from file
 ```

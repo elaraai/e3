@@ -41,7 +41,9 @@ export type {
   DataflowExecutionState,
   ExecutionListItem,
   ExecutionHistoryStatus,
-  DatasetListItem,
+  TreeKind,
+  ListEntry,
+  DatasetStatusDetail,
 } from './types.js';
 
 // HTTP utilities and auth
@@ -86,7 +88,10 @@ export {
   datasetList,
   datasetListAt,
   datasetListRecursive,
+  datasetListRecursivePaths,
+  datasetListWithStatus,
   datasetGet,
+  datasetGetStatus,
   datasetSet,
 } from './datasets.js';
 

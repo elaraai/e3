@@ -20,12 +20,12 @@ import { repoCommand } from './commands/repo.js';
 import { packageCommand } from './commands/package.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { listCommand } from './commands/list.js';
-import { treeCommand } from './commands/tree.js';
 import { getCommand } from './commands/get.js';
 import { setCommand } from './commands/set.js';
 import { startCommand } from './commands/start.js';
 import { runCommand } from './commands/run.js';
 import { logsCommand } from './commands/logs.js';
+import { datasetStatusCommand } from './commands/dataset-status.js';
 import { convertCommand } from './commands/convert.js';
 import { watchCommand } from './commands/watch.js';
 import { createAuthCommand, createLoginCommand, createLogoutCommand } from './commands/auth.js';
@@ -161,14 +161,9 @@ program
 program
   .command('list <repo> [path]')
   .description('List workspaces or tree contents at path (ws.path.to.tree)')
+  .option('-r, --recursive', 'List all datasets recursively')
+  .option('-l, --long', 'Show detailed information (type, status, size)')
   .action(listCommand);
-
-program
-  .command('tree <repo> <path>')
-  .description('Show full tree structure at path (ws or ws.subtree)')
-  .option('--depth <n>', 'Maximum depth to display')
-  .option('--types', 'Show dataset types')
-  .action(treeCommand);
 
 program
   .command('get <repo> <path>')
@@ -181,6 +176,11 @@ program
   .description('Set dataset value from file (ws.path.to.dataset)')
   .option('--type <typespec>', 'Type specification in .east format (required for .json/.csv files)')
   .action(setCommand);
+
+program
+  .command('status <repo> <path>')
+  .description('Show dataset status at path (ws.path.to.dataset)')
+  .action(datasetStatusCommand);
 
 // Execution commands
 program

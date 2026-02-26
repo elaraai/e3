@@ -254,6 +254,9 @@ e3 workspace status <repo> <ws>                # Show workspace status (tasks, d
 
 ```bash
 e3 list <repo> [path]                          # List tree contents
+e3 list <repo> <path> -r                       # All dataset paths recursively
+e3 list <repo> <path> -l                       # Immediate children with type/status/size
+e3 list <repo> <path> -r -l                    # All datasets with type/status/size
 e3 get <repo> <path> [-f east|json|beast2]     # Get dataset value
 e3 set <repo> <path> <file> [--type <spec>]    # Set dataset from file
 ```

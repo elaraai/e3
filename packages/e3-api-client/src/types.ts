@@ -690,16 +690,48 @@ export const ExecutionListItemType = StructType({
 // =============================================================================
 
 /**
- * A dataset in the flat list response.
+ * Tree branch kind variant.
  *
- * @property path - Full path to dataset (e.g., ".inputs.a.x")
- * @property type - East type of the dataset (mandatory)
- * @property hash - Object hash of the value (None if unassigned)
+ * Currently only `struct` branches exist. Future: `dict`, `array`, `variant`.
+ */
+export const TreeKindType = VariantType({ struct: NullType });
+
+/**
+ * A list entry — either a dataset leaf or a tree branch.
+ *
+ * Used by the `?list=true&status=true` endpoints to return both
+ * tree structure entries and dataset leaves in a single flat list.
+ */
+export const ListEntryType = VariantType({
+  dataset: StructType({
+    path: StringType,
+    type: EastTypeType,
+    hash: OptionType(StringType),
+    size: OptionType(IntegerType),
+  }),
+  tree: StructType({
+    path: StringType,
+    kind: TreeKindType,
+  }),
+});
+
+// =============================================================================
+// Dataset Status Detail Types (single dataset query)
+// =============================================================================
+
+/**
+ * Detailed status of a single dataset.
+ *
+ * @property path - Dataset path (e.g., ".inputs.config")
+ * @property type - East type of the dataset
+ * @property refType - Ref type: "unassigned", "null", or "value"
+ * @property hash - Object hash (None if unassigned/null)
  * @property size - Size in bytes (None if unassigned)
  */
-export const DatasetListItemType = StructType({
+export const DatasetStatusDetailType = StructType({
   path: StringType,
   type: EastTypeType,
+  refType: StringType,
   hash: OptionType(StringType),
   size: OptionType(IntegerType),
 });
@@ -742,7 +774,9 @@ export type DataflowExecutionSummary = ValueTypeOf<typeof DataflowExecutionSumma
 export type DataflowExecutionState = ValueTypeOf<typeof DataflowExecutionStateType>;
 export type ExecutionHistoryStatus = ValueTypeOf<typeof ExecutionHistoryStatusType>;
 export type ExecutionListItem = ValueTypeOf<typeof ExecutionListItemType>;
-export type DatasetListItem = ValueTypeOf<typeof DatasetListItemType>;
+export type TreeKind = ValueTypeOf<typeof TreeKindType>;
+export type ListEntry = ValueTypeOf<typeof ListEntryType>;
+export type DatasetStatusDetail = ValueTypeOf<typeof DatasetStatusDetailType>;
 
 // =============================================================================
 // Namespace export for convenience
@@ -829,5 +863,9 @@ export const ApiTypes = {
   ExecutionListItemType,
 
   // Dataset List (recursive)
-  DatasetListItemType,
+  TreeKindType,
+  ListEntryType,
+
+  // Dataset Status Detail (single dataset)
+  DatasetStatusDetailType,
 } as const;

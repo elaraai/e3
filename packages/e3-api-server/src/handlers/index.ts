@@ -25,7 +25,11 @@ export {
 
 export {
   listDatasets,
+  listDatasetsRecursive,
+  listDatasetsRecursivePaths,
+  listDatasetsWithStatus,
   getDataset,
+  getDatasetStatus,
   setDataset,
 } from './datasets.js';
 

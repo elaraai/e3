@@ -69,6 +69,14 @@ class InMemoryObjectStore implements ObjectStore {
     return this.getRepoObjects(repo).has(hash);
   }
 
+  async stat(repo: string, hash: string): Promise<{ size: number }> {
+    const data = this.getRepoObjects(repo).get(hash);
+    if (!data) {
+      throw new ObjectNotFoundError(hash);
+    }
+    return { size: data.length };
+  }
+
   async list(repo: string): Promise<string[]> {
     return [...this.getRepoObjects(repo).keys()];
   }
