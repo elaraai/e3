@@ -690,21 +690,6 @@ export const ExecutionListItemType = StructType({
 // =============================================================================
 
 /**
- * A dataset in the flat list response.
- *
- * @property path - Full path to dataset (e.g., ".inputs.a.x")
- * @property type - East type of the dataset (mandatory)
- * @property hash - Object hash of the value (None if unassigned)
- * @property size - Size in bytes (None if unassigned)
- */
-export const DatasetListItemType = StructType({
-  path: StringType,
-  type: EastTypeType,
-  hash: OptionType(StringType),
-  size: OptionType(IntegerType),
-});
-
-/**
  * Tree branch kind variant.
  *
  * Currently only `struct` branches exist. Future: `dict`, `array`, `variant`.
@@ -789,7 +774,6 @@ export type DataflowExecutionSummary = ValueTypeOf<typeof DataflowExecutionSumma
 export type DataflowExecutionState = ValueTypeOf<typeof DataflowExecutionStateType>;
 export type ExecutionHistoryStatus = ValueTypeOf<typeof ExecutionHistoryStatusType>;
 export type ExecutionListItem = ValueTypeOf<typeof ExecutionListItemType>;
-export type DatasetListItem = ValueTypeOf<typeof DatasetListItemType>;
 export type TreeKind = ValueTypeOf<typeof TreeKindType>;
 export type ListEntry = ValueTypeOf<typeof ListEntryType>;
 export type DatasetStatusDetail = ValueTypeOf<typeof DatasetStatusDetailType>;
@@ -879,7 +863,6 @@ export const ApiTypes = {
   ExecutionListItemType,
 
   // Dataset List (recursive)
-  DatasetListItemType,
   TreeKindType,
   ListEntryType,
 

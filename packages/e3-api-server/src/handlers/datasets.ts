@@ -16,7 +16,7 @@ import {
 import type { StorageBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
-import { DatasetStatusDetailType, ListEntryType, type DatasetListItem, type ListEntry, type DatasetStatusDetail } from '../types.js';
+import { DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from '../types.js';
 
 /**
  * List dataset fields at the given path.

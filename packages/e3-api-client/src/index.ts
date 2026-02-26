@@ -41,7 +41,6 @@ export type {
   DataflowExecutionState,
   ExecutionListItem,
   ExecutionHistoryStatus,
-  DatasetListItem,
   TreeKind,
   ListEntry,
   DatasetStatusDetail,
