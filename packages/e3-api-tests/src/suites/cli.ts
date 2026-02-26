@@ -180,6 +180,8 @@ export function cliTests(
         result = await runE3Command(['list', remoteUrl, wsName, '-r', '-l'], workDir, { env });
         assert.strictEqual(result.exitCode, 0, `List -r -l failed: ${result.stderr}`);
         assert.match(result.stdout, /inputs/, 'Should list inputs');
+        // Tree entries should appear with (tree) marker
+        assert.match(result.stdout, /\(tree\)/, 'Should show tree entries');
         // Datasets should show status columns (set/unset)
         assert.match(result.stdout, /unset|set/, 'Datasets should show status');
 

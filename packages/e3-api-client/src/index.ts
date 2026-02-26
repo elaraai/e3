@@ -42,6 +42,8 @@ export type {
   ExecutionListItem,
   ExecutionHistoryStatus,
   DatasetListItem,
+  TreeKind,
+  ListEntry,
   DatasetStatusDetail,
 } from './types.js';
 

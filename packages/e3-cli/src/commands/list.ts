@@ -30,9 +30,9 @@ import {
   datasetListRecursive as datasetListRecursiveRemote,
   datasetListRecursivePaths as datasetListRecursivePathsRemote,
   datasetListWithStatus as datasetListWithStatusRemote,
-  type DatasetListItem,
+  type ListEntry,
 } from '@elaraai/e3-api-client';
-import { printFor, EastTypeType, isVariant, toEastTypeValue, type EastTypeValue } from '@elaraai/east';
+import { printFor, EastTypeType } from '@elaraai/east';
 import { parseRepoLocation, parseDatasetPath, formatError, exitError } from '../utils.js';
 import { formatSize } from '../format.js';
 
@@ -89,7 +89,7 @@ function leafType(node: TreeLeafNode): string {
   }
 }
 
-/** Flatten tree to table rows (recursive). */
+/** Flatten tree to table rows (recursive), including tree entries. */
 function collectRows(nodes: TreeNode[], prefix: string, result: TableRow[]): void {
   for (const node of nodes) {
     const path = prefix ? `${prefix}.${node.name}` : `.${node.name}`;
@@ -101,12 +101,13 @@ function collectRows(nodes: TreeNode[], prefix: string, result: TableRow[]): voi
         size: leafSize(node),
       });
     } else if (node.kind === 'tree') {
+      result.push({ name: path, type: '(tree)', status: '-', size: '-' });
       collectRows(node.children, path, result);
     }
   }
 }
 
-/** Collect only immediate leaf children as rows. */
+/** Collect immediate children as rows (both datasets and trees). */
 function collectImmediateRows(nodes: TreeNode[], prefix: string, result: TableRow[]): void {
   for (const node of nodes) {
     if (node.kind === 'dataset') {
@@ -116,12 +117,21 @@ function collectImmediateRows(nodes: TreeNode[], prefix: string, result: TableRo
         status: leafStatus(node),
         size: leafSize(node),
       });
+    } else if (node.kind === 'tree') {
+      result.push({ name: node.name, type: '(tree)', status: '-', size: '-' });
     }
   }
 }
 
-/** Convert a DatasetListItem to a table row. */
-function itemToRow(item: DatasetListItem, usePath: boolean): TableRow {
+/** Convert a ListEntry variant to a table row. */
+function entryToRow(entry: ListEntry, usePath: boolean): TableRow {
+  if (entry.type === 'tree') {
+    const name = usePath ? entry.value.path : entry.value.path.split('.').pop()!;
+    return { name, type: '(tree)', status: '-', size: '-' };
+  }
+
+  // entry.type === 'dataset'
+  const item = entry.value;
   let typeStr: string;
   try {
     typeStr = printTypeValue(item.type);
@@ -248,7 +258,7 @@ export async function listCommand(repoArg: string, pathSpec: string | undefined,
           location.baseUrl, location.repo, ws, path,
           { token: location.token }
         );
-        const rows = items.map(item => itemToRow(item, true));
+        const rows = items.map(item => entryToRow(item, true));
         printTable(rows, 'PATH');
       }
       return;
@@ -305,7 +315,7 @@ export async function listCommand(repoArg: string, pathSpec: string | undefined,
           location.baseUrl, location.repo, ws, path,
           { token: location.token }
         );
-        const rows = items.map(item => itemToRow(item, false));
+        const rows = items.map(item => entryToRow(item, false));
         printTable(rows, 'NAME');
       }
       return;

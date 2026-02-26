@@ -191,12 +191,15 @@ export function datasetTests(setup: TestSetup<TestContext>): void {
 
       // List immediate children under "inputs" (should have "config")
       const inputsPath = [variant('field', 'inputs')];
-      const items = await datasetListWithStatus(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', inputsPath, opts);
-      assert.ok(Array.isArray(items), 'should return an array');
+      const entries = await datasetListWithStatus(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', inputsPath, opts);
+      assert.ok(Array.isArray(entries), 'should return an array');
       // The string package has at least one input field
-      assert.ok(items.length >= 1, `expected at least 1 item, got ${items.length}`);
-      // Each item should have path, type, hash, size
-      for (const item of items) {
+      assert.ok(entries.length >= 1, `expected at least 1 entry, got ${entries.length}`);
+      // Each dataset entry should have path, type, hash, size
+      const datasets = entries.filter(e => e.type === 'dataset');
+      assert.ok(datasets.length >= 1, 'should have at least 1 dataset entry');
+      for (const entry of datasets) {
+        const item = entry.value;
         assert.ok(typeof item.path === 'string', 'item should have path');
         assert.ok(item.type !== undefined, 'item should have type');
         assert.ok(item.hash.type === 'some' || item.hash.type === 'none', 'item should have hash option');
@@ -216,26 +219,31 @@ export function datasetTests(setup: TestSetup<TestContext>): void {
       await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'hashsize-ws', opts);
       await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'hashsize-ws', 'hashsize-pkg@1.0.0', opts);
 
-      // List all datasets recursively — input has a default value, task output is unassigned
-      const items = await datasetListRecursive(ctx.config.baseUrl, ctx.repoName, 'hashsize-ws', [], opts);
-      assert.ok(items.length >= 2, `expected at least 2 datasets, got ${items.length}`);
+      // List all entries recursively — includes tree and dataset entries
+      const entries = await datasetListRecursive(ctx.config.baseUrl, ctx.repoName, 'hashsize-ws', [], opts);
+
+      // Should have tree entries (inputs, tasks, etc.) and dataset entries
+      const treeEntries = entries.filter(e => e.type === 'tree');
+      const datasetEntries = entries.filter(e => e.type === 'dataset');
+      assert.ok(treeEntries.length >= 1, `expected at least 1 tree entry, got ${treeEntries.length}`);
+      assert.ok(datasetEntries.length >= 2, `expected at least 2 dataset entries, got ${datasetEntries.length}`);
 
       // Find the input dataset and task output dataset
-      const inputItem = items.find(d => d.path.includes('value'));
-      const outputItem = items.find(d => d.path.includes('compute'));
+      const inputItem = datasetEntries.find(d => d.value.path.includes('value'));
+      const outputItem = datasetEntries.find(d => d.value.path.includes('compute'));
       assert.ok(inputItem, 'should find input "value" dataset');
       assert.ok(outputItem, 'should find task "compute" dataset');
 
       // Input has a default value (10n) — hash and size should be populated
-      assert.strictEqual(inputItem.hash.type, 'some', 'input hash should be some');
-      assert.strictEqual(inputItem.size.type, 'some', 'input size should be some');
-      assert.strictEqual(typeof inputItem.hash.value, 'string');
-      assert.strictEqual(inputItem.hash.value.length, 64, 'hash should be 64-char hex');
-      assert.ok(inputItem.size.value > 0n, 'input size should be positive');
+      assert.strictEqual(inputItem.value.hash.type, 'some', 'input hash should be some');
+      assert.strictEqual(inputItem.value.size.type, 'some', 'input size should be some');
+      assert.strictEqual(typeof inputItem.value.hash.value, 'string');
+      assert.strictEqual(inputItem.value.hash.value.length, 64, 'hash should be 64-char hex');
+      assert.ok(inputItem.value.size.value > 0n, 'input size should be positive');
 
       // Task output is unassigned — hash and size should be none
-      assert.strictEqual(outputItem.hash.type, 'none', 'unassigned output hash should be none');
-      assert.strictEqual(outputItem.size.type, 'none', 'unassigned output size should be none');
+      assert.strictEqual(outputItem.value.hash.type, 'none', 'unassigned output hash should be none');
+      assert.strictEqual(outputItem.value.size.type, 'none', 'unassigned output size should be none');
 
       // Now set the input to a new value and verify hash/size update
       const encode = encodeBeast2For(IntegerType);
@@ -246,13 +254,14 @@ export function datasetTests(setup: TestSetup<TestContext>): void {
       await datasetSet(ctx.config.baseUrl, ctx.repoName, 'hashsize-ws', inputPath, encode(42n), opts);
 
       // List again and check the input has updated hash/size
-      const items2 = await datasetListRecursive(ctx.config.baseUrl, ctx.repoName, 'hashsize-ws', [], opts);
-      const inputItem2 = items2.find(d => d.path.includes('value'));
+      const entries2 = await datasetListRecursive(ctx.config.baseUrl, ctx.repoName, 'hashsize-ws', [], opts);
+      const datasetEntries2 = entries2.filter(e => e.type === 'dataset');
+      const inputItem2 = datasetEntries2.find(d => d.value.path.includes('value'));
       assert.ok(inputItem2, 'should find input after set');
-      assert.strictEqual(inputItem2.hash.type, 'some', 'updated input hash should be some');
-      assert.strictEqual(inputItem2.size.type, 'some', 'updated input size should be some');
-      assert.strictEqual(inputItem2.hash.value.length, 64, 'updated hash should be 64-char hex');
-      assert.ok(inputItem2.size.value > 0n, 'updated input size should be positive');
+      assert.strictEqual(inputItem2.value.hash.type, 'some', 'updated input hash should be some');
+      assert.strictEqual(inputItem2.value.size.type, 'some', 'updated input size should be some');
+      assert.strictEqual(inputItem2.value.hash.value.length, 64, 'updated hash should be 64-char hex');
+      assert.ok(inputItem2.value.size.value > 0n, 'updated input size should be positive');
     });
   });
 }

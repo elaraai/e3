@@ -6,7 +6,7 @@
 import { ArrayType, StringType } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
 import { get, type RequestOptions } from './http.js';
-import { DatasetListItemType, DatasetStatusDetailType, type DatasetListItem, type DatasetStatusDetail } from './types.js';
+import { DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from './types.js';
 
 function datasetEndpoint(repo: string, workspace: string, path: TreePath): string {
   let endpoint = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`;
@@ -150,14 +150,14 @@ export async function datasetSet(
 }
 
 /**
- * List all datasets recursively under a path (flat list).
+ * List all entries recursively under a path (flat list of datasets and trees).
  *
  * @param url - Base URL of the e3 API server
  * @param repo - Repository name
  * @param workspace - Workspace name
  * @param path - Starting path (empty for root)
  * @param options - Request options including auth token
- * @returns Array of dataset items with path, type, hash, and size
+ * @returns Array of list entries (dataset or tree variants) with path, type, hash, and size
  * @throws {ApiError} On application-level errors
  * @throws {AuthError} On 401 Unauthorized
  */
@@ -167,9 +167,9 @@ export async function datasetListRecursive(
   workspace: string,
   path: TreePath,
   options: RequestOptions
-): Promise<DatasetListItem[]> {
+): Promise<ListEntry[]> {
   const endpoint = `${datasetEndpoint(repo, workspace, path)}?list=true&recursive=true&status=true`;
-  return get(url, endpoint, ArrayType(DatasetListItemType), options);
+  return get(url, endpoint, ArrayType(ListEntryType), options);
 }
 
 /**
@@ -201,7 +201,7 @@ export async function datasetListRecursivePaths(
  * @param workspace - Workspace name
  * @param path - Path to list (empty for root)
  * @param options - Request options including auth token
- * @returns Array of dataset items with path, type, hash, and size
+ * @returns Array of list entries (dataset or tree variants) with path, type, hash, and size
  */
 export async function datasetListWithStatus(
   url: string,
@@ -209,9 +209,9 @@ export async function datasetListWithStatus(
   workspace: string,
   path: TreePath,
   options: RequestOptions
-): Promise<DatasetListItem[]> {
+): Promise<ListEntry[]> {
   const endpoint = `${datasetEndpoint(repo, workspace, path)}?list=true&status=true`;
-  return get(url, endpoint, ArrayType(DatasetListItemType), options);
+  return get(url, endpoint, ArrayType(ListEntryType), options);
 }
 
 /**

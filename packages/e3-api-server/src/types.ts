@@ -660,6 +660,32 @@ export const DatasetListItemType = StructType({
   size: OptionType(IntegerType),
 });
 
+/**
+ * Tree branch kind variant.
+ *
+ * Currently only `struct` branches exist. Future: `dict`, `array`, `variant`.
+ */
+export const TreeKindType = VariantType({ struct: NullType });
+
+/**
+ * A list entry — either a dataset leaf or a tree branch.
+ *
+ * Used by the `?list=true&status=true` endpoints to return both
+ * tree structure entries and dataset leaves in a single flat list.
+ */
+export const ListEntryType = VariantType({
+  dataset: StructType({
+    path: StringType,
+    type: EastTypeType,
+    hash: OptionType(StringType),
+    size: OptionType(IntegerType),
+  }),
+  tree: StructType({
+    path: StringType,
+    kind: TreeKindType,
+  }),
+});
+
 // =============================================================================
 // Dataset Status Detail Types (single dataset query)
 // =============================================================================
@@ -720,6 +746,8 @@ export type DataflowExecutionState = ValueTypeOf<typeof DataflowExecutionStateTy
 export type ExecutionHistoryStatus = ValueTypeOf<typeof ExecutionHistoryStatusType>;
 export type ExecutionListItem = ValueTypeOf<typeof ExecutionListItemType>;
 export type DatasetListItem = ValueTypeOf<typeof DatasetListItemType>;
+export type TreeKind = ValueTypeOf<typeof TreeKindType>;
+export type ListEntry = ValueTypeOf<typeof ListEntryType>;
 export type DatasetStatusDetail = ValueTypeOf<typeof DatasetStatusDetailType>;
 
 // =============================================================================
@@ -811,6 +839,8 @@ export const ApiTypes = {
 
   // Dataset List (recursive)
   DatasetListItemType,
+  TreeKindType,
+  ListEntryType,
 
   // Dataset Status Detail (single dataset)
   DatasetStatusDetailType,

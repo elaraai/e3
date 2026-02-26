@@ -3,7 +3,7 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import { NullType, ArrayType, StringType, decodeBeast2, some, none, toEastTypeValue, isVariant, type EastTypeValue } from '@elaraai/east';
+import { NullType, ArrayType, StringType, decodeBeast2, some, none, variant, toEastTypeValue, isVariant, type EastTypeValue } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
 import {
   workspaceListTree,
@@ -16,7 +16,7 @@ import {
 import type { StorageBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
-import { DatasetListItemType, DatasetStatusDetailType, type DatasetListItem, type DatasetStatusDetail } from '../types.js';
+import { DatasetStatusDetailType, ListEntryType, type DatasetListItem, type ListEntry, type DatasetStatusDetail } from '../types.js';
 
 /**
  * List dataset fields at the given path.
@@ -96,35 +96,36 @@ export async function setDataset(
 }
 
 /**
- * Flatten a tree of nodes into a list of dataset items.
+ * Flatten a tree of nodes into a list of ListEntry variants (dataset + tree entries).
  */
-function flattenTree(
+function flattenTreeEntries(
   nodes: TreeNode[],
   pathPrefix: string,
-  result: DatasetListItem[]
+  result: ListEntry[],
+  recursive: boolean
 ): void {
   for (const node of nodes) {
     const path = pathPrefix ? `${pathPrefix}.${node.name}` : `.${node.name}`;
 
     if (node.kind === 'dataset') {
-      // Leaf node - add to result
       const datasetType = node.datasetType;
       if (datasetType) {
-        // Convert EastType to EastTypeValue if needed
         const typeValue: EastTypeValue = isVariant(datasetType)
           ? datasetType as EastTypeValue
           : toEastTypeValue(datasetType);
 
-        result.push({
+        result.push(variant('dataset', {
           path,
           type: typeValue,
           hash: node.hash ? some(node.hash) : none,
           size: node.size !== undefined ? some(BigInt(node.size)) : none,
-        });
+        }));
       }
     } else if (node.kind === 'tree') {
-      // Branch node - recurse
-      flattenTree(node.children, path, result);
+      result.push(variant('tree', { path, kind: variant('struct', null) }));
+      if (recursive) {
+        flattenTreeEntries(node.children, path, result, recursive);
+      }
     }
   }
 }
@@ -186,13 +187,13 @@ export async function listDatasetsRecursive(
     // Build path prefix from treePath
     const pathPrefix = treePath.map(seg => seg.value).join('.');
 
-    // Flatten to list
-    const result: DatasetListItem[] = [];
-    flattenTree(nodes, pathPrefix ? `.${pathPrefix}` : '', result);
+    // Flatten to list (includes tree entries)
+    const result: ListEntry[] = [];
+    flattenTreeEntries(nodes, pathPrefix ? `.${pathPrefix}` : '', result, true);
 
-    return sendSuccess(ArrayType(DatasetListItemType), result);
+    return sendSuccess(ArrayType(ListEntryType), result);
   } catch (err) {
-    return sendError(ArrayType(DatasetListItemType), errorToVariant(err));
+    return sendError(ArrayType(ListEntryType), errorToVariant(err));
   }
 }
 
@@ -240,7 +241,7 @@ export async function listDatasetsRecursivePaths(
 }
 
 /**
- * List immediate children with types and status (DatasetListItem[]).
+ * List immediate children with types and status (ListEntry[]).
  */
 export async function listDatasetsWithStatus(
   storage: StorageBackend,
@@ -256,11 +257,11 @@ export async function listDatasetsWithStatus(
     });
 
     const pathPrefix = treePath.map(seg => seg.value).join('.');
-    const result: DatasetListItem[] = [];
-    flattenTree(nodes, pathPrefix ? `.${pathPrefix}` : '', result);
+    const result: ListEntry[] = [];
+    flattenTreeEntries(nodes, pathPrefix ? `.${pathPrefix}` : '', result, false);
 
-    return sendSuccess(ArrayType(DatasetListItemType), result);
+    return sendSuccess(ArrayType(ListEntryType), result);
   } catch (err) {
-    return sendError(ArrayType(DatasetListItemType), errorToVariant(err));
+    return sendError(ArrayType(ListEntryType), errorToVariant(err));
   }
 }

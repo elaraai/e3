@@ -407,6 +407,8 @@ describe('end-to-end workflow', () => {
       assert.match(listResult.stdout, /unset/, 'Task output should show unset');
       assert.match(listResult.stdout, /\bset\b/, 'Input should show set');
       assert.match(listResult.stdout, /\d+ B/, 'Input should show byte size');
+      // Tree entries should appear with (tree) marker
+      assert.match(listResult.stdout, /\(tree\)/, 'Should show tree entries');
 
       // Update input
       const newValuePath = join(testDir, 'val.east');
