@@ -107,6 +107,13 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   // Enable CORS if configured
   if (enableCors) {
     app.use('*', cors({ origin: '*' }));
+    // Allow Private Network Access (required for extension webviews on WiFi)
+    app.use('*', async (c, next) => {
+      await next();
+      if (c.req.header('Access-Control-Request-Private-Network') === 'true') {
+        c.header('Access-Control-Allow-Private-Network', 'true');
+      }
+    });
   }
 
   // Create OIDC provider if configured (built-in auth server)
