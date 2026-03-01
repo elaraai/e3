@@ -1,6 +1,6 @@
 {
   "name": "@elaraai/e3-types",
-  "version": "0.0.2-beta.34",
+  "version": "0.0.2-beta.35",
   "description": "Shared type definitions for e3 (East Execution Engine)",
   "type": "module",
   "main": "dist/src/index.js",
