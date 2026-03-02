@@ -19,8 +19,6 @@ import {
   workspaceRemove,
   workspaceGetState,
   workspaceGetPackage,
-  workspaceGetRoot,
-  workspaceSetRoot,
   workspaceDeploy,
   workspaceExport,
 } from './workspaces.js';
@@ -29,7 +27,6 @@ import {
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
 } from './errors.js';
-import { objectWrite } from './storage/local/LocalObjectStore.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
 import { LocalStorage } from './storage/local/index.js';
 import type { StorageBackend } from './storage/interfaces.js';
@@ -166,12 +163,10 @@ describe('workspaces', () => {
       assert.strictEqual(state.packageName, 'deploy-test');
       assert.strictEqual(state.packageVersion, '1.0.0');
       assert.strictEqual(state.packageHash.length, 64);
-      assert.strictEqual(state.rootHash.length, 64);
       assert.ok(state.deployedAt instanceof Date);
-      assert.ok(state.rootUpdatedAt instanceof Date);
     });
 
-    it('uses package root as initial workspace root', async () => {
+    it('initializes per-dataset refs from package', async () => {
       const myInput = e3.input('value', StringType, 'test');
       const pkg = e3.package('root-test', '1.0.0', myInput);
       const zipPath = join(tempDir, 'root-test.zip');
@@ -180,14 +175,9 @@ describe('workspaces', () => {
 
       await workspaceDeploy(storage, testRepo, 'ws', 'root-test', '1.0.0');
 
-      // Get the package root
-      const pkgObject = await packageRead(storage, testRepo, 'root-test', '1.0.0');
-      const pkgRoot = pkgObject.data.value;
-
-      // Get workspace root
-      const wsRoot = await workspaceGetRoot(storage, testRepo, 'ws');
-
-      assert.strictEqual(wsRoot, pkgRoot);
+      // Verify per-dataset ref files were created
+      const refs = await storage.datasets.list(testRepo, 'ws');
+      assert.ok(refs.length > 0, 'Expected per-dataset refs to be created');
     });
 
     it('stores package hash at deploy time', async () => {
@@ -245,79 +235,8 @@ describe('workspaces', () => {
     });
   });
 
-  describe('workspaceGetRoot / workspaceSetRoot', () => {
-    it('gets root hash', async () => {
-      const pkg = e3.package('root-get', '1.0.0') as any;
-      const zipPath = join(tempDir, 'root-get.zip');
-      await e3.export(pkg, zipPath);
-      await packageImport(storage, testRepo, zipPath);
-      await workspaceDeploy(storage, testRepo, 'ws', 'root-get', '1.0.0');
-
-      const root = await workspaceGetRoot(storage, testRepo, 'ws');
-
-      assert.strictEqual(root.length, 64);
-    });
-
-    it('sets root hash atomically', async () => {
-      const pkg = e3.package('root-set', '1.0.0') as any;
-      const zipPath = join(tempDir, 'root-set.zip');
-      await e3.export(pkg, zipPath);
-      await packageImport(storage, testRepo, zipPath);
-      await workspaceDeploy(storage, testRepo, 'ws', 'root-set', '1.0.0');
-
-      // Create a new object to use as root
-      const newData = new Uint8Array([1, 2, 3, 4, 5]);
-      const newHash = await objectWrite(testRepo, newData);
-
-      await workspaceSetRoot(storage, testRepo, 'ws', newHash);
-
-      const root = await workspaceGetRoot(storage, testRepo, 'ws');
-      assert.strictEqual(root, newHash);
-    });
-
-    it('updates rootUpdatedAt timestamp', async () => {
-      const pkg = e3.package('root-time', '1.0.0') as any;
-      const zipPath = join(tempDir, 'root-time.zip');
-      await e3.export(pkg, zipPath);
-      await packageImport(storage, testRepo, zipPath);
-      await workspaceDeploy(storage, testRepo, 'ws', 'root-time', '1.0.0');
-
-      const stateBefore = await workspaceGetState(storage, testRepo, 'ws');
-      assert.ok(stateBefore !== null);
-
-      // Wait a bit to ensure timestamp changes
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      const newData = new Uint8Array([1, 2, 3]);
-      const newHash = await objectWrite(testRepo, newData);
-      await workspaceSetRoot(storage, testRepo, 'ws', newHash);
-
-      const stateAfter = await workspaceGetState(storage, testRepo, 'ws');
-      assert.ok(stateAfter !== null);
-      assert.ok(stateAfter.rootUpdatedAt > stateBefore.rootUpdatedAt);
-      // deployedAt should not change
-      assert.strictEqual(
-        stateAfter.deployedAt.getTime(),
-        stateBefore.deployedAt.getTime()
-      );
-    });
-
-    it('throws for non-existent workspace', async () => {
-      await assert.rejects(
-        async () => await workspaceGetRoot(storage, testRepo, 'nonexistent'),
-        WorkspaceNotFoundError
-      );
-    });
-
-    it('throws for undeployed workspace', async () => {
-      await workspaceCreate(storage, testRepo, 'empty');
-
-      await assert.rejects(
-        async () => await workspaceGetRoot(storage, testRepo, 'empty'),
-        WorkspaceNotDeployedError
-      );
-    });
-  });
+  // workspaceGetRoot/workspaceSetRoot were removed — workspace state no longer
+  // has rootHash. Per-dataset refs are used instead.
 
   describe('workspaceExport', () => {
     it('exports workspace as package zip', async () => {
@@ -336,7 +255,7 @@ describe('workspaces', () => {
       assert.ok(existsSync(exportZip));
       assert.strictEqual(result.name, 'export-test');
       assert.ok(result.version.startsWith('1.0.0-'));
-      assert.ok(result.objectCount >= 2);
+      assert.ok(result.objectCount >= 1);
     });
 
     it('uses custom name and version', async () => {
@@ -378,30 +297,27 @@ describe('workspaces', () => {
       }
     });
 
-    it('exports modified workspace root', async () => {
-      const pkg = e3.package('modified-export', '1.0.0') as any;
+    it('exports workspace with per-dataset refs', async () => {
+      const myInput = e3.input('value', StringType, 'initial');
+      const pkg = e3.package('modified-export', '1.0.0', myInput);
       const importZip = join(tempDir, 'modified-export.zip');
       await e3.export(pkg, importZip);
       await packageImport(storage, testRepo, importZip);
       await workspaceDeploy(storage, testRepo, 'ws', 'modified-export', '1.0.0');
 
-      // Modify the workspace root
-      const newData = new Uint8Array([99, 88, 77]);
-      const newHash = await objectWrite(testRepo, newData);
-      await workspaceSetRoot(storage, testRepo, 'ws', newHash);
-
       // Export
       const exportZip = join(tempDir, 'modified.zip');
       const result = await workspaceExport(storage, testRepo, 'ws', exportZip);
 
-      // Import to new repo and verify root changed
+      // Import to new repo and verify package structure
       const testRepo2 = createTestRepo();
       const storage2 = new LocalStorage();
       try {
         await packageImport(storage2, testRepo2, exportZip);
         const exportedPkg = await packageRead(storage2, testRepo2, result.name, result.version);
 
-        assert.strictEqual(exportedPkg.data.value, newHash);
+        // Package data has structure but no root hash
+        assert.ok(exportedPkg.data.structure, 'Exported package should have structure');
       } finally {
         removeTestRepo(testRepo2);
       }

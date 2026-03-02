@@ -13,8 +13,11 @@
  * tree node. This enables proper encoding/decoding with the correct StructType
  * and supports future tree types (array, variant, etc.).
  *
- * Low-level operations work with hashes directly (by-hash).
- * High-level operations traverse paths from a root (by-path).
+ * Workspace operations use per-dataset ref files (DatasetRef) instead of tree
+ * traversal. This enables concurrent writes without serialization.
+ *
+ * Low-level tree read/write operations remain for computing root hashes and
+ * for package operations.
  */
 
 import {
@@ -26,7 +29,7 @@ import {
   type EastType,
   type EastTypeValue,
 } from '@elaraai/east';
-import { DataRefType, PackageObjectType, WorkspaceStateType, type DataRef, type Structure, type TreePath, type WorkspaceState } from '@elaraai/e3-types';
+import { DataRefType, PackageObjectType, WorkspaceStateType, type DataRef, type DatasetRef, type Structure, type TreePath, type VersionVector } from '@elaraai/e3-types';
 import { packageRead } from './packages.js';
 import {
   WorkspaceNotFoundError,
@@ -156,200 +159,8 @@ export async function datasetWrite(
 }
 
 // =============================================================================
-// High-level Operations (by path)
+// High-level Operations (by path) - Package operations using tree traversal
 // =============================================================================
-
-/**
- * Result of traversing to a path location.
- */
-interface TraversalResult {
-  /** The structure at the path location */
-  structure: Structure;
-  /** The DataRef at the path location */
-  ref: DataRef;
-}
-
-/**
- * Traverse a tree from root to a path, co-walking structure and data.
- *
- * @param storage - Storage backend
- * @param repo - Repository identifier
- * @param rootHash - Hash of the root tree object
- * @param rootStructure - Structure of the root tree
- * @param path - Path to traverse
- * @returns The structure and DataRef at the path location
- * @throws If path is invalid or traversal fails
- */
-async function traverse(
-  storage: StorageBackend,
-  repo: string,
-  rootHash: string,
-  rootStructure: Structure,
-  path: TreePath
-): Promise<TraversalResult> {
-  let currentStructure = rootStructure;
-  let currentHash = rootHash;
-
-  for (let i = 0; i < path.length; i++) {
-    const segment = path[i]!;
-
-    if (segment.type !== 'field') {
-      throw new Error(`Unsupported path segment type: ${segment.type}`);
-    }
-
-    const fieldName = segment.value;
-
-    // Current structure must be a struct tree to descend into
-    if (currentStructure.type !== 'struct') {
-      const pathSoFar = path.slice(0, i).map(s => s.value).join('.');
-      throw new Error(`Cannot descend into non-struct at path '${pathSoFar}'`);
-    }
-
-    // Read the current tree object
-    const treeObject = await treeRead(storage, repo, currentHash, currentStructure);
-
-    // Look up the child ref
-    const childRef = treeObject[fieldName];
-    if (!childRef) {
-      const pathSoFar = path.slice(0, i).map(s => s.value).join('.');
-      const available = Object.keys(treeObject).join(', ');
-      throw new Error(`Field '${fieldName}' not found at '${pathSoFar}'. Available: ${available}`);
-    }
-
-    // Look up the child structure
-    const childStructure = currentStructure.value.get(fieldName);
-    if (!childStructure) {
-      throw new Error(`Field '${fieldName}' not found in structure`);
-    }
-
-    // If this is the last segment, return the result
-    if (i === path.length - 1) {
-      return { structure: childStructure, ref: childRef };
-    }
-
-    // Otherwise, continue traversing (must be a tree ref)
-    if (childRef.type !== 'tree') {
-      const pathSoFar = path.slice(0, i + 1).map(s => s.value).join('.');
-      throw new Error(`Expected tree ref at '${pathSoFar}', got '${childRef.type}'`);
-    }
-
-    currentStructure = childStructure;
-    currentHash = childRef.value;
-  }
-
-  // Empty path - return root
-  return {
-    structure: rootStructure,
-    ref: { type: 'tree', value: rootHash } as DataRef,
-  };
-}
-
-/**
- * List field names at a tree path within a package's data tree.
- *
- * @param storage - Storage backend
- * @param repo - Repository identifier
- * @param name - Package name
- * @param version - Package version
- * @param path - Path to the tree node
- * @returns Array of field names at the path
- * @throws If package not found, path invalid, or path points to a dataset
- */
-export async function packageListTree(
-  storage: StorageBackend,
-  repo: string,
-  name: string,
-  version: string,
-  path: TreePath
-): Promise<string[]> {
-  // Read the package to get root structure and hash
-  const pkg = await packageRead(storage, repo, name, version);
-  const rootStructure = pkg.data.structure;
-  const rootHash = pkg.data.value;
-
-  if (path.length === 0) {
-    // Empty path - list root tree fields
-    if (rootStructure.type !== 'struct') {
-      throw new Error('Root is not a tree');
-    }
-    const treeObject = await treeRead(storage, repo, rootHash, rootStructure);
-    return Object.keys(treeObject);
-  }
-
-  // Traverse to the path
-  const { structure, ref } = await traverse(storage, repo, rootHash, rootStructure, path);
-
-  // Must be a tree structure
-  if (structure.type !== 'struct') {
-    const pathStr = path.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' points to a dataset, not a tree`);
-  }
-
-  // Must be a tree ref
-  if (ref.type !== 'tree') {
-    const pathStr = path.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' has ref type '${ref.type}', expected 'tree'`);
-  }
-
-  // Read the tree and return field names
-  const treeObject = await treeRead(storage, repo, ref.value, structure);
-  return Object.keys(treeObject);
-}
-
-/**
- * Read and decode a dataset value at a path within a package's data tree.
- *
- * @param storage - Storage backend
- * @param repo - Repository identifier
- * @param name - Package name
- * @param version - Package version
- * @param path - Path to the dataset
- * @returns The decoded dataset value
- * @throws If package not found, path invalid, or path points to a tree
- */
-export async function packageGetDataset(
-  storage: StorageBackend,
-  repo: string,
-  name: string,
-  version: string,
-  path: TreePath
-): Promise<unknown> {
-  // Read the package to get root structure and hash
-  const pkg = await packageRead(storage, repo, name, version);
-  const rootStructure = pkg.data.structure;
-  const rootHash = pkg.data.value;
-
-  if (path.length === 0) {
-    throw new Error('Cannot get dataset at root path - root is always a tree');
-  }
-
-  // Traverse to the path
-  const { structure, ref } = await traverse(storage, repo, rootHash, rootStructure, path);
-
-  // Must be a value structure
-  if (structure.type !== 'value') {
-    const pathStr = path.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
-  }
-
-  // Handle different ref types
-  if (ref.type === 'unassigned') {
-    throw new Error(`Dataset at path is unassigned (pending task output)`);
-  }
-
-  if (ref.type === 'null') {
-    return null;
-  }
-
-  if (ref.type === 'tree') {
-    const pathStr = path.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' structure says value but ref is tree`);
-  }
-
-  // Read and return the dataset value
-  const result = await datasetRead(storage, repo, ref.value);
-  return result.value;
-}
 
 /**
  * Options for setting a workspace dataset.
@@ -366,11 +177,8 @@ export interface WorkspaceSetDatasetOptions {
 /**
  * Update a dataset at a path within a workspace.
  *
- * This creates new tree objects along the path with structural sharing,
- * then atomically updates the workspace root.
- *
- * Acquires an exclusive lock on the workspace for the duration of the write
- * to prevent concurrent modifications.
+ * Writes the value to the object store and updates the per-dataset ref file.
+ * Uses shared structure lock to allow concurrent writes.
  *
  * @param storage - Storage backend
  * @param repo - Repository identifier
@@ -399,7 +207,7 @@ export async function workspaceSetDataset(
   const externalLock = options.lock;
   let lock: LockHandle | null = externalLock ?? null;
   if (!lock) {
-    lock = await storage.locks.acquire(repo, ws, variant('dataset_write', null));
+    lock = await storage.locks.acquire(repo, ws, variant('dataset_write', null), { mode: 'shared' });
     if (!lock) {
       const state = await storage.locks.getState(repo, ws);
       throw new WorkspaceLockError(ws, state ? {
@@ -409,7 +217,58 @@ export async function workspaceSetDataset(
     }
   }
   try {
-    await workspaceSetDatasetUnlocked(storage, repo, ws, treePath, value, type);
+    const wsState = await readWorkspaceState(storage, repo, ws);
+
+    // Read the deployed package object to get the structure
+    const pkgData = await storage.objects.read(repo, wsState.packageHash);
+    const decoder = decodeBeast2For(PackageObjectType);
+    const pkgObject = decoder(Buffer.from(pkgData));
+    const rootStructure = pkgObject.data.structure;
+
+    // Validate that the path leads to a value structure and check writable
+    let currentStructure = rootStructure;
+    for (let i = 0; i < treePath.length; i++) {
+      const segment = treePath[i]!;
+      if (segment.type !== 'field') {
+        throw new Error(`Unsupported path segment type: ${segment.type}`);
+      }
+
+      if (currentStructure.type !== 'struct') {
+        const pathSoFar = treePath.slice(0, i).map(s => s.value).join('.');
+        throw new Error(`Cannot descend into non-struct at path '${pathSoFar}'`);
+      }
+
+      const childStructure = currentStructure.value.get(segment.value);
+      if (!childStructure) {
+        const pathSoFar = treePath.slice(0, i).map(s => s.value).join('.');
+        const available = Array.from(currentStructure.value.keys()).join(', ');
+        throw new Error(`Field '${segment.value}' not found at '${pathSoFar}'. Available: ${available}`);
+      }
+
+      currentStructure = childStructure;
+    }
+
+    // Final structure must be a value
+    if (currentStructure.type !== 'value') {
+      const pathStr = treePath.map(s => s.value).join('.');
+      throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
+    }
+
+    // Check writable flag
+    if (!currentStructure.value.writable) {
+      const pathStr = treePath.map(s => s.value).join('.');
+      throw new Error(`Dataset at '${pathStr}' is not writable`);
+    }
+
+    // Write the new dataset value to object store
+    const newValueHash = await datasetWrite(storage, repo, value, type);
+
+    // Build ref path from tree path
+    const refPath = treePath.map(s => s.value).join('/');
+
+    // Write the DatasetRef with empty version vector (will be populated by dataflow)
+    const datasetRef: DatasetRef = variant('value', { hash: newValueHash, versions: new Map() });
+    await storage.datasets.write(repo, ws, refPath, datasetRef);
   } finally {
     // Only release the lock if we acquired it internally
     if (!externalLock) {
@@ -418,147 +277,16 @@ export async function workspaceSetDataset(
   }
 }
 
-/**
- * Internal: Update a dataset without acquiring a lock.
- * Caller must hold the workspace lock.
- */
-async function workspaceSetDatasetUnlocked(
-  storage: StorageBackend,
-  repo: string,
-  ws: string,
-  treePath: TreePath,
-  value: unknown,
-  type: EastType | EastTypeValue
-): Promise<void> {
-  const state = await readWorkspaceState(storage, repo, ws);
-
-  // Read the deployed package object to get the structure
-  const pkgData = await storage.objects.read(repo, state.packageHash);
-  const decoder = decodeBeast2For(PackageObjectType);
-  const pkgObject = decoder(Buffer.from(pkgData));
-  const rootStructure = pkgObject.data.structure;
-
-  // Validate that the path leads to a value structure
-  let currentStructure = rootStructure;
-  for (let i = 0; i < treePath.length; i++) {
-    const segment = treePath[i]!;
-    if (segment.type !== 'field') {
-      throw new Error(`Unsupported path segment type: ${segment.type}`);
-    }
-
-    if (currentStructure.type !== 'struct') {
-      const pathSoFar = treePath.slice(0, i).map(s => s.value).join('.');
-      throw new Error(`Cannot descend into non-struct at path '${pathSoFar}'`);
-    }
-
-    const childStructure = currentStructure.value.get(segment.value);
-    if (!childStructure) {
-      const pathSoFar = treePath.slice(0, i).map(s => s.value).join('.');
-      const available = Array.from(currentStructure.value.keys()).join(', ');
-      throw new Error(`Field '${segment.value}' not found at '${pathSoFar}'. Available: ${available}`);
-    }
-
-    currentStructure = childStructure;
-  }
-
-  // Final structure must be a value
-  if (currentStructure.type !== 'value') {
-    const pathStr = treePath.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
-  }
-
-  // Write the new dataset value
-  const newValueHash = await datasetWrite(storage, repo, value, type);
-
-  // Now rebuild the tree path from leaf to root (structural sharing)
-  // We need to read each tree along the path, modify it, and write a new version
-
-  // Collect all tree hashes and structures along the path
-  const treeInfos: Array<{
-    hash: string;
-    structure: Structure;
-  }> = [];
-
-  let currentHash = state.rootHash;
-  currentStructure = rootStructure;
-
-  // Read all trees along the path (except the last segment which is the dataset)
-  for (let i = 0; i < treePath.length - 1; i++) {
-    treeInfos.push({ hash: currentHash, structure: currentStructure });
-
-    const segment = treePath[i]!;
-    const treeObject = await treeRead(storage, repo, currentHash, currentStructure);
-    const childRef = treeObject[segment.value];
-
-    if (!childRef || childRef.type !== 'tree') {
-      throw new Error(`Expected tree ref at path segment ${i}`);
-    }
-
-    currentHash = childRef.value;
-    currentStructure = (currentStructure as { type: 'struct'; value: Map<string, Structure> }).value.get(segment.value)!;
-  }
-
-  // Add the final tree that contains the dataset
-  treeInfos.push({ hash: currentHash, structure: currentStructure });
-
-  // Now rebuild from leaf to root
-  // Start with the new value hash as the new ref
-  let newRef: DataRef = { type: 'value', value: newValueHash } as DataRef;
-
-  for (let i = treeInfos.length - 1; i >= 0; i--) {
-    const { hash, structure } = treeInfos[i]!;
-    const fieldName = treePath[i]!.value;
-
-    // Read the current tree
-    const treeObject = await treeRead(storage, repo, hash, structure);
-
-    // Create modified tree with the new ref
-    const newTreeObject: TreeObject = {
-      ...treeObject,
-      [fieldName]: newRef,
-    };
-
-    // Write the new tree
-    const newTreeHash = await treeWrite(storage, repo, newTreeObject, structure);
-
-    // This becomes the new ref for the parent
-    newRef = { type: 'tree', value: newTreeHash } as DataRef;
-  }
-
-  // The final newRef is always a tree ref pointing to the new root
-  // (because we start with a value ref and wrap it in tree refs bottom-up)
-  if (newRef.type !== 'tree' || newRef.value === null) {
-    throw new Error('Internal error: expected tree ref after rebuilding path');
-  }
-  const newRootHash = newRef.value;
-
-  // Update workspace state atomically
-  await writeWorkspaceState(storage, repo, ws, {
-    ...state,
-    rootHash: newRootHash,
-    rootUpdatedAt: new Date(),
-  });
-}
-
 // =============================================================================
 // Workspace Helper Functions
 // =============================================================================
-
-/**
- * Write workspace state to file atomically.
- */
-async function writeWorkspaceState(storage: StorageBackend, repo: string, ws: string, state: WorkspaceState): Promise<void> {
-  const encoder = encodeBeast2For(WorkspaceStateType);
-  const data = encoder(state);
-  await storage.refs.workspaceWrite(repo, ws, data);
-}
 
 /**
  * Read workspace state from file.
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace exists but not deployed
  */
-async function readWorkspaceState(storage: StorageBackend, repo: string, ws: string): Promise<WorkspaceState> {
+async function readWorkspaceState(storage: StorageBackend, repo: string, ws: string) {
   const data = await storage.refs.workspaceRead(repo, ws);
   if (data === null) {
     throw new WorkspaceNotFoundError(ws);
@@ -571,38 +299,39 @@ async function readWorkspaceState(storage: StorageBackend, repo: string, ws: str
 }
 
 /**
- * Get root structure and hash for a workspace.
+ * Get root structure for a workspace.
  * Reads the deployed package object to get the structure.
  */
-async function getWorkspaceRootInfo(
+async function getWorkspaceStructure(
   storage: StorageBackend,
   repo: string,
   ws: string
-): Promise<{ rootHash: string; rootStructure: Structure }> {
-  const state = await readWorkspaceState(storage, repo, ws);
+): Promise<{ rootStructure: Structure }> {
+  const wsState = await readWorkspaceState(storage, repo, ws);
 
   // Read the deployed package object using the stored hash
-  const pkgData = await storage.objects.read(repo, state.packageHash);
+  const pkgData = await storage.objects.read(repo, wsState.packageHash);
   const decoder = decodeBeast2For(PackageObjectType);
   const pkgObject = decoder(Buffer.from(pkgData));
 
   return {
-    rootHash: state.rootHash,
     rootStructure: pkgObject.data.structure,
   };
 }
 
 // =============================================================================
-// Workspace High-level Operations (by path)
+// Workspace High-level Operations (by path) - Using per-dataset refs
 // =============================================================================
 
 /**
  * List field names at a tree path within a workspace's data tree.
  *
+ * Uses the structure to determine available fields (no tree traversal needed).
+ *
  * @param storage - Storage backend
  * @param repo - Repository identifier
  * @param ws - Workspace name
- * @param path - Path to the tree node
+ * @param treePath - Path to the tree node
  * @returns Array of field names at the path
  * @throws If workspace not deployed, path invalid, or path points to a dataset
  */
@@ -612,44 +341,45 @@ export async function workspaceListTree(
   ws: string,
   treePath: TreePath
 ): Promise<string[]> {
-  const { rootHash, rootStructure } = await getWorkspaceRootInfo(storage, repo, ws);
+  const { rootStructure } = await getWorkspaceStructure(storage, repo, ws);
 
-  if (treePath.length === 0) {
-    // Empty path - list root tree fields
-    if (rootStructure.type !== 'struct') {
-      throw new Error('Root is not a tree');
+  // Navigate structure to find the target node
+  let currentStructure = rootStructure;
+  for (let i = 0; i < treePath.length; i++) {
+    const segment = treePath[i]!;
+    if (segment.type !== 'field') {
+      throw new Error(`Unsupported path segment type: ${segment.type}`);
     }
-    const treeObject = await treeRead(storage, repo, rootHash, rootStructure);
-    return Object.keys(treeObject);
+
+    if (currentStructure.type !== 'struct') {
+      const pathStr = treePath.slice(0, i).map(s => s.value).join('.');
+      throw new Error(`Path '${pathStr}' points to a dataset, not a tree`);
+    }
+
+    const childStructure = currentStructure.value.get(segment.value);
+    if (!childStructure) {
+      throw new Error(`Field '${segment.value}' not found in structure`);
+    }
+    currentStructure = childStructure;
   }
 
-  // Traverse to the path
-  const { structure, ref } = await traverse(storage, repo, rootHash, rootStructure, treePath);
-
-  // Must be a tree structure
-  if (structure.type !== 'struct') {
+  if (currentStructure.type !== 'struct') {
     const pathStr = treePath.map(s => s.value).join('.');
     throw new Error(`Path '${pathStr}' points to a dataset, not a tree`);
   }
 
-  // Must be a tree ref
-  if (ref.type !== 'tree') {
-    const pathStr = treePath.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' has ref type '${ref.type}', expected 'tree'`);
-  }
-
-  // Read the tree and return field names
-  const treeObject = await treeRead(storage, repo, ref.value, structure);
-  return Object.keys(treeObject);
+  return Array.from(currentStructure.value.keys());
 }
 
 /**
  * Read and decode a dataset value at a path within a workspace's data tree.
  *
+ * Reads the per-dataset ref file to get the value hash, then decodes the value.
+ *
  * @param storage - Storage backend
  * @param repo - Repository identifier
  * @param ws - Workspace name
- * @param path - Path to the dataset
+ * @param treePath - Path to the dataset
  * @returns The decoded dataset value
  * @throws If workspace not deployed, path invalid, or path points to a tree
  */
@@ -659,23 +389,32 @@ export async function workspaceGetDataset(
   ws: string,
   treePath: TreePath
 ): Promise<unknown> {
-  const { rootHash, rootStructure } = await getWorkspaceRootInfo(storage, repo, ws);
-
   if (treePath.length === 0) {
     throw new Error('Cannot get dataset at root path - root is always a tree');
   }
 
-  // Traverse to the path
-  const { structure, ref } = await traverse(storage, repo, rootHash, rootStructure, treePath);
+  // Validate path against structure
+  const { rootStructure } = await getWorkspaceStructure(storage, repo, ws);
+  let currentStructure = rootStructure;
+  for (let i = 0; i < treePath.length; i++) {
+    const segment = treePath[i]!;
+    if (segment.type !== 'field') throw new Error(`Unsupported path segment type: ${segment.type}`);
+    if (currentStructure.type !== 'struct') throw new Error(`Cannot descend into non-struct`);
+    const child = currentStructure.value.get(segment.value);
+    if (!child) throw new Error(`Field '${segment.value}' not found in structure`);
+    currentStructure = child;
+  }
 
-  // Must be a value structure
-  if (structure.type !== 'value') {
+  if (currentStructure.type !== 'value') {
     const pathStr = treePath.map(s => s.value).join('.');
     throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
   }
 
-  // Handle different ref types
-  if (ref.type === 'unassigned') {
+  // Read the ref file
+  const refPath = treePath.map(s => s.value).join('/');
+  const ref = await storage.datasets.read(repo, ws, refPath);
+
+  if (!ref || ref.type === 'unassigned') {
     throw new Error(`Dataset at path is unassigned (pending task output)`);
   }
 
@@ -683,21 +422,15 @@ export async function workspaceGetDataset(
     return null;
   }
 
-  if (ref.type === 'tree') {
-    const pathStr = treePath.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' structure says value but ref is tree`);
-  }
-
   // Read and return the dataset value
-  const result = await datasetRead(storage, repo, ref.value);
+  const result = await datasetRead(storage, repo, ref.value.hash);
   return result.value;
 }
 
 /**
  * Get the hash of a dataset at a path within a workspace's data tree.
  *
- * Unlike workspaceGetDataset which decodes the value, this returns the raw
- * hash reference. Useful for dataflow execution which operates on hashes.
+ * Reads the per-dataset ref file directly. No tree traversal needed.
  *
  * @param storage - Storage backend
  * @param repo - Repository identifier
@@ -712,42 +445,32 @@ export async function workspaceGetDatasetHash(
   ws: string,
   treePath: TreePath
 ): Promise<{ refType: DataRef['type']; hash: string | null }> {
-  const { rootHash, rootStructure } = await getWorkspaceRootInfo(storage, repo, ws);
-
   if (treePath.length === 0) {
     throw new Error('Cannot get dataset at root path - root is always a tree');
   }
 
-  // Traverse to the path
-  const { structure, ref } = await traverse(storage, repo, rootHash, rootStructure, treePath);
+  // Read the ref file directly using the path
+  const refPath = treePath.map(s => s.value).join('/');
+  const ref = await storage.datasets.read(repo, ws, refPath);
 
-  // Must be a value structure
-  if (structure.type !== 'value') {
-    const pathStr = treePath.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
+  if (!ref || ref.type === 'unassigned') {
+    return { refType: 'unassigned', hash: null };
   }
 
-  // Return ref type and hash
-  if (ref.type === 'unassigned' || ref.type === 'null') {
-    return { refType: ref.type, hash: null };
+  if (ref.type === 'null') {
+    return { refType: 'null', hash: null };
   }
 
-  if (ref.type === 'tree') {
-    const pathStr = treePath.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' structure says value but ref is tree`);
-  }
-
-  return { refType: ref.type, hash: ref.value };
+  return { refType: 'value', hash: ref.value.hash };
 }
 
 /**
  * Set a dataset at a path within a workspace using a pre-computed hash.
  *
- * Unlike workspaceSetDataset which encodes a value, this takes a hash
- * directly. Useful for dataflow execution which already has the output hash.
+ * Writes a DatasetRef file directly. No tree path-copy needed.
  *
  * IMPORTANT: This function does NOT acquire a workspace lock. The caller must
- * hold an exclusive lock on the workspace before calling this function. This
+ * hold a lock on the workspace before calling this function. This
  * is typically used by dataflowExecute which holds the lock for the entire
  * execution.
  *
@@ -756,7 +479,6 @@ export async function workspaceGetDatasetHash(
  * @param ws - Workspace name
  * @param treePath - Path to the dataset
  * @param valueHash - Hash of the dataset value already in the object store
- * @returns The new root hash after updating the tree
  * @throws If workspace not deployed, path invalid, or path points to a tree
  */
 export async function workspaceSetDatasetByHash(
@@ -764,116 +486,17 @@ export async function workspaceSetDatasetByHash(
   repo: string,
   ws: string,
   treePath: TreePath,
-  valueHash: string
-): Promise<string> {
+  valueHash: string,
+  versions: VersionVector
+): Promise<void> {
   if (treePath.length === 0) {
     throw new Error('Cannot set dataset at root path - root is always a tree');
   }
 
-  const state = await readWorkspaceState(storage, repo, ws);
-
-  // Read the deployed package object to get the structure
-  const pkgData = await storage.objects.read(repo, state.packageHash);
-  const decoder = decodeBeast2For(PackageObjectType);
-  const pkgObject = decoder(Buffer.from(pkgData));
-  const rootStructure = pkgObject.data.structure;
-
-  // Validate that the path leads to a value structure
-  let currentStructure = rootStructure;
-  for (let i = 0; i < treePath.length; i++) {
-    const segment = treePath[i]!;
-    if (segment.type !== 'field') {
-      throw new Error(`Unsupported path segment type: ${segment.type}`);
-    }
-
-    if (currentStructure.type !== 'struct') {
-      const pathSoFar = treePath.slice(0, i).map(s => s.value).join('.');
-      throw new Error(`Cannot descend into non-struct at path '${pathSoFar}'`);
-    }
-
-    const childStructure = currentStructure.value.get(segment.value);
-    if (!childStructure) {
-      const pathSoFar = treePath.slice(0, i).map(s => s.value).join('.');
-      const available = Array.from(currentStructure.value.keys()).join(', ');
-      throw new Error(`Field '${segment.value}' not found at '${pathSoFar}'. Available: ${available}`);
-    }
-
-    currentStructure = childStructure;
-  }
-
-  // Final structure must be a value
-  if (currentStructure.type !== 'value') {
-    const pathStr = treePath.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
-  }
-
-  // Rebuild the tree path from leaf to root (structural sharing)
-  // Collect all tree hashes and structures along the path
-  const treeInfos: Array<{
-    hash: string;
-    structure: Structure;
-  }> = [];
-
-  let currentHash = state.rootHash;
-  currentStructure = rootStructure;
-
-  // Read all trees along the path (except the last segment which is the dataset)
-  for (let i = 0; i < treePath.length - 1; i++) {
-    treeInfos.push({ hash: currentHash, structure: currentStructure });
-
-    const segment = treePath[i]!;
-    const treeObject = await treeRead(storage, repo, currentHash, currentStructure);
-    const childRef = treeObject[segment.value];
-
-    if (!childRef || childRef.type !== 'tree') {
-      throw new Error(`Expected tree ref at path segment ${i}`);
-    }
-
-    currentHash = childRef.value;
-    currentStructure = (currentStructure as { type: 'struct'; value: Map<string, Structure> }).value.get(segment.value)!;
-  }
-
-  // Add the final tree that contains the dataset
-  treeInfos.push({ hash: currentHash, structure: currentStructure });
-
-  // Now rebuild from leaf to root
-  // Start with the provided value hash as the new ref
-  let newRef: DataRef = { type: 'value', value: valueHash } as DataRef;
-
-  for (let i = treeInfos.length - 1; i >= 0; i--) {
-    const { hash, structure } = treeInfos[i]!;
-    const fieldName = treePath[i]!.value;
-
-    // Read the current tree
-    const treeObject = await treeRead(storage, repo, hash, structure);
-
-    // Create modified tree with the new ref
-    const newTreeObject: TreeObject = {
-      ...treeObject,
-      [fieldName]: newRef,
-    };
-
-    // Write the new tree
-    const newTreeHash = await treeWrite(storage, repo, newTreeObject, structure);
-
-    // This becomes the new ref for the parent
-    newRef = { type: 'tree', value: newTreeHash } as DataRef;
-  }
-
-  // The final newRef is always a tree ref pointing to the new root
-  if (newRef.type !== 'tree' || newRef.value === null) {
-    throw new Error('Internal error: expected tree ref after rebuilding path');
-  }
-  const newRootHash = newRef.value;
-
-  // Update workspace state atomically
-  await writeWorkspaceState(storage, repo, ws, {
-    ...state,
-    rootHash: newRootHash,
-    rootUpdatedAt: new Date(),
-  });
-
-  return newRootHash;
+  // Write the DatasetRef directly
+  const refPath = treePath.map(s => s.value).join('/');
+  const datasetRef: DatasetRef = variant('value', { hash: valueHash, versions });
+  await storage.datasets.write(repo, ws, refPath, datasetRef);
 }
 
 /**
@@ -908,25 +531,34 @@ export async function workspaceGetDatasetStatus(
   ws: string,
   treePath: TreePath
 ): Promise<DatasetStatusResult> {
-  const { rootHash, rootStructure } = await getWorkspaceRootInfo(storage, repo, ws);
-
   if (treePath.length === 0) {
     throw new Error('Cannot get dataset status at root path - root is always a tree');
   }
 
-  // Traverse to the path
-  const { structure, ref } = await traverse(storage, repo, rootHash, rootStructure, treePath);
+  // Validate path and get type from structure
+  const { rootStructure } = await getWorkspaceStructure(storage, repo, ws);
+  let currentStructure = rootStructure;
+  for (let i = 0; i < treePath.length; i++) {
+    const segment = treePath[i]!;
+    if (segment.type !== 'field') throw new Error(`Unsupported path segment type: ${segment.type}`);
+    if (currentStructure.type !== 'struct') throw new Error('Cannot descend into non-struct');
+    const child = currentStructure.value.get(segment.value);
+    if (!child) throw new Error(`Field '${segment.value}' not found`);
+    currentStructure = child;
+  }
 
-  // Must be a value structure
-  if (structure.type !== 'value') {
+  if (currentStructure.type !== 'value') {
     const pathStr = treePath.map(s => s.value).join('.');
     throw new Error(`Path '${pathStr}' points to a tree, not a dataset`);
   }
 
-  const datasetType = structure.value as EastTypeValue;
+  const datasetType = currentStructure.value.type as EastTypeValue;
 
-  // Handle different ref types
-  if (ref.type === 'unassigned') {
+  // Read the ref file
+  const refPath = treePath.map(s => s.value).join('/');
+  const ref = await storage.datasets.read(repo, ws, refPath);
+
+  if (!ref || ref.type === 'unassigned') {
     return { refType: 'unassigned', hash: null, datasetType, size: null };
   }
 
@@ -934,14 +566,9 @@ export async function workspaceGetDatasetStatus(
     return { refType: 'null', hash: null, datasetType, size: 0 };
   }
 
-  if (ref.type === 'tree') {
-    const pathStr = treePath.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' structure says value but ref is tree`);
-  }
-
   // value ref - get size from object store
-  const { size } = await storage.objects.stat(repo, ref.value);
-  return { refType: 'value', hash: ref.value, datasetType, size };
+  const { size } = await storage.objects.stat(repo, ref.value.hash);
+  return { refType: 'value', hash: ref.value.hash, datasetType, size };
 }
 
 // =============================================================================
@@ -1011,7 +638,7 @@ function getTaskOutputTypeFromStructure(structure: Structure): EastTypeValue | u
   if (structure.type !== 'struct') return undefined;
   const outputStructure = structure.value.get('output');
   if (outputStructure?.type === 'value') {
-    return outputStructure.value as EastTypeValue;
+    return outputStructure.value.type as EastTypeValue;
   }
   return undefined;
 }
@@ -1019,8 +646,8 @@ function getTaskOutputTypeFromStructure(structure: Structure): EastTypeValue | u
 /**
  * Get the full tree structure at a path within a workspace.
  *
- * Recursively walks the tree and returns a hierarchical structure
- * suitable for display. Tasks are shown as leaves with their output type.
+ * Recursively walks the structure and ref files to build a hierarchical
+ * structure suitable for display. Tasks are shown as leaves with their output type.
  *
  * @param storage - Storage backend
  * @param repo - Repository identifier
@@ -1037,43 +664,38 @@ export async function workspaceGetTree(
   treePath: TreePath,
   options: WorkspaceGetTreeOptions = {}
 ): Promise<TreeNode[]> {
-  const { rootHash, rootStructure } = await getWorkspaceRootInfo(storage, repo, ws);
+  const { rootStructure } = await getWorkspaceStructure(storage, repo, ws);
   const { maxDepth, includeTypes, includeStatus } = options;
 
-  // If path is empty, start from root
-  if (treePath.length === 0) {
-    if (rootStructure.type !== 'struct') {
-      throw new Error('Root is not a tree');
-    }
-    return walkTree(storage, repo, rootHash, rootStructure, 0, maxDepth, includeTypes, includeStatus);
+  // Navigate to the target structure
+  let targetStructure = rootStructure;
+  let pathPrefix = '';
+  for (const segment of treePath) {
+    if (segment.type !== 'field') throw new Error(`Unsupported path segment type: ${segment.type}`);
+    if (targetStructure.type !== 'struct') throw new Error('Cannot descend into non-struct');
+    const child = targetStructure.value.get(segment.value);
+    if (!child) throw new Error(`Field '${segment.value}' not found`);
+    pathPrefix = pathPrefix ? `${pathPrefix}/${segment.value}` : segment.value;
+    targetStructure = child;
   }
 
-  // Traverse to the path first
-  const { structure, ref } = await traverse(storage, repo, rootHash, rootStructure, treePath);
-
-  // Must be a tree structure
-  if (structure.type !== 'struct') {
+  if (targetStructure.type !== 'struct') {
     const pathStr = treePath.map(s => s.value).join('.');
     throw new Error(`Path '${pathStr}' points to a dataset, not a tree`);
   }
 
-  // Must be a tree ref
-  if (ref.type !== 'tree') {
-    const pathStr = treePath.map(s => s.value).join('.');
-    throw new Error(`Path '${pathStr}' has ref type '${ref.type}', expected 'tree'`);
-  }
-
-  return walkTree(storage, repo, ref.value, structure, 0, maxDepth, includeTypes, includeStatus);
+  return walkStructure(storage, repo, ws, targetStructure, pathPrefix, 0, maxDepth, includeTypes, includeStatus);
 }
 
 /**
- * Recursively walk a tree and build TreeNode array.
+ * Recursively walk structure and build TreeNode array using ref files.
  */
-async function walkTree(
+async function walkStructure(
   storage: StorageBackend,
   repo: string,
-  treeHash: string,
+  ws: string,
   structure: Structure,
+  pathPrefix: string,
   currentDepth: number,
   maxDepth: number | undefined,
   includeTypes: boolean | undefined,
@@ -1083,31 +705,31 @@ async function walkTree(
     throw new Error('Expected struct structure for tree walk');
   }
 
-  const treeObject = await treeRead(storage, repo, treeHash, structure);
+  const entries = Array.from(structure.value.entries());
 
-  // Filter to fields that exist in the structure, then process in parallel
-  const entries = Object.entries(treeObject)
-    .filter(([fieldName]) => structure.value.has(fieldName));
-
-  const nodes = await Promise.all(entries.map(async ([fieldName, childRef]): Promise<TreeNode> => {
-    const childStructure = structure.value.get(fieldName)!;
+  const nodes = await Promise.all(entries.map(async ([fieldName, childStructure]): Promise<TreeNode> => {
+    const childPath = pathPrefix ? `${pathPrefix}/${fieldName}` : fieldName;
 
     if (childStructure.type === 'value') {
       // Dataset (leaf node)
       const node: TreeLeafNode = {
         name: fieldName,
         kind: 'dataset',
-        datasetType: includeTypes ? childStructure.value as EastTypeValue : undefined,
+        datasetType: includeTypes ? childStructure.value.type as EastTypeValue : undefined,
       };
 
       if (includeStatus) {
-        node.refType = childRef.type;
-        if (childRef.type === 'value') {
-          node.hash = childRef.value;
-          const { size } = await storage.objects.stat(repo, childRef.value);
-          node.size = size;
-        } else if (childRef.type === 'null') {
+        const ref = await storage.datasets.read(repo, ws, childPath);
+        if (!ref || ref.type === 'unassigned') {
+          node.refType = 'unassigned';
+        } else if (ref.type === 'null') {
+          node.refType = 'null';
           node.size = 0;
+        } else {
+          node.refType = 'value';
+          node.hash = ref.value.hash;
+          const { size } = await storage.objects.stat(repo, ref.value.hash);
+          node.size = size;
         }
       }
 
@@ -1117,7 +739,7 @@ async function walkTree(
     // childStructure.type === 'struct'
 
     // Task subtree — show as leaf with output type
-    if (isTaskStructure(childStructure) && childRef.type === 'tree') {
+    if (isTaskStructure(childStructure)) {
       const node: TreeLeafNode = {
         name: fieldName,
         kind: 'dataset',
@@ -1125,17 +747,19 @@ async function walkTree(
       };
 
       if (includeStatus) {
-        const taskTree = await treeRead(storage, repo, childRef.value, childStructure);
-        const outputRef = taskTree['output'];
-        if (outputRef) {
-          node.refType = outputRef.type;
-          if (outputRef.type === 'value') {
-            node.hash = outputRef.value;
-            const { size } = await storage.objects.stat(repo, outputRef.value);
-            node.size = size;
-          } else if (outputRef.type === 'null') {
-            node.size = 0;
-          }
+        // Read the output ref for the task
+        const outputRefPath = `${childPath}/output`;
+        const outputRef = await storage.datasets.read(repo, ws, outputRefPath);
+        if (!outputRef || outputRef.type === 'unassigned') {
+          node.refType = 'unassigned';
+        } else if (outputRef.type === 'null') {
+          node.refType = 'null';
+          node.size = 0;
+        } else {
+          node.refType = 'value';
+          node.hash = outputRef.value.hash;
+          const { size } = await storage.objects.stat(repo, outputRef.value.hash);
+          node.size = size;
         }
       }
 
@@ -1145,18 +769,17 @@ async function walkTree(
     // Regular subtree
     let children: TreeNode[] = [];
     if (maxDepth === undefined || currentDepth < maxDepth) {
-      if (childRef.type === 'tree') {
-        children = await walkTree(
-          storage,
-          repo,
-          childRef.value,
-          childStructure,
-          currentDepth + 1,
-          maxDepth,
-          includeTypes,
-          includeStatus
-        );
-      }
+      children = await walkStructure(
+        storage,
+        repo,
+        ws,
+        childStructure,
+        childPath,
+        currentDepth + 1,
+        maxDepth,
+        includeTypes,
+        includeStatus
+      );
     }
 
     return { name: fieldName, kind: 'tree', children } as TreeBranchNode;
@@ -1166,4 +789,49 @@ async function walkTree(
   nodes.sort((a, b) => a.name.localeCompare(b.name));
 
   return nodes;
+}
+
+// =============================================================================
+// Package Operations (still use tree traversal for compatibility)
+// =============================================================================
+
+/**
+ * List field names at a tree path within a package's data tree.
+ *
+ * Note: In the new format, packages store per-dataset refs in data/ dir
+ * rather than tree objects. This function uses the structure directly.
+ *
+ * @param storage - Storage backend
+ * @param repo - Repository identifier
+ * @param name - Package name
+ * @param version - Package version
+ * @param path - Path to the tree node
+ * @returns Array of field names at the path
+ * @throws If package not found, path invalid, or path points to a dataset
+ */
+export async function packageListTree(
+  storage: StorageBackend,
+  repo: string,
+  name: string,
+  version: string,
+  path: TreePath
+): Promise<string[]> {
+  const pkg = await packageRead(storage, repo, name, version);
+  const rootStructure = pkg.data.structure;
+
+  let currentStructure = rootStructure;
+  for (let i = 0; i < path.length; i++) {
+    const segment = path[i]!;
+    if (segment.type !== 'field') throw new Error(`Unsupported path segment type: ${segment.type}`);
+    if (currentStructure.type !== 'struct') throw new Error('Path points to a dataset, not a tree');
+    const child = currentStructure.value.get(segment.value);
+    if (!child) throw new Error(`Field '${segment.value}' not found`);
+    currentStructure = child;
+  }
+
+  if (currentStructure.type !== 'struct') {
+    throw new Error('Path points to a dataset, not a tree');
+  }
+
+  return Array.from(currentStructure.value.keys());
 }

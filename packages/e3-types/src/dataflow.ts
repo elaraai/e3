@@ -40,7 +40,7 @@ export type DataflowExecutionStatus = 'running' | 'completed' | 'failed' | 'canc
 /**
  * Status of an individual task within an execution.
  */
-export type TaskStatus = 'pending' | 'ready' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+export type TaskStatus = 'pending' | 'ready' | 'in_progress' | 'completed' | 'failed' | 'skipped' | 'deferred';
 
 // =============================================================================
 // Task State
@@ -212,6 +212,41 @@ export const ExecutionEventType = VariantType({
     /** Reason for cancellation */
     reason: OptionType(StringType),
   }),
+  /** An input dataset changed during execution (reactive dataflow) */
+  input_changed: StructType({
+    /** Event sequence number */
+    seq: IntegerType,
+    /** When the event occurred */
+    timestamp: DateTimeType,
+    /** Path of the changed input dataset */
+    path: StringType,
+    /** Previous hash (empty string if was unassigned) */
+    previousHash: StringType,
+    /** New hash */
+    newHash: StringType,
+  }),
+  /** A task was invalidated due to upstream input change */
+  task_invalidated: StructType({
+    /** Event sequence number */
+    seq: IntegerType,
+    /** When the event occurred */
+    timestamp: DateTimeType,
+    /** Task name */
+    task: StringType,
+    /** Reason for invalidation */
+    reason: StringType,
+  }),
+  /** A task was deferred due to inconsistent input versions */
+  task_deferred: StructType({
+    /** Event sequence number */
+    seq: IntegerType,
+    /** When the event occurred */
+    timestamp: DateTimeType,
+    /** Task name */
+    task: StringType,
+    /** Path where version conflict was detected */
+    conflictPath: StringType,
+  }),
 });
 export type ExecutionEvent = ValueTypeOf<typeof ExecutionEventType>;
 
@@ -276,6 +311,16 @@ export const DataflowExecutionStateType = StructType({
   /** Error message if status is 'failed' */
   error: OptionType(StringType),
 
+  // Reactive dataflow tracking
+  /** Version vectors: dataset keypath -> VersionVector (root input path -> hash) */
+  versionVectors: DictType(StringType, DictType(StringType, StringType)),
+  /** Input snapshot: root input keypath -> hash at time of last check */
+  inputSnapshot: DictType(StringType, StringType),
+  /** Set of dataset keypaths that are task outputs */
+  taskOutputPaths: ArrayType(StringType),
+  /** Number of tasks re-executed due to input changes */
+  reexecuted: IntegerType,
+
   // Events (inline array)
   /** All events for this execution */
   events: ArrayType(ExecutionEventType),
@@ -316,6 +361,10 @@ export const TaskExecutionRecordType = StructType({
   executionId: StringType,
   /** Whether this was a cache hit */
   cached: BooleanType,
+  /** Output version vector (which root input versions produced this output) */
+  outputVersions: DictType(StringType, StringType),
+  /** Number of times this task was executed (including re-executions due to input changes) */
+  executionCount: IntegerType,
 });
 export type TaskExecutionRecord = ValueTypeOf<typeof TaskExecutionRecordType>;
 
@@ -333,6 +382,8 @@ export const DataflowRunSummaryType = StructType({
   failed: IntegerType,
   /** Number of skipped tasks */
   skipped: IntegerType,
+  /** Number of tasks re-executed due to input changes */
+  reexecuted: IntegerType,
 });
 export type DataflowRunSummary = ValueTypeOf<typeof DataflowRunSummaryType>;
 
@@ -362,10 +413,10 @@ export const DataflowRunType = StructType({
   /** Current status of the run */
   status: DataflowRunStatusType,
 
-  /** Root hash at start (input snapshot) */
-  inputSnapshot: StringType,
-  /** Root hash at end (output snapshot, null if still running) */
-  outputSnapshot: OptionType(StringType),
+  /** Input version snapshot at start (root input path -> hash) */
+  inputVersions: DictType(StringType, StringType),
+  /** Output version snapshot at end (null if still running) */
+  outputVersions: OptionType(DictType(StringType, StringType)),
 
   /** Map of task name -> execution record */
   taskExecutions: DictType(StringType, TaskExecutionRecordType),

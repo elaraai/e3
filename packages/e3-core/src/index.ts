@@ -80,8 +80,6 @@ export {
   workspaceRemove,
   workspaceGetState,
   workspaceGetPackage,
-  workspaceGetRoot,
-  workspaceSetRoot,
   workspaceDeploy,
   workspaceExport,
   type WorkspaceExportResult,
@@ -101,7 +99,6 @@ export {
 // Tree and dataset operations (high-level, by path)
 export {
   packageListTree,
-  packageGetDataset,
   workspaceListTree,
   workspaceGetDataset,
   workspaceGetDatasetHash,
@@ -174,6 +171,7 @@ export {
   dataflowCheckCache,
   dataflowGetDependentsToSkip,
   dataflowResolveInputHashes,
+  findAffectedTasks,
   parsePathString,
   type DataflowGraph,
   type DataflowOptions,
@@ -209,6 +207,10 @@ export {
   stepIsComplete,
   stepFinalize,
   stepCancel,
+  stepApplyTreeUpdate,
+  stepDetectInputChanges,
+  stepInvalidateTasks,
+  stepCheckVersionConsistency,
   type StepInitializeOptions,
   // State store
   type ExecutionStateStore,
@@ -256,6 +258,20 @@ export {
   type TaskStatusInfo,
   type WorkspaceStatusResult,
 } from './workspaceStatus.js';
+
+// Dataset refs (reactive dataflow)
+export {
+  checkVersionConsistency,
+  mergeVersionVectors,
+  inputVersionVector,
+  keypathToRefPath,
+  refPathToKeypath,
+  snapshotInputVersions,
+  detectInputChanges,
+  computeRootHash,
+  writeRefsFromTree,
+  writeRefsFromPackage,
+} from './dataset-refs.js';
 
 // Errors
 export {

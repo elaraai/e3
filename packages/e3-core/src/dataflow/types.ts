@@ -140,6 +140,8 @@ export interface FinalizeResult {
   failed: number;
   /** Number of tasks skipped due to upstream failure */
   skipped: number;
+  /** Number of tasks re-executed due to input changes */
+  reexecuted: number;
   /** Total duration in milliseconds */
   duration: number;
 }
@@ -148,6 +150,6 @@ export interface FinalizeResult {
  * Result of stepApplyTreeUpdate.
  */
 export interface TreeUpdateResult {
-  /** The new workspace root hash after the update */
-  newRootHash: string;
+  /** Placeholder — per-dataset ref writes don't produce a root hash */
+  ok: true;
 }

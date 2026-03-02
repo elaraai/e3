@@ -43,10 +43,6 @@ export const WorkspaceStateType = StructType({
   packageHash: StringType,
   /** UTC datetime when the package was deployed */
   deployedAt: DateTimeType,
-  /** Current root data tree hash */
-  rootHash: StringType,
-  /** UTC datetime when root was last updated */
-  rootUpdatedAt: DateTimeType,
   /** Run ID of the latest completed dataflow run (null if never run) */
   currentRunId: OptionType(StringType),
 });

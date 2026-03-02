@@ -14,9 +14,14 @@
  * - Small and focused (one step = one Lambda invocation)
  * - Deterministic where possible (pure functions marked as such)
  * - Idempotent for retries
+ *
+ * Reactive step functions (stepDetectInputChanges, stepInvalidateTasks,
+ * stepCheckVersionConsistency) enable the reactive fixpoint loop where
+ * input changes during execution trigger re-execution of affected tasks.
  */
 
 import { variant, some, none } from '@elaraai/east';
+import type { VersionVector, Structure } from '@elaraai/e3-types';
 import type { StorageBackend } from '../storage/interfaces.js';
 import {
   dataflowGetGraph,
@@ -24,11 +29,19 @@ import {
   dataflowGetDependentsToSkip,
   dataflowResolveInputHashes,
   dataflowCheckCache,
+  findAffectedTasks,
 } from '../dataflow.js';
 import {
   workspaceGetDatasetHash,
   workspaceSetDatasetByHash,
 } from '../trees.js';
+import {
+  checkVersionConsistency,
+  mergeVersionVectors,
+  inputVersionVector,
+  snapshotInputVersions,
+  detectInputChanges,
+} from '../dataset-refs.js';
 import type { DataflowGraph } from '../dataflow.js';
 import type {
   DataflowExecutionState,
@@ -64,8 +77,8 @@ export interface StepInitializeOptions {
 /**
  * Initialize a new dataflow execution.
  *
- * Builds the dependency graph and creates the initial execution state.
- * This is an async operation because it reads workspace and package state.
+ * Builds the dependency graph, snapshots root input versions, initializes
+ * version vectors, and creates the initial execution state.
  *
  * @param storage - Storage backend
  * @param repo - Repository identifier
@@ -100,6 +113,27 @@ export async function stepInitialize(
       const { TaskNotFoundError } = await import('../errors.js');
       throw new TaskNotFoundError(filter);
     }
+  }
+
+  // Compute task output paths (datasets produced by tasks)
+  const taskOutputPathsSet = new Set<string>();
+  for (const task of graph.tasks) {
+    taskOutputPathsSet.add(task.output);
+  }
+  const taskOutputPaths = Array.from(taskOutputPathsSet);
+
+  // Read package structure for input snapshot
+  const structure = await getWorkspaceStructure(storage, repo, workspace);
+
+  // Snapshot root input hashes
+  const inputSnapshotMap = await snapshotInputVersions(
+    storage, repo, workspace, structure, taskOutputPathsSet
+  );
+
+  // Initialize version vectors for root inputs
+  const versionVectors = new Map<string, Map<string, string>>();
+  for (const [keypath, hash] of inputSnapshotMap) {
+    versionVectors.set(keypath, inputVersionVector(keypath, hash));
   }
 
   // Initialize task states
@@ -137,6 +171,10 @@ export async function stepInitialize(
     status: 'running' as const,
     completedAt: none,
     error: none,
+    versionVectors,
+    inputSnapshot: inputSnapshotMap,
+    taskOutputPaths,
+    reexecuted: 0n,
     events: [] as ExecutionEvent[],
     eventSeq: 0n,
   } as DataflowExecutionState;
@@ -174,6 +212,33 @@ function getGraph(state: DataflowExecutionState): DataflowGraph {
   return state.graph.value;
 }
 
+/**
+ * Read workspace structure from storage.
+ *
+ * @internal
+ */
+async function getWorkspaceStructure(
+  storage: StorageBackend,
+  repo: string,
+  workspace: string
+): Promise<Structure> {
+  const { decodeBeast2For } = await import('@elaraai/east');
+  const { PackageObjectType, WorkspaceStateType } = await import('@elaraai/e3-types');
+
+  const wsData = await storage.refs.workspaceRead(repo, workspace);
+  if (wsData === null || wsData.length === 0) {
+    throw new Error(`Workspace '${workspace}' not found or not deployed`);
+  }
+  const wsDecoder = decodeBeast2For(WorkspaceStateType);
+  const wsState = wsDecoder(wsData);
+
+  const pkgData = await storage.objects.read(repo, wsState.packageHash);
+  const pkgDecoder = decodeBeast2For(PackageObjectType);
+  const pkgObject = pkgDecoder(Buffer.from(pkgData));
+
+  return pkgObject.data.structure;
+}
+
 // =============================================================================
 // Pure Step Functions
 // =============================================================================
@@ -184,7 +249,7 @@ function getGraph(state: DataflowExecutionState): DataflowGraph {
  * A task is ready when:
  * 1. All tasks it depends on have completed (not just started)
  * 2. It passes the filter (if any)
- * 3. It is not already completed, in-progress, failed, or skipped
+ * 3. It is not already completed, in-progress, failed, skipped, or deferred
  *
  * This is a pure function - it only reads state.
  *
@@ -210,8 +275,11 @@ export function stepGetReady(state: DataflowExecutionState): string[] {
     const taskState = state.tasks.get(taskName);
     if (!taskState) return false;
 
-    // Skip tasks that are already being processed
-    if (taskState.status !== 'pending' && taskState.status !== 'ready') {
+    // Skip tasks that are already being processed or deferred
+    if (
+      taskState.status !== 'pending' &&
+      taskState.status !== 'ready'
+    ) {
       return false;
     }
 
@@ -230,6 +298,8 @@ export function stepGetReady(state: DataflowExecutionState): string[] {
  * An execution is complete when:
  * - All tasks are in a terminal state (completed, failed, skipped)
  * - Or there are no more ready tasks and no tasks in progress
+ * - Or all remaining non-terminal tasks are deferred with no tasks in progress
+ *   (consistency deadlock)
  *
  * This is a pure function - it only reads state.
  *
@@ -239,40 +309,226 @@ export function stepGetReady(state: DataflowExecutionState): string[] {
 export function stepIsComplete(state: DataflowExecutionState): boolean {
   const filterValue = state.filter.type === 'some' ? state.filter.value : null;
 
+  let hasInProgress = false;
+  let hasNonTerminal = false;
+
   for (const taskState of state.tasks.values()) {
-    // Check if any task is still in a non-terminal state
     if (
       taskState.status === 'pending' ||
       taskState.status === 'ready' ||
-      taskState.status === 'in_progress'
+      taskState.status === 'in_progress' ||
+      taskState.status === 'deferred'
     ) {
-      // If in progress, not complete
       if (taskState.status === 'in_progress') {
-        return false;
+        hasInProgress = true;
+        hasNonTerminal = true;
+        continue;
       }
 
-      // If pending or ready, check if it can ever become ready
-      // A task is stuck if it has unmet dependencies that failed/skipped
+      if (taskState.status === 'deferred') {
+        hasNonTerminal = true;
+        continue;
+      }
+
+      // pending or ready — check if it can ever become ready
       const task = getGraph(state).tasks.find(t => t.name === taskState.name);
       if (task) {
         const hasUnmetDeps = task.dependsOn.some(dep => {
           const depState = state.tasks.get(dep);
           return depState && (depState.status === 'failed' || depState.status === 'skipped');
         });
-        // If it's stuck due to failed deps, it should have been skipped
-        // If not stuck, we're not complete
         if (!hasUnmetDeps) {
-          // Check if it passes the filter
           if (filterValue !== null && taskState.name !== filterValue) {
             continue; // Filtered out, doesn't affect completion
           }
-          return false;
+          hasNonTerminal = true;
+          continue;
         }
       }
     }
   }
 
-  return true;
+  // If nothing in progress and no non-terminal tasks, we're done
+  if (!hasNonTerminal) return true;
+
+  // If we have non-terminal tasks but nothing in progress,
+  // check for deferred-only deadlock
+  if (!hasInProgress) {
+    const allNonTerminalDeferred = [...state.tasks.values()].every(ts =>
+      ts.status === 'completed' ||
+      ts.status === 'failed' ||
+      ts.status === 'skipped' ||
+      ts.status === 'deferred' ||
+      (filterValue !== null && ts.name !== filterValue)
+    );
+    if (allNonTerminalDeferred) return true;
+  }
+
+  return false;
+}
+
+// =============================================================================
+// Reactive Step Functions
+// =============================================================================
+
+/**
+ * Detect input changes since the last snapshot.
+ *
+ * Reads current root input dataset hashes from storage and compares
+ * against the snapshot stored in state. For each change, updates the
+ * input snapshot and version vectors, and emits input_changed events.
+ *
+ * @param storage - Storage backend
+ * @param state - Execution state to mutate (inputSnapshot, versionVectors)
+ * @returns Changes detected and events emitted
+ */
+export async function stepDetectInputChanges(
+  storage: StorageBackend,
+  state: DataflowExecutionState
+): Promise<{
+  changes: Array<{ path: string; previousHash: string | null; newHash: string }>;
+  events: ExecutionEvent[];
+}> {
+  const structure = await getWorkspaceStructure(storage, state.repo, state.workspace);
+  const taskOutputPathsSet = new Set(state.taskOutputPaths);
+
+  const changes = await detectInputChanges(
+    storage, state.repo, state.workspace,
+    state.inputSnapshot, structure, taskOutputPathsSet
+  );
+
+  const events: ExecutionEvent[] = [];
+  const mutableState = state as Mutable<DataflowExecutionState>;
+
+  for (const change of changes) {
+    // Update input snapshot
+    state.inputSnapshot.set(change.path, change.newHash);
+
+    // Update version vector for this input
+    state.versionVectors.set(change.path, inputVersionVector(change.path, change.newHash));
+
+    // Emit event
+    mutableState.eventSeq = state.eventSeq + 1n;
+    const event: ExecutionEvent = variant('input_changed', {
+      seq: mutableState.eventSeq,
+      timestamp: new Date(),
+      path: change.path,
+      previousHash: change.previousHash ?? '',
+      newHash: change.newHash,
+    });
+    (mutableState.events as ExecutionEvent[]).push(event);
+    events.push(event);
+  }
+
+  return { changes, events };
+}
+
+/**
+ * Invalidate tasks affected by input changes.
+ *
+ * For each affected task that is not currently in_progress:
+ * - completed: reset to pending, decrement executed/cached counter, emit task_invalidated
+ * - deferred: reset to pending
+ * - pending/ready: leave as-is (will pick up new inputs naturally)
+ * - skipped: leave as-is (upstream failure still applies)
+ *
+ * @param state - Execution state to mutate
+ * @param changes - Input changes from stepDetectInputChanges
+ * @returns Invalidated task names and events
+ */
+export function stepInvalidateTasks(
+  state: DataflowExecutionState,
+  changes: Array<{ path: string }>
+): {
+  invalidated: string[];
+  events: ExecutionEvent[];
+} {
+  const graph = getGraph(state);
+  const affectedTaskNames = findAffectedTasks(graph, changes);
+
+  const invalidated: string[] = [];
+  const events: ExecutionEvent[] = [];
+  const mutableState = state as Mutable<DataflowExecutionState>;
+
+  for (const taskName of affectedTaskNames) {
+    const taskState = state.tasks.get(taskName) as Mutable<TaskState> | undefined;
+    if (!taskState) continue;
+
+    // Skip tasks that are currently running — they'll be checked when they finish
+    if (taskState.status === 'in_progress') continue;
+    // Skip tasks not affected (already in failed/skipped terminal states from failure)
+    if (taskState.status === 'skipped') continue;
+
+    if (taskState.status === 'completed') {
+      // Reset completed task for re-execution
+      const wasCached = taskState.cached.type === 'some' && taskState.cached.value;
+
+      taskState.status = 'pending';
+      taskState.cached = none;
+      taskState.outputHash = none;
+      taskState.completedAt = none;
+      taskState.duration = none;
+
+      // Decrement counters
+      if (wasCached) {
+        mutableState.cached = state.cached - 1n;
+      } else {
+        mutableState.executed = state.executed - 1n;
+      }
+
+      invalidated.push(taskName);
+
+      // Emit event
+      mutableState.eventSeq = state.eventSeq + 1n;
+      const event: ExecutionEvent = variant('task_invalidated', {
+        seq: mutableState.eventSeq,
+        timestamp: new Date(),
+        task: taskName,
+        reason: `input changed: ${changes.map(c => c.path).join(', ')}`,
+      });
+      (mutableState.events as ExecutionEvent[]).push(event);
+      events.push(event);
+    } else if (taskState.status === 'deferred') {
+      // Un-defer — it will be re-evaluated for readiness
+      taskState.status = 'pending';
+      invalidated.push(taskName);
+    }
+  }
+
+  return { invalidated, events };
+}
+
+/**
+ * Check version vector consistency for a task's inputs.
+ *
+ * All input version vectors must agree on shared keys (same root input path
+ * must have the same hash in every vector that contains it).
+ *
+ * @param state - Execution state
+ * @param taskName - Task to check
+ * @returns Consistency result with merged VV or conflict path
+ */
+export function stepCheckVersionConsistency(
+  state: DataflowExecutionState,
+  taskName: string
+): { consistent: true; mergedVV: VersionVector } | { consistent: false; conflictPath: string } {
+  const graph = getGraph(state);
+  const task = graph.tasks.find(t => t.name === taskName);
+  if (!task) {
+    throw new Error(`Task '${taskName}' not found in graph`);
+  }
+
+  const inputVVs: VersionVector[] = [];
+  for (const inputPath of task.inputs) {
+    const vv = state.versionVectors.get(inputPath) ?? new Map();
+    inputVVs.push(vv);
+  }
+
+  const result = checkVersionConsistency(inputVVs);
+  if (result.consistent) {
+    return { consistent: true, mergedVV: result.merged };
+  }
+  return { consistent: false, conflictPath: result.conflictPath };
 }
 
 // =============================================================================
@@ -395,7 +651,8 @@ export function stepTaskStarted(
 /**
  * Mark a task as completed successfully.
  *
- * Mutates the execution state and returns the newly ready tasks.
+ * Mutates the execution state, computes the merged version vector for the
+ * task's output, and returns the newly ready tasks.
  *
  * @param state - Execution state to mutate
  * @param taskName - Name of the task
@@ -430,6 +687,19 @@ export function stepTaskCompleted(
     mutableState.cached = state.cached + 1n;
   } else {
     mutableState.executed = state.executed + 1n;
+  }
+
+  // Compute and store merged VV for the task's output
+  const graph = getGraph(state);
+  const task = graph.tasks.find(t => t.name === taskName);
+  if (task) {
+    const inputVVs: VersionVector[] = [];
+    for (const inputPath of task.inputs) {
+      const vv = state.versionVectors.get(inputPath) ?? new Map();
+      inputVVs.push(vv);
+    }
+    const mergedVV = mergeVersionVectors(inputVVs);
+    state.versionVectors.set(task.output, mergedVV);
   }
 
   // Find newly ready tasks
@@ -613,6 +883,7 @@ export function stepFinalize(state: DataflowExecutionState): {
     cached: Number(state.cached),
     failed: Number(state.failed),
     skipped: Number(state.skipped),
+    reexecuted: Number(state.reexecuted),
     duration,
   };
 
@@ -652,51 +923,40 @@ export function stepCancel(
 // =============================================================================
 
 /**
- * Apply a task's output to the workspace tree.
+ * Apply a task's output to the workspace tree with version vector.
  *
- * This step function handles workspace tree updates, which must be serialized
- * to prevent lost-update race conditions when multiple tasks complete
- * concurrently.
- *
- * For local execution, the LocalOrchestrator handles this internally with
- * an AsyncMutex. For cloud execution (e.g., AWS Step Functions), this should
- * be called in a dedicated "ApplyTreeUpdates" state that processes updates
- * serially.
+ * Writes the output ref file with the merged version vector from the task's
+ * inputs. Per-dataset ref writes are atomic and independent, so no
+ * serialization is needed for concurrent writes to different paths.
  *
  * @param storage - Storage backend
  * @param repo - Repository identifier
  * @param workspace - Workspace name
  * @param outputPathStr - Output path as a keypath string (e.g., ".results.data")
  * @param outputHash - Hash of the output dataset to write
- * @returns Result with the new workspace root hash
- *
- * @remarks
- * Tree updates must be serialized to prevent race conditions:
- * - Two tasks complete concurrently, both read the same workspace root
- * - Both compute new roots with their outputs
- * - One write overwrites the other, losing the first task's output
- *
- * Cloud implementations should use a dedicated serialization mechanism
- * (e.g., a single Lambda invocation per update, or DynamoDB transactions).
+ * @param versions - Merged version vector for provenance tracking
+ * @returns Result indicating success
  */
 export async function stepApplyTreeUpdate(
   storage: StorageBackend,
   repo: string,
   workspace: string,
   outputPathStr: string,
-  outputHash: string
+  outputHash: string,
+  versions: VersionVector
 ): Promise<TreeUpdateResult> {
   const { parsePathString } = await import('../dataflow.js');
   const outputPath = parsePathString(outputPathStr);
 
-  // Write the output to the workspace tree
-  const newRootHash = await workspaceSetDatasetByHash(
+  // Write the output ref with version vector
+  await workspaceSetDatasetByHash(
     storage,
     repo,
     workspace,
     outputPath,
-    outputHash
+    outputHash,
+    versions
   );
 
-  return { newRootHash };
+  return { ok: true };
 }

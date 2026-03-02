@@ -16,6 +16,7 @@
  */
 
 import { StructType, StringType, DictType, ValueTypeOf } from '@elaraai/east';
+import { DatasetRefType } from './dataset-ref.js';
 import { StructureType } from './structure.js';
 
 /**
@@ -26,31 +27,13 @@ import { StructureType } from './structure.js';
  *
  * @remarks
  * - `structure`: Defines which paths are datasets vs trees (recursive)
- * - `value`: Hash of the root tree object in the object store
- *
- * @example
- * ```ts
- * const data: PackageData = {
- *   structure: variant('struct', new Map([
- *     ['inputs', variant('struct', new Map([
- *       ['sales', variant('value', variant('Array', variant('Integer', null)))],
- *     ]))],
- *     ['tasks', variant('struct', new Map([
- *       ['process', variant('struct', new Map([
- *         ['function_ir', variant('value', ...)],
- *         ['output', variant('value', variant('Integer', null))],
- *       ]))],
- *     ]))],
- *   ])),
- *   value: 'abc123...',  // Hash of initial tree
- * };
- * ```
+ * - `refs`: Per-dataset refs mapping refPath to DatasetRef (replaces old root tree hash)
  */
 export const PackageDataType = StructType({
   /** Structure defining tree shape (what's a group vs dataset) */
   structure: StructureType,
-  /** Hash of the root tree object containing initial/default values */
-  value: StringType,
+  /** Per-dataset refs: refPath (e.g. "inputs/greeting") -> DatasetRef */
+  refs: DictType(StringType, DatasetRefType),
 });
 export type PackageDataType = typeof PackageDataType;
 
@@ -84,7 +67,7 @@ export type PackageDatasets = PackageData;
  *   tasks: new Map([['process', 'abc123...']]),  // hash of TaskObject
  *   data: {
  *     structure: variant('struct', new Map([...])),
- *     value: 'def456...',  // hash of root tree
+ *     refs: new Map([['inputs/sales', variant('value', { hash: 'def456...', versions: new Map() })]]),
  *   },
  * };
  * ```

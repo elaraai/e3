@@ -87,6 +87,11 @@ export interface AcquireLockOptions {
    * Timeout in milliseconds when wait=true. Default: 30000 (30 seconds)
    */
   timeout?: number;
+  /**
+   * Lock mode: 'shared' allows concurrent shared holders, 'exclusive' is mutually exclusive.
+   * Default: 'exclusive'
+   */
+  mode?: 'shared' | 'exclusive';
 }
 
 // =============================================================================
@@ -280,11 +285,22 @@ async function tryAcquireFlock(
   options: AcquireLockOptions
 ): Promise<ChildProcess | null> {
   // First, check if there's a stale lock we can clean up
-  await checkAndCleanStaleLock(lockPath);
+  // (only for exclusive mode — shared locks don't need stale checking)
+  if (options.mode !== 'shared') {
+    await checkAndCleanStaleLock(lockPath);
+  }
 
-  const args = options.wait
-    ? ['--timeout', String((options.timeout ?? 30000) / 1000), lockPath, 'cat']
-    : ['--nonblock', lockPath, 'cat'];
+  const isShared = options.mode === 'shared';
+  const args: string[] = [];
+  if (isShared) {
+    args.push('--shared');
+  }
+  if (options.wait) {
+    args.push('--timeout', String((options.timeout ?? 30000) / 1000));
+  } else {
+    args.push('--nonblock');
+  }
+  args.push(lockPath, 'cat');
 
   const child = spawn('flock', args, {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -412,11 +428,12 @@ export class LocalLockService implements LockService {
     repo: string,
     resource: string,
     operation: LockOperation,
-    options?: { wait?: boolean; timeout?: number }
+    options?: { wait?: boolean; timeout?: number; mode?: 'shared' | 'exclusive' }
   ): Promise<LockHandle | null> {
     const acquireOptions: AcquireLockOptions = {
       wait: options?.wait ?? false,
       timeout: options?.timeout,
+      mode: options?.mode ?? 'exclusive',
     };
 
     try {

@@ -13,9 +13,9 @@ import { join } from 'node:path';
 import { variant, StringType, IntegerType, StructType, ArrayType, East } from '@elaraai/east';
 import e3 from '@elaraai/e3';
 import type { DataRef, Structure } from '@elaraai/e3-types';
-import { treeRead, treeWrite, datasetRead, datasetWrite, packageListTree, packageGetDataset, workspaceListTree, workspaceGetDataset, workspaceGetDatasetStatus, workspaceSetDataset } from './trees.js';
+import { treeRead, treeWrite, datasetRead, datasetWrite, packageListTree, workspaceListTree, workspaceGetDataset, workspaceGetDatasetStatus, workspaceSetDataset } from './trees.js';
 import { packageImport } from './packages.js';
-import { workspaceCreate, workspaceDeploy, workspaceSetRoot } from './workspaces.js';
+import { workspaceCreate, workspaceDeploy } from './workspaces.js';
 import { WorkspaceNotFoundError, WorkspaceNotDeployedError } from './errors.js';
 import { createTestRepo, removeTestRepo, createTempDir, removeTempDir } from './test-helpers.js';
 import { LocalStorage } from './storage/local/index.js';
@@ -44,7 +44,7 @@ describe('trees', () => {
 
   // Helper to create a value structure (dataset leaf)
   function valueStructure(type: any): Structure {
-    return variant('value', type);
+    return variant('value', { type, writable: true });
   }
 
   describe('treeWrite and treeRead', () => {
@@ -380,81 +380,8 @@ describe('trees', () => {
     });
   });
 
-  describe('packageGetDataset', () => {
-    it('reads dataset value at path', async () => {
-      const myInput = e3.input('greeting', StringType, 'hello world');
-      const pkg = e3.package('get-test', '1.0.0', myInput);
-      const zipPath = join(tempDir, 'get-test.zip');
-      await e3.export(pkg, zipPath);
-      await packageImport(storage, testRepo, zipPath);
-
-      const value = await packageGetDataset(storage, testRepo, 'get-test', '1.0.0', [
-        variant('field', 'inputs'),
-        variant('field', 'greeting'),
-      ]);
-
-      assert.strictEqual(value, 'hello world');
-    });
-
-    it('reads integer dataset', async () => {
-      const myInput = e3.input('count', IntegerType, 42n);
-      const pkg = e3.package('int-test', '1.0.0', myInput);
-      const zipPath = join(tempDir, 'int-test.zip');
-      await e3.export(pkg, zipPath);
-      await packageImport(storage, testRepo, zipPath);
-
-      const value = await packageGetDataset(storage, testRepo, 'int-test', '1.0.0', [
-        variant('field', 'inputs'),
-        variant('field', 'count'),
-      ]);
-
-      assert.strictEqual(value, 42n);
-    });
-
-    it('throws for empty path', async () => {
-      const myInput = e3.input('value', StringType, 'test');
-      const pkg = e3.package('empty-path', '1.0.0', myInput);
-      const zipPath = join(tempDir, 'empty-path.zip');
-      await e3.export(pkg, zipPath);
-      await packageImport(storage, testRepo, zipPath);
-
-      await assert.rejects(
-        async () => await packageGetDataset(storage, testRepo, 'empty-path', '1.0.0', []),
-        /root.*tree/
-      );
-    });
-
-    it('throws when path points to tree', async () => {
-      const myInput = e3.input('value', StringType, 'test');
-      const pkg = e3.package('tree-path', '1.0.0', myInput);
-      const zipPath = join(tempDir, 'tree-path.zip');
-      await e3.export(pkg, zipPath);
-      await packageImport(storage, testRepo, zipPath);
-
-      await assert.rejects(
-        async () => await packageGetDataset(storage, testRepo, 'tree-path', '1.0.0', [
-          variant('field', 'inputs'),
-        ]),
-        /tree, not a dataset/
-      );
-    });
-
-    it('throws for non-existent path', async () => {
-      const myInput = e3.input('value', StringType, 'test');
-      const pkg = e3.package('bad-path', '1.0.0', myInput);
-      const zipPath = join(tempDir, 'bad-path.zip');
-      await e3.export(pkg, zipPath);
-      await packageImport(storage, testRepo, zipPath);
-
-      await assert.rejects(
-        async () => await packageGetDataset(storage, testRepo, 'bad-path', '1.0.0', [
-          variant('field', 'inputs'),
-          variant('field', 'nonexistent'),
-        ]),
-        /not found/
-      );
-    });
-  });
+  // packageGetDataset was removed — packages no longer have tree objects.
+  // Dataset values are stored as per-dataset ref files.
 
   describe('workspaceListTree', () => {
     it('lists root tree fields', async () => {
@@ -803,7 +730,7 @@ describe('trees', () => {
     });
 
     it('returns status for null ref', async () => {
-      // Deploy a package, then manually rewrite the tree to include a null ref
+      // Deploy a package, then manually write a null ref
       const myInput = e3.input('value', IntegerType, 10n);
       const pkg = e3.package('status-null', '1.0.0', myInput);
       const zipPath = join(tempDir, 'status-null.zip');
@@ -811,34 +738,8 @@ describe('trees', () => {
       await packageImport(storage, testRepo, zipPath);
       await workspaceDeploy(storage, testRepo, 'myws', 'status-null', '1.0.0');
 
-      // Read the current tree, replace the input ref with a null ref, rewrite
-      const rootFields = await workspaceListTree(storage, testRepo, 'myws', []);
-      assert.ok(rootFields.includes('inputs'));
-
-      // Get current root info by reading the workspace state
-      // We need to reconstruct the tree with a null ref for inputs.value
-      // Use the structure from the existing tree
-      const inputsStructure = structStructure({
-        value: valueStructure(IntegerType),
-      });
-      const rootStructure = structStructure({
-        inputs: inputsStructure,
-      });
-
-      // Write a new inputs tree with a null ref
-      const newInputsTree: Record<string, DataRef> = {
-        value: variant('null', null),
-      };
-      const newInputsHash = await treeWrite(storage, testRepo, newInputsTree, inputsStructure);
-
-      // Write a new root tree pointing to the new inputs
-      const newRootTree: Record<string, DataRef> = {
-        inputs: variant('tree', newInputsHash),
-      };
-      const newRootHash = await treeWrite(storage, testRepo, newRootTree, rootStructure);
-
-      // Update workspace root
-      await workspaceSetRoot(storage, testRepo, 'myws', newRootHash);
+      // Write a null ref for the dataset
+      await storage.datasets.write(testRepo, 'myws', 'inputs/value', variant('null', { versions: new Map() }));
 
       // Now query the status of the null ref dataset
       const result = await workspaceGetDatasetStatus(storage, testRepo, 'myws', [

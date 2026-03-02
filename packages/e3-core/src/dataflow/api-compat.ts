@@ -154,6 +154,9 @@ export function coreEventToApiEvent(event: ExecutionEvent): ApiDataflowEvent | n
     case 'task_ready':
     case 'execution_completed':
     case 'execution_cancelled':
+    case 'input_changed':
+    case 'task_invalidated':
+    case 'task_deferred':
       return null;
   }
 }

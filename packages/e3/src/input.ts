@@ -57,6 +57,7 @@ export function input<Name extends string, T extends EastType>(
     path: [variant('field', 'inputs'), variant('field', name)],
     type,
     default: defaultValue,
+    writable: true,
     deps: new Set([...inputsTree.deps, inputsTree]),
   };
 }

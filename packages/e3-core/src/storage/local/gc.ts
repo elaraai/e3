@@ -211,11 +211,18 @@ function extractChildren(
   const children: { hash: string; isLeaf: boolean }[] = [];
 
   if (isPackageObjectShape(t)) {
-    const pkg = value as { tasks: Map<string, string>; data: { value: string } };
+    const pkg = value as { tasks: Map<string, string>; data: { structure: unknown; refs?: Map<string, { type: string; value: any }> } };
     for (const taskHash of pkg.tasks.values()) {
       children.push({ hash: taskHash, isLeaf: false });
     }
-    children.push({ hash: pkg.data.value, isLeaf: false }); // root tree
+    // Extract value hashes from inline per-dataset refs
+    if (pkg.data.refs instanceof Map) {
+      for (const ref of pkg.data.refs.values()) {
+        if (ref.type === 'value' && typeof ref.value?.hash === 'string') {
+          children.push({ hash: ref.value.hash, isLeaf: true });
+        }
+      }
+    }
     return children;
   }
 

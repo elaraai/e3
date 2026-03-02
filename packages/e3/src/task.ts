@@ -65,6 +65,7 @@ function createFunctionIRDataset(name: string, taskTree: DataTreeDef, ir: Functi
     path: [variant('field', 'tasks'), variant('field', name), variant('field', 'function_ir')],
     type: IRType,
     default: ir as any, // The IR value itself is the default
+    writable: false,
     deps: new Set([...taskTree.deps, taskTree]),
   };
 }
@@ -87,6 +88,7 @@ function createOutputDataset<Name extends string, Output extends EastType>(
     name: 'output',
     path: [variant('field', 'tasks'), variant('field', name), variant('field', 'output')],
     type: outputType,
+    writable: false,
     deps: new Set([...taskTree.deps, taskTree]),
   };
 }

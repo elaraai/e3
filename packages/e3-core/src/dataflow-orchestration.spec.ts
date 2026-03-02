@@ -15,16 +15,17 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { variant, StringType, ArrayType, encodeBeast2For, StructType, East, IRType } from '@elaraai/east';
+import { variant, StringType, ArrayType, encodeBeast2For, East, IRType } from '@elaraai/east';
 import {
   TaskObjectType,
   PackageObjectType,
-  DataRefType,
   type TreePath,
   type Structure,
   type DataRef,
+  type DatasetRef,
 } from '@elaraai/e3-types';
 import { dataflowExecute } from './dataflow.js';
+import { datasetWrite } from './trees.js';
 import { objectWrite } from './storage/local/LocalObjectStore.js';
 import { workspaceDeploy } from './workspaces.js';
 import { workspaceSetDataset } from './trees.js';
@@ -92,7 +93,7 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       output: TreePath;
     }>,
     structure: Structure,
-    initialData?: Record<string, { value: unknown; ref: DataRef }>
+    _initialData?: Record<string, { value: unknown; ref: DataRef }>
   ): Promise<Map<string, string>> {
     const taskEncoder = encodeBeast2For(TaskObjectType);
     const tasksMap = new Map<string, string>();
@@ -108,30 +109,12 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       tasksMap.set(t.name, taskHash);
     }
 
-    const structFields = (structure as { type: 'struct'; value: Map<string, Structure> }).value;
-    const dataRefFields: Record<string, typeof DataRefType> = {};
-    for (const key of structFields.keys()) {
-      dataRefFields[key] = DataRefType;
-    }
-    const dataTreeType = StructType(dataRefFields);
-    const dataTreeEncoder = encodeBeast2For(dataTreeType);
-
-    const dataRefs: Record<string, DataRef> = {};
-    for (const key of (structure as { type: 'struct'; value: Map<string, Structure> }).value.keys()) {
-      if (initialData && key in initialData) {
-        dataRefs[key] = initialData[key].ref;
-      } else {
-        dataRefs[key] = { type: 'unassigned', value: null } as DataRef;
-      }
-    }
-
-    const dataHash = await objectWrite(repoPath, dataTreeEncoder(dataRefs));
-
+    // Create package object (no root tree — per-dataset refs are used instead)
     const pkgEncoder = encodeBeast2For(PackageObjectType);
     const pkgObj = {
       data: {
         structure,
-        value: dataHash,
+        refs: new Map(),
       },
       tasks: tasksMap,
     };
@@ -150,10 +133,10 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['middle1', { type: 'value', value: StringType }],
-          ['middle2', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle1', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle2', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -208,10 +191,10 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['out_a', { type: 'value', value: StringType }],
-          ['out_b', { type: 'value', value: StringType }],
-          ['out_c', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out_a', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out_b', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out_c', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -267,11 +250,11 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['out1', { type: 'value', value: StringType }],
-          ['out2', { type: 'value', value: StringType }],
-          ['out3', { type: 'value', value: StringType }],
-          ['out4', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out1', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out2', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out3', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out4', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -342,8 +325,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -411,10 +394,10 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['middle1', { type: 'value', value: StringType }],
-          ['middle2', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle1', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle2', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -487,8 +470,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -538,8 +521,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -597,8 +580,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -648,8 +631,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -696,8 +679,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -745,6 +728,387 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const call = mockRunner.getCalls()[0];
       assert.ok(call.options?.onStdout, 'onStdout should be passed to runner');
       assert.ok(call.options?.onStderr, 'onStderr should be passed to runner');
+    });
+  });
+
+  describe('reactive dataflow', () => {
+    it('reaches fixpoint without re-execution when inputs unchanged', async () => {
+      // Normal execution, no input changes → same behavior as before
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const middlePath: TreePath = [variant('field', 'middle')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: middlePath },
+          { name: 'task-b', command: ['echo'], inputs: [middlePath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      for (const [name, hash] of taskHashes) {
+        mockRunner.setResult(hash, {
+          state: 'success',
+          cached: false,
+          outputHash: `output-${name}`,
+        });
+      }
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.executed, 2);
+      assert.strictEqual(result.reexecuted, 0);
+    });
+
+    it('re-executes downstream tasks when input changes during execution', async () => {
+      // Setup: input → taskA → output
+      // MockTaskRunner for taskA: during execution, write new value to input ref
+      // After taskA completes, reactive loop detects change, invalidates taskA
+      // taskA re-runs with new input
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'initial-value', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount === 1) {
+          // On first execution, simulate a concurrent input change
+          const newHash = await datasetWrite(storage, testRepo, 'changed-value', StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      // Should have executed task-a twice: once initially, once after input change
+      assert.strictEqual(callCount, 2);
+      assert.strictEqual(result.reexecuted, 1);
+      // executed counts final unique tasks, not total calls
+      assert.strictEqual(result.executed, 1);
+    });
+
+    it('re-executes chain when input changes during execution', async () => {
+      // Setup: input → taskA → middle → taskB → output
+      // During taskA execution, input changes
+      // taskA should re-run, then taskB should run with new output
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const middlePath: TreePath = [variant('field', 'middle')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: middlePath },
+          { name: 'task-b', command: ['echo'], inputs: [middlePath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'initial-value', StringType);
+
+      let taskACallCount = 0;
+      let taskBCallCount = 0;
+
+      const taskAHash = taskHashes.get('task-a')!;
+      const taskBHash = taskHashes.get('task-b')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        taskACallCount++;
+        if (taskACallCount === 1) {
+          // On first execution, simulate a concurrent input change
+          const newHash = await datasetWrite(storage, testRepo, 'changed-value', StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `middle-v${taskACallCount}`,
+        };
+      });
+
+      mockRunner.setResult(taskBHash, (_inputHashes) => {
+        taskBCallCount++;
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${taskBCallCount}`,
+        };
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      // taskA should run twice (initial + re-execution after input change)
+      assert.strictEqual(taskACallCount, 2);
+      // taskB should run once (deferred until taskA re-executes, then runs with fresh data)
+      assert.strictEqual(taskBCallCount, 1);
+      // One re-execution (taskA)
+      assert.strictEqual(result.reexecuted, 1);
+    });
+
+    it('tracks reexecuted count correctly', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'v1', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount <= 2) {
+          // First two calls: write a new input value
+          const newHash = await datasetWrite(storage, testRepo, `v${callCount + 1}`, StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      // Should execute 3 times total: initial + 2 re-executions
+      assert.strictEqual(callCount, 3);
+      assert.strictEqual(result.reexecuted, 2);
+    });
+
+    it('calls onInputChanged callback', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'initial', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount === 1) {
+          const newHash = await datasetWrite(storage, testRepo, 'changed', StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const inputChanges: Array<{ path: string; previousHash: string; newHash: string }> = [];
+
+      await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+        onInputChanged: (path, previousHash, newHash) => {
+          inputChanges.push({ path, previousHash, newHash });
+        },
+      });
+
+      assert.strictEqual(inputChanges.length, 1);
+      assert.strictEqual(inputChanges[0]!.path, '.input');
+      assert.ok(inputChanges[0]!.previousHash.length > 0);
+      assert.ok(inputChanges[0]!.newHash.length > 0);
+      assert.notStrictEqual(inputChanges[0]!.previousHash, inputChanges[0]!.newHash);
+    });
+
+    it('calls onTaskInvalidated callback', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'initial', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount === 1) {
+          const newHash = await datasetWrite(storage, testRepo, 'changed', StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const invalidated: Array<{ name: string; reason: string }> = [];
+
+      await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+        onTaskInvalidated: (name, reason) => {
+          invalidated.push({ name, reason });
+        },
+      });
+
+      assert.strictEqual(invalidated.length, 1);
+      assert.strictEqual(invalidated[0]!.name, 'task-a');
+      assert.ok(invalidated[0]!.reason.includes('.input'), `Reason should mention input path, got: ${invalidated[0]!.reason}`);
+    });
+
+    it('handles no-op change (same hash)', async () => {
+      // Input "changes" but to same hash value → no invalidation
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'same-value', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount === 1) {
+          // Write the same value — hash should not change
+          const sameHash = await datasetWrite(storage, testRepo, 'same-value', StringType);
+          const ref: DatasetRef = variant('value', { hash: sameHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      // Should NOT re-execute since the hash is the same
+      assert.strictEqual(callCount, 1);
+      assert.strictEqual(result.reexecuted, 0);
     });
   });
 });

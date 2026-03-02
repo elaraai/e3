@@ -57,7 +57,7 @@ describe('packages', () => {
       assert.strictEqual(result.version, '1.0.0');
       assert.strictEqual(typeof result.packageHash, 'string');
       assert.strictEqual(result.packageHash.length, 64);
-      assert.ok(result.objectCount >= 2, `Expected at least 2 objects, got ${result.objectCount}`);
+      assert.ok(result.objectCount >= 1, `Expected at least 1 object, got ${result.objectCount}`);
     });
 
     it('imports package with input dataset', async () => {
@@ -70,7 +70,7 @@ describe('packages', () => {
 
       assert.strictEqual(result.name, 'input-pkg');
       assert.strictEqual(result.version, '2.0.0');
-      assert.ok(result.objectCount >= 3, `Expected at least 3 objects, got ${result.objectCount}`);
+      assert.ok(result.objectCount >= 2, `Expected at least 2 objects, got ${result.objectCount}`);
     });
 
     it('creates package ref file', async () => {
@@ -247,7 +247,7 @@ describe('packages', () => {
 
       assert.ok(existsSync(exportZip), 'Export zip should exist');
       assert.strictEqual(result.packageHash.length, 64);
-      assert.ok(result.objectCount >= 2, `Expected at least 2 objects, got ${result.objectCount}`);
+      assert.ok(result.objectCount >= 1, `Expected at least 1 object, got ${result.objectCount}`);
     });
 
     it('exports package with input dataset', async () => {
@@ -260,7 +260,7 @@ describe('packages', () => {
       const exportZip = join(tempDir, 'export-input.zip');
       const result = await packageExport(storage, testRepo, 'export-input', '1.0.0', exportZip);
 
-      assert.ok(result.objectCount >= 3, `Expected at least 3 objects, got ${result.objectCount}`);
+      assert.ok(result.objectCount >= 2, `Expected at least 2 objects, got ${result.objectCount}`);
     });
 
     it('produces zip with same content as original', async () => {
