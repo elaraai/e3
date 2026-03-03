@@ -132,6 +132,8 @@ export interface TaskFailedResult {
 export interface FinalizeResult {
   /** Overall success - true if all tasks completed successfully */
   success: boolean;
+  /** Dataflow run ID (UUIDv7) */
+  runId: string;
   /** Number of tasks executed (not from cache) */
   executed: number;
   /** Number of tasks served from cache */
@@ -153,3 +155,13 @@ export interface TreeUpdateResult {
   /** Placeholder — per-dataset ref writes don't produce a root hash */
   ok: true;
 }
+
+// =============================================================================
+// Utility Types
+// =============================================================================
+
+/**
+ * Type helper for mutable state (removes readonly).
+ * Used by step functions and the orchestrator to mutate execution state.
+ */
+export type Mutable<T> = { -readonly [P in keyof T]: T[P] extends object ? Mutable<T[P]> : T[P] };

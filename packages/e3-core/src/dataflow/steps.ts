@@ -53,10 +53,8 @@ import type {
   FinalizeResult,
   TreeUpdateResult,
   ExecutionEvent,
+  Mutable,
 } from './types.js';
-
-// Type helper for mutable state (removes readonly)
-type Mutable<T> = { -readonly [P in keyof T]: T[P] extends object ? Mutable<T[P]> : T[P] };
 
 // =============================================================================
 // Initialization
@@ -295,11 +293,9 @@ export function stepGetReady(state: DataflowExecutionState): string[] {
 /**
  * Check if the execution is complete.
  *
- * An execution is complete when:
- * - All tasks are in a terminal state (completed, failed, skipped)
- * - Or there are no more ready tasks and no tasks in progress
- * - Or all remaining non-terminal tasks are deferred with no tasks in progress
- *   (consistency deadlock)
+ * An execution is complete when all tasks are in a terminal state
+ * (completed, failed, skipped) or have permanently unresolvable
+ * dependencies. Returns false if any non-terminal tasks remain.
  *
  * This is a pure function - it only reads state.
  *
@@ -309,9 +305,6 @@ export function stepGetReady(state: DataflowExecutionState): string[] {
 export function stepIsComplete(state: DataflowExecutionState): boolean {
   const filterValue = state.filter.type === 'some' ? state.filter.value : null;
 
-  let hasInProgress = false;
-  let hasNonTerminal = false;
-
   for (const taskState of state.tasks.values()) {
     if (
       taskState.status === 'pending' ||
@@ -320,14 +313,11 @@ export function stepIsComplete(state: DataflowExecutionState): boolean {
       taskState.status === 'deferred'
     ) {
       if (taskState.status === 'in_progress') {
-        hasInProgress = true;
-        hasNonTerminal = true;
-        continue;
+        return false;
       }
 
       if (taskState.status === 'deferred') {
-        hasNonTerminal = true;
-        continue;
+        return false;
       }
 
       // pending or ready — check if it can ever become ready
@@ -341,30 +331,13 @@ export function stepIsComplete(state: DataflowExecutionState): boolean {
           if (filterValue !== null && taskState.name !== filterValue) {
             continue; // Filtered out, doesn't affect completion
           }
-          hasNonTerminal = true;
-          continue;
+          return false;
         }
       }
     }
   }
 
-  // If nothing in progress and no non-terminal tasks, we're done
-  if (!hasNonTerminal) return true;
-
-  // If we have non-terminal tasks but nothing in progress,
-  // check for deferred-only deadlock
-  if (!hasInProgress) {
-    const allNonTerminalDeferred = [...state.tasks.values()].every(ts =>
-      ts.status === 'completed' ||
-      ts.status === 'failed' ||
-      ts.status === 'skipped' ||
-      ts.status === 'deferred' ||
-      (filterValue !== null && ts.name !== filterValue)
-    );
-    if (allNonTerminalDeferred) return true;
-  }
-
-  return false;
+  return true;
 }
 
 // =============================================================================
@@ -490,8 +463,8 @@ export function stepInvalidateTasks(
       events.push(event);
     } else if (taskState.status === 'deferred') {
       // Un-defer — it will be re-evaluated for readiness
+      // Don't add to invalidated — task was never executed
       taskState.status = 'pending';
-      invalidated.push(taskName);
     }
   }
 
@@ -846,9 +819,10 @@ export function stepTasksSkipped(
  * Mutates the execution state to mark it as completed or failed.
  *
  * @param state - Execution state to mutate
+ * @param runId - Dataflow run ID (UUIDv7) from the orchestrator
  * @returns Final result
  */
-export function stepFinalize(state: DataflowExecutionState): {
+export function stepFinalize(state: DataflowExecutionState, runId: string): {
   result: FinalizeResult;
   event: ExecutionEvent;
 } {
@@ -879,6 +853,7 @@ export function stepFinalize(state: DataflowExecutionState): {
 
   const result: FinalizeResult = {
     success,
+    runId,
     executed: Number(state.executed),
     cached: Number(state.cached),
     failed: Number(state.failed),

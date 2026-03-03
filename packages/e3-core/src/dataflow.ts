@@ -28,7 +28,6 @@ import {
   executionGetOutput,
   inputsHash,
 } from './executions.js';
-import { uuidv7 } from './uuid.js';
 import type { TaskRunner } from './execution/interfaces.js';
 import {
   workspaceGetDatasetHash,
@@ -313,8 +312,6 @@ export async function dataflowExecute(
   const { LocalOrchestrator } = await import('./dataflow/orchestrator/LocalOrchestrator.js');
   const orchestrator = new LocalOrchestrator();
 
-  const runId = uuidv7();
-
   const taskResults: TaskExecutionResult[] = [];
 
   const handle = await orchestrator.start(storage, repo, ws, {
@@ -354,7 +351,7 @@ export async function dataflowExecute(
 
   return {
     success: result.success,
-    runId,
+    runId: result.runId,
     executed: result.executed,
     cached: result.cached,
     failed: result.failed,
@@ -366,10 +363,8 @@ export async function dataflowExecute(
 }
 
 /**
- * Start dataflow execution in the background (non-blocking).
- *
- * Returns a promise immediately without awaiting execution. The lock is
- * released automatically when execution completes.
+ * Execute dataflow with an externally-held lock.
+ * The lock is released automatically when execution completes or fails.
  *
  * @param storage - Storage backend
  * @param repo - Repository identifier
@@ -485,7 +480,6 @@ export interface DataflowGraph {
  *
  * @param graph - The dependency graph
  * @param changes - Array of changed input paths
- * @param taskOutputPaths - Set of keypath strings that are task outputs
  * @returns Array of affected task names
  */
 export function findAffectedTasks(
