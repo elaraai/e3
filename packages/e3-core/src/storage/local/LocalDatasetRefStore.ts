@@ -47,11 +47,19 @@ export class LocalDatasetRefStore implements DatasetRefStore {
     const dir = path.dirname(filePath);
     await fs.mkdir(dir, { recursive: true });
 
-    // Atomic write: write to .partial, then rename
-    const partialPath = `${filePath}.partial`;
+    // Atomic write: write to unique staging file, then rename
+    // Use random suffix to avoid collisions with concurrent writes
+    const randomSuffix = Math.random().toString(36).slice(2, 10);
+    const stagingPath = `${filePath}.${Date.now()}.${randomSuffix}.partial`;
     const data = encodeRef(ref);
-    await fs.writeFile(partialPath, data);
-    await fs.rename(partialPath, filePath);
+    await fs.writeFile(stagingPath, data);
+    try {
+      await fs.rename(stagingPath, filePath);
+    } catch (err) {
+      // Clean up staging file on failure
+      try { await fs.unlink(stagingPath); } catch { /* ignore */ }
+      throw err;
+    }
   }
 
   async list(repo: string, ws: string): Promise<string[]> {
@@ -77,7 +85,7 @@ export class LocalDatasetRefStore implements DatasetRefStore {
       const fullPath = path.join(currentDir, entry.name);
       if (entry.isDirectory()) {
         await this.walkDir(baseDir, fullPath, results);
-      } else if (entry.name.endsWith('.ref')) {
+      } else if (entry.name.endsWith('.ref') && !entry.name.includes('.partial')) {
         // Convert filesystem path back to dataset path
         // Remove base dir prefix, leading separator, and .ref suffix
         const relative = path.relative(baseDir, fullPath);
