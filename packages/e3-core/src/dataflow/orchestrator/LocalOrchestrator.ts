@@ -16,7 +16,7 @@
  */
 
 import { decodeBeast2For, encodeBeast2For, variant } from '@elaraai/east';
-import type { VersionVector, DataflowRun, TaskExecutionRecord } from '@elaraai/e3-types';
+import type { VersionVector, DataflowRun, TaskExecutionRecord, Structure } from '@elaraai/e3-types';
 import { WorkspaceStateType } from '@elaraai/e3-types';
 import type { StorageBackend, LockHandle } from '../../storage/interfaces.js';
 import type { TaskExecuteOptions } from '../../execution/interfaces.js';
@@ -125,6 +125,8 @@ interface RunningExecution {
   runId: string;
   /** Task execution records for DataflowRun */
   taskExecutions: Map<string, TaskExecutionRecord>;
+  /** Cleanup function to remove abort listener on normal completion */
+  abortCleanup?: () => void;
   completionPromise: Promise<FinalizeResult>;
   resolveCompletion: (result: FinalizeResult) => void;
   rejectCompletion: (error: Error) => void;
@@ -257,6 +259,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
           }
         };
         options.signal.addEventListener('abort', onAbort, { once: true });
+        execution.abortCleanup = () => options.signal!.removeEventListener('abort', onAbort);
       }
 
       // Start the execution loop (non-blocking)
@@ -356,6 +359,9 @@ export class LocalOrchestrator implements DataflowOrchestrator {
       const wsDecoder = decodeBeast2For(WorkspaceStateType);
       const wsState = wsData && wsData.length > 0 ? wsDecoder(wsData) : null;
 
+      // Cache structure for the entire execution (immutable during execution)
+      const structure = wsState ? await this.readStructure(storage, repo, wsState.packageHash) : null;
+
       // Write initial DataflowRun record
       if (wsState) {
         const initialRun: DataflowRun = {
@@ -417,7 +423,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
           if (!vvCheck.consistent) {
             // Defer: inputs have inconsistent versions of the same root input
             const ts = state.tasks.get(taskName) as Mutable<TaskState> | undefined;
-            if (ts) ts.status = 'deferred' as TaskState['status'];
+            if (ts) ts.status = 'deferred';
 
             // Emit task_deferred event
             const mutableState = state as Mutable<DataflowExecutionState>;
@@ -439,44 +445,47 @@ export class LocalOrchestrator implements DataflowOrchestrator {
 
           // Check cache
           if (prepared.cachedOutputHash !== null) {
-            // Cache hit — write ref with merged VV and update state
-            await stepApplyTreeUpdate(
-              storage, repo, state.workspace,
-              prepared.outputPath, prepared.cachedOutputHash, vvCheck.mergedVV
-            );
+            // Cache hit — wrap in mutex to serialize with concurrent .then() callbacks
+            await execution.mutex.runExclusive(async () => {
+              // Write ref with merged VV and update state
+              await stepApplyTreeUpdate(
+                storage, repo, state.workspace,
+                prepared.outputPath, prepared.cachedOutputHash!, vvCheck.mergedVV
+              );
 
-            stepTaskCompleted(
-              state,
-              taskName,
-              prepared.cachedOutputHash,
-              true,
-              0
-            );
+              stepTaskCompleted(
+                state,
+                taskName,
+                prepared.cachedOutputHash!,
+                true,
+                0
+              );
 
-            // Track task execution for DataflowRun
-            const existingCached = execution.taskExecutions.get(taskName);
-            execution.taskExecutions.set(taskName, {
-              executionId: state.id,
-              cached: true,
-              outputVersions: new Map(vvCheck.mergedVV),
-              executionCount: (existingCached?.executionCount ?? 0n) + 1n,
+              // Track task execution for DataflowRun
+              const existingCached = execution.taskExecutions.get(taskName);
+              execution.taskExecutions.set(taskName, {
+                executionId: state.id,
+                cached: true,
+                outputVersions: new Map(vvCheck.mergedVV),
+                executionCount: (existingCached?.executionCount ?? 0n) + 1n,
+              });
+
+              // Notify callback
+              options.onTaskComplete?.({
+                name: taskName,
+                cached: true,
+                state: 'success',
+                duration: 0,
+              });
+
+              // Detect input changes after cached result
+              await this.handleInputChanges(storage, state, options, structure);
+
+              // Update state store
+              if (this.stateStore) {
+                await this.stateStore.update(state);
+              }
             });
-
-            // Notify callback
-            options.onTaskComplete?.({
-              name: taskName,
-              cached: true,
-              state: 'success',
-              duration: 0,
-            });
-
-            // Detect input changes after cached result
-            await this.handleInputChanges(storage, state, options);
-
-            // Update state store
-            if (this.stateStore) {
-              await this.stateStore.update(state);
-            }
             continue;
           }
 
@@ -537,7 +546,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
                 });
 
                 // Detect input changes after task completion
-                await this.handleInputChanges(storage, state, options);
+                await this.handleInputChanges(storage, state, options, structure);
               } else {
                 hasFailure = true;
 
@@ -598,11 +607,12 @@ export class LocalOrchestrator implements DataflowOrchestrator {
       }
 
       // Check for stuck state: non-terminal tasks remain but none are ready or running
-      const stuck = [...state.tasks.values()].some(ts =>
-        ts.status === 'pending' || ts.status === 'ready' || ts.status === 'deferred'
-      );
-      if (stuck && !checkAborted() && !hasFailure) {
-        throw new DataflowError('Dataflow stuck: tasks remain but none are ready or running');
+      const stuckTasks = [...state.tasks.entries()]
+        .filter(([, ts]) => ts.status === 'pending' || ts.status === 'ready' || ts.status === 'deferred')
+        .map(([name, ts]) => `${name} (${ts.status})`)
+        .join(', ');
+      if (stuckTasks.length > 0 && !checkAborted() && !hasFailure) {
+        throw new DataflowError(`Dataflow stuck: ${stuckTasks}`);
       }
 
       // Check for abort one final time
@@ -622,7 +632,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
             completedAt: variant('some', new Date()),
             status: variant('cancelled', {}),
             inputVersions: new Map(state.inputSnapshot),
-            outputVersions: variant('some', new Map(state.inputSnapshot)),
+            outputVersions: variant('some', this.buildOutputVersions(state)),
             taskExecutions: new Map(execution.taskExecutions),
             summary: {
               total: BigInt(state.tasks.size),
@@ -674,7 +684,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
           completedAt: variant('some', new Date()),
           status: finalStatus,
           inputVersions: new Map(state.inputSnapshot),
-          outputVersions: variant('some', new Map(state.inputSnapshot)),
+          outputVersions: variant('some', this.buildOutputVersions(state)),
           taskExecutions: new Map(execution.taskExecutions),
           summary: {
             total: BigInt(state.tasks.size),
@@ -704,6 +714,9 @@ export class LocalOrchestrator implements DataflowOrchestrator {
 
       execution.resolveCompletion(result);
     } finally {
+      // Remove abort listener to avoid leaking execution object
+      execution.abortCleanup?.();
+
       // Always release the dataflow lock (we always acquire it)
       await execution.lock.release();
       // Release shared workspace lock only if we acquired it (not external)
@@ -725,9 +738,10 @@ export class LocalOrchestrator implements DataflowOrchestrator {
   private async handleInputChanges(
     storage: StorageBackend,
     state: DataflowExecutionState,
-    options: OrchestratorStartOptions
+    options: OrchestratorStartOptions,
+    structure: Structure | null
   ): Promise<void> {
-    const { changes, events: changeEvents } = await stepDetectInputChanges(storage, state);
+    const { changes, events: changeEvents } = await stepDetectInputChanges(storage, state, structure);
 
     // Notify via callbacks
     for (const evt of changeEvents) {
@@ -831,6 +845,38 @@ export class LocalOrchestrator implements DataflowOrchestrator {
     }
 
     return results;
+  }
+
+  /**
+   * Build output versions map from completed task states.
+   */
+  private buildOutputVersions(state: DataflowExecutionState): Map<string, string> {
+    const outputVersions = new Map<string, string>();
+    const graph = state.graph.type === 'some' ? state.graph.value : null;
+    if (graph) {
+      for (const task of graph.tasks) {
+        const ts = state.tasks.get(task.name);
+        if (ts && ts.outputHash.type === 'some') {
+          outputVersions.set(task.output, ts.outputHash.value);
+        }
+      }
+    }
+    return outputVersions;
+  }
+
+  /**
+   * Read workspace structure from storage.
+   */
+  private async readStructure(
+    storage: StorageBackend,
+    repo: string,
+    packageHash: string
+  ): Promise<Structure> {
+    const { PackageObjectType } = await import('@elaraai/e3-types');
+    const pkgData = await storage.objects.read(repo, packageHash);
+    const pkgDecoder = decodeBeast2For(PackageObjectType);
+    const pkgObject = pkgDecoder(Buffer.from(pkgData));
+    return pkgObject.data.structure;
   }
 
   /**

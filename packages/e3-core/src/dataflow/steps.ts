@@ -357,12 +357,13 @@ export function stepIsComplete(state: DataflowExecutionState): boolean {
  */
 export async function stepDetectInputChanges(
   storage: StorageBackend,
-  state: DataflowExecutionState
+  state: DataflowExecutionState,
+  cachedStructure?: Structure | null
 ): Promise<{
   changes: Array<{ path: string; previousHash: string | null; newHash: string }>;
   events: ExecutionEvent[];
 }> {
-  const structure = await getWorkspaceStructure(storage, state.repo, state.workspace);
+  const structure = cachedStructure ?? await getWorkspaceStructure(storage, state.repo, state.workspace);
   const taskOutputPathsSet = new Set(state.taskOutputPaths);
 
   const changes = await detectInputChanges(
@@ -404,6 +405,7 @@ export async function stepDetectInputChanges(
  * - deferred: reset to pending
  * - pending/ready: leave as-is (will pick up new inputs naturally)
  * - skipped: leave as-is (upstream failure still applies)
+ * - failed: leave as-is (task already failed; orchestrator is winding down)
  *
  * @param state - Execution state to mutate
  * @param changes - Input changes from stepDetectInputChanges
@@ -429,7 +431,9 @@ export function stepInvalidateTasks(
 
     // Skip tasks that are currently running — they'll be checked when they finish
     if (taskState.status === 'in_progress') continue;
-    // Skip tasks not affected (already in failed/skipped terminal states from failure)
+    // Leave failed — orchestrator is winding down
+    if (taskState.status === 'failed') continue;
+    // Skip tasks not affected (already in skipped terminal state from failure)
     if (taskState.status === 'skipped') continue;
 
     if (taskState.status === 'completed') {
