@@ -20,7 +20,7 @@
  * @see East serialization docs for keypath syntax details
  */
 
-import { VariantType, StringType, ArrayType, DictType, RecursiveType, ValueTypeOf, printIdentifier, variant, EastTypeType } from '@elaraai/east';
+import { VariantType, StringType, ArrayType, DictType, RecursiveType, ValueTypeOf, printIdentifier, variant, EastTypeType, StructType, BooleanType } from '@elaraai/east';
 
 /**
  * Structure definition for a data tree node.
@@ -47,8 +47,13 @@ import { VariantType, StringType, ArrayType, DictType, RecursiveType, ValueTypeO
  * ```
  */
 export const StructureType = RecursiveType(self => VariantType({
-  /** Dataset: East type of the value (homoiconic EastTypeValue) */
-  value: EastTypeType,
+  /** Dataset: East type and writable flag */
+  value: StructType({
+    /** The East type of the dataset value (homoiconic EastTypeValue) */
+    type: EastTypeType,
+    /** Whether the dataset can be written to by users (e.g., inputs are writable, task outputs are not) */
+    writable: BooleanType,
+  }),
   /** Struct tree: named children mapping to child structures */
   struct: DictType(StringType, self),
 }));

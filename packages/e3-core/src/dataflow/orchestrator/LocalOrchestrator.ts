@@ -8,16 +8,22 @@
  *
  * Executes dataflow using an async loop with step functions.
  * This is the default orchestrator for CLI and local API server usage.
+ *
+ * Supports reactive execution: after each task completes, checks for
+ * root input changes. If inputs changed, affected tasks are invalidated
+ * and re-executed. Version vector consistency checks defer tasks whose
+ * inputs have conflicting provenance (diamond dependency protection).
  */
 
-import { variant } from '@elaraai/east';
+import { decodeBeast2For, encodeBeast2For, variant } from '@elaraai/east';
+import type { VersionVector, DataflowRun, TaskExecutionRecord, Structure } from '@elaraai/e3-types';
+import { WorkspaceStateType } from '@elaraai/e3-types';
 import type { StorageBackend, LockHandle } from '../../storage/interfaces.js';
 import type { TaskExecuteOptions } from '../../execution/interfaces.js';
 import { taskExecute } from '../../execution/LocalTaskRunner.js';
-import { workspaceSetDatasetByHash } from '../../trees.js';
-import { parsePathString } from '../../dataflow.js';
-import { WorkspaceLockError, DataflowAbortedError } from '../../errors.js';
+import { WorkspaceLockError, DataflowAbortedError, DataflowError } from '../../errors.js';
 import type { TaskExecutionResult } from '../../dataflow.js';
+import { uuidv7 } from '../../uuid.js';
 import type {
   DataflowOrchestrator,
   ExecutionHandle,
@@ -30,6 +36,7 @@ import type {
   DataflowExecutionState,
   ExecutionEvent,
   FinalizeResult,
+  TaskState,
 } from '../types.js';
 import {
   stepInitialize,
@@ -42,14 +49,25 @@ import {
   stepIsComplete,
   stepFinalize,
   stepCancel,
+  stepApplyTreeUpdate,
+  stepDetectInputChanges,
+  stepInvalidateTasks,
+  stepCheckVersionConsistency,
 } from '../steps.js';
+import type { Mutable } from '../types.js';
+
+// =============================================================================
+// Async Mutex for State Mutations
+// =============================================================================
 
 /**
- * Simple async mutex to serialize workspace state updates.
+ * Simple async mutex to serialize state mutations.
  *
- * When multiple tasks complete concurrently, their workspace writes must be
- * serialized to prevent race conditions (read-modify-write on the workspace
- * root hash). This mutex ensures only one update runs at a time.
+ * When multiple tasks complete concurrently, their `.then()` callbacks
+ * mutate shared DataflowExecutionState. Between `await` points
+ * (stepApplyTreeUpdate, handleInputChanges), another callback can run
+ * and corrupt counters/version vectors. This mutex ensures only one
+ * state mutation runs at a time while task execution itself runs in parallel.
  */
 class AsyncMutex {
   private queue: Array<() => void> = [];
@@ -95,11 +113,20 @@ class AsyncMutex {
 interface RunningExecution {
   state: DataflowExecutionState;
   lock: LockHandle;
+  /** Shared workspace lock (allows concurrent set operations) */
+  sharedLock: LockHandle | null;
   externalLock: boolean;
   options: OrchestratorStartOptions;
-  mutex: AsyncMutex;
   aborted: boolean;
   runningTasks: Map<string, Promise<void>>;
+  /** Mutex to serialize state mutations from concurrent task completions */
+  mutex: AsyncMutex;
+  /** Dataflow run ID (UUIDv7) for DataflowRun recording */
+  runId: string;
+  /** Task execution records for DataflowRun */
+  taskExecutions: Map<string, TaskExecutionRecord>;
+  /** Cleanup function to remove abort listener on normal completion */
+  abortCleanup?: () => void;
   completionPromise: Promise<FinalizeResult>;
   resolveCompletion: (result: FinalizeResult) => void;
   rejectCompletion: (error: Error) => void;
@@ -110,9 +137,11 @@ interface RunningExecution {
  *
  * @remarks
  * - Uses step functions for each operation
- * - Serializes workspace writes with AsyncMutex
+ * - Per-dataset ref writes are atomic and independent (no mutex needed)
  * - Supports AbortSignal for cancellation
  * - Persists state through the provided state store
+ * - Reactive: detects input changes after each task, invalidates and
+ *   re-executes affected tasks until fixpoint
  */
 export class LocalOrchestrator implements DataflowOrchestrator {
   private executions = new Map<string, RunningExecution>();
@@ -131,12 +160,36 @@ export class LocalOrchestrator implements DataflowOrchestrator {
     workspace: string,
     options: OrchestratorStartOptions = {}
   ): Promise<ExecutionHandle> {
-    // Acquire lock if not provided externally
+    // Acquire locks if not provided externally.
+    // Dual-lock model:
+    //   - Shared lock on workspace (allows concurrent e3 set)
+    //   - Exclusive lock on workspace#dataflow (prevents concurrent starts)
     const externalLock = !!options.lock;
-    const lock = options.lock ?? await storage.locks.acquire(repo, workspace, variant('dataflow', null));
 
-    if (!lock) {
-      throw new WorkspaceLockError(workspace);
+    let sharedLock: LockHandle | null = null;
+    let dataflowLock: LockHandle | null = null;
+
+    if (externalLock) {
+      // Caller's lock serves as shared workspace lock
+      sharedLock = options.lock!;
+      // Still acquire exclusive dataflow lock (prevents concurrent starts)
+      dataflowLock = await storage.locks.acquire(repo, `${workspace}#dataflow`, variant('dataflow', null));
+      if (!dataflowLock) {
+        throw new WorkspaceLockError(workspace);
+      }
+    } else {
+      // Acquire shared workspace lock first (coexists with e3 set)
+      sharedLock = await storage.locks.acquire(repo, workspace, variant('dataflow', null), { mode: 'shared' });
+      if (!sharedLock) {
+        throw new WorkspaceLockError(workspace);
+      }
+
+      // Acquire exclusive dataflow lock (prevents concurrent starts)
+      dataflowLock = await storage.locks.acquire(repo, `${workspace}#dataflow`, variant('dataflow', null));
+      if (!dataflowLock) {
+        await sharedLock.release();
+        throw new WorkspaceLockError(workspace);
+      }
     }
 
     try {
@@ -174,12 +227,15 @@ export class LocalOrchestrator implements DataflowOrchestrator {
       // Create running execution state
       const execution: RunningExecution = {
         state,
-        lock,
+        lock: dataflowLock,
+        sharedLock,
         externalLock,
         options,
-        mutex: new AsyncMutex(),
         aborted: false,
         runningTasks: new Map(),
+        mutex: new AsyncMutex(),
+        runId: uuidv7(),
+        taskExecutions: new Map(),
         completionPromise,
         resolveCompletion,
         rejectCompletion,
@@ -189,13 +245,10 @@ export class LocalOrchestrator implements DataflowOrchestrator {
       this.executions.set(key, execution);
 
       // Listen for abort signal to persist cancellation immediately.
-      // This ensures the "cancelled" status survives even if the process
-      // is killed (e.g., repeated Ctrl-C) before the loop can persist.
       if (options.signal) {
         const onAbort = () => {
           execution.aborted = true;
           if (this.stateStore) {
-            // Fire-and-forget: best-effort immediate persistence
             void this.stateStore.updateStatus(
               repo,
               workspace,
@@ -206,6 +259,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
           }
         };
         options.signal.addEventListener('abort', onAbort, { once: true });
+        execution.abortCleanup = () => options.signal!.removeEventListener('abort', onAbort);
       }
 
       // Start the execution loop (non-blocking)
@@ -215,9 +269,11 @@ export class LocalOrchestrator implements DataflowOrchestrator {
 
       return { id: executionId, repo, workspace };
     } catch (err) {
-      // Release lock on initialization failure (if we acquired it)
-      if (!externalLock) {
-        await lock.release();
+      // Always release the dataflow lock on initialization failure
+      await dataflowLock!.release();
+      // Release shared workspace lock only if we acquired it (not external)
+      if (!externalLock && sharedLock) {
+        await sharedLock.release();
       }
       throw err;
     }
@@ -262,8 +318,6 @@ export class LocalOrchestrator implements DataflowOrchestrator {
 
     execution.aborted = true;
 
-    // Persist cancellation immediately so it survives process crashes.
-    // The execution loop will also detect the abort and clean up gracefully.
     if (this.stateStore) {
       await this.stateStore.updateStatus(
         handle.repo,
@@ -283,20 +337,54 @@ export class LocalOrchestrator implements DataflowOrchestrator {
   }
 
   /**
-   * Main execution loop.
+   * Main execution loop with reactive fixpoint.
    *
-   * Uses step functions to execute tasks, managing concurrency and
-   * workspace state updates.
+   * After each task completes, checks for input changes and invalidates
+   * affected tasks. Uses version vector consistency checks to defer tasks
+   * whose inputs have conflicting provenance. Execution continues until
+   * fixpoint (no more ready, running, or deferred tasks).
    */
   private async runExecutionLoop(
     storage: StorageBackend,
     repo: string,
     execution: RunningExecution
   ): Promise<void> {
-    const { state, options, mutex } = execution;
+    const { state, options } = execution;
 
     try {
       let hasFailure = false;
+
+      // Read workspace state for DataflowRun recording
+      const wsData = await storage.refs.workspaceRead(repo, state.workspace);
+      const wsDecoder = decodeBeast2For(WorkspaceStateType);
+      const wsState = wsData && wsData.length > 0 ? wsDecoder(wsData) : null;
+
+      // Cache structure for the entire execution (immutable during execution)
+      const structure = wsState ? await this.readStructure(storage, repo, wsState.packageHash) : null;
+
+      // Write initial DataflowRun record
+      if (wsState) {
+        const initialRun: DataflowRun = {
+          runId: execution.runId,
+          workspaceName: state.workspace,
+          packageRef: `${wsState.packageName}@${wsState.packageVersion}`,
+          startedAt: state.startedAt,
+          completedAt: variant('none', null),
+          status: variant('running', {}),
+          inputVersions: new Map(state.inputSnapshot),
+          outputVersions: variant('none', null),
+          taskExecutions: new Map(),
+          summary: {
+            total: BigInt(state.tasks.size),
+            completed: 0n,
+            cached: 0n,
+            failed: 0n,
+            skipped: 0n,
+            reexecuted: 0n,
+          },
+        };
+        await storage.refs.dataflowRunWrite(repo, state.workspace, initialRun);
+      }
 
       // Check for abort signal from options
       const checkAborted = () => {
@@ -315,6 +403,11 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         // Get ready tasks
         const readyTasks = stepGetReady(state);
 
+        // Track whether any task was completed synchronously (via cache hit)
+        // in this iteration. If so, new downstream tasks may have become ready
+        // that aren't in the stale readyTasks array.
+        let hadSyncCompletion = false;
+
         // Launch tasks up to concurrency limit if no failure and not aborted
         const concurrencyLimit = Number(state.concurrency);
         while (
@@ -330,13 +423,42 @@ export class LocalOrchestrator implements DataflowOrchestrator {
             continue;
           }
 
+          // Version vector consistency check before launching
+          const vvCheck = stepCheckVersionConsistency(state, taskName);
+          if (!vvCheck.consistent) {
+            // Defer: inputs have inconsistent versions of the same root input
+            const ts = state.tasks.get(taskName) as Mutable<TaskState> | undefined;
+            if (ts) ts.status = 'deferred';
+
+            // Emit task_deferred event
+            const mutableState = state as Mutable<DataflowExecutionState>;
+            mutableState.eventSeq = state.eventSeq + 1n;
+            const deferEvent: ExecutionEvent = variant('task_deferred', {
+              seq: mutableState.eventSeq,
+              timestamp: new Date(),
+              task: taskName,
+              conflictPath: vvCheck.conflictPath,
+            });
+            (mutableState.events as ExecutionEvent[]).push(deferEvent);
+
+            options.onTaskDeferred?.(taskName, vvCheck.conflictPath);
+            continue;
+          }
+
           // Prepare task (resolve inputs, check cache)
           const prepared = await stepPrepareTask(storage, state, taskName);
 
           // Check cache
           if (prepared.cachedOutputHash !== null) {
-            // Cache hit - handle synchronously within mutex
-            await mutex.runExclusive(async () => {
+            hadSyncCompletion = true;
+            // Cache hit — wrap in mutex to serialize with concurrent .then() callbacks
+            await execution.mutex.runExclusive(async () => {
+              // Write ref with merged VV and update state
+              await stepApplyTreeUpdate(
+                storage, repo, state.workspace,
+                prepared.outputPath, prepared.cachedOutputHash!, vvCheck.mergedVV
+              );
+
               stepTaskCompleted(
                 state,
                 taskName,
@@ -344,6 +466,15 @@ export class LocalOrchestrator implements DataflowOrchestrator {
                 true,
                 0
               );
+
+              // Track task execution for DataflowRun
+              const existingCached = execution.taskExecutions.get(taskName);
+              execution.taskExecutions.set(taskName, {
+                executionId: state.id,
+                cached: true,
+                outputVersions: new Map(vvCheck.mergedVV),
+                executionCount: (existingCached?.executionCount ?? 0n) + 1n,
+              });
 
               // Notify callback
               options.onTaskComplete?.({
@@ -353,7 +484,10 @@ export class LocalOrchestrator implements DataflowOrchestrator {
                 duration: 0,
               });
 
-              // Update state store (events are added by step function)
+              // Detect input changes after cached result
+              await this.handleInputChanges(storage, state, options, structure);
+
+              // Update state store
               if (this.stateStore) {
                 await this.stateStore.update(state);
               }
@@ -375,18 +509,21 @@ export class LocalOrchestrator implements DataflowOrchestrator {
             execution,
             taskName,
             prepared
-          ).then(async (result) => {
-            // Handle task completion within mutex
-            await mutex.runExclusive(async () => {
+          ).then(result =>
+            execution.mutex.runExclusive(async () => {
+              // Handle task completion
               if (result.state === 'success') {
-                const outputPath = parsePathString(prepared.outputPath);
+                // Re-check VV consistency (inputs may have changed during execution)
+                const postVVCheck = stepCheckVersionConsistency(state, taskName);
+                const mergedVV: VersionVector = postVVCheck.consistent
+                  ? postVVCheck.mergedVV
+                  : new Map();
+
                 if (result.outputHash) {
-                  await workspaceSetDatasetByHash(
-                    storage,
-                    repo,
-                    state.workspace,
-                    outputPath,
-                    result.outputHash
+                  // Write output ref with merged VV
+                  await stepApplyTreeUpdate(
+                    storage, repo, state.workspace,
+                    prepared.outputPath, result.outputHash, mergedVV
                   );
                 }
 
@@ -398,12 +535,24 @@ export class LocalOrchestrator implements DataflowOrchestrator {
                   result.duration
                 );
 
+                // Track task execution for DataflowRun
+                const existing = execution.taskExecutions.get(taskName);
+                execution.taskExecutions.set(taskName, {
+                  executionId: result.executionId ?? state.id,
+                  cached: result.cached,
+                  outputVersions: new Map(mergedVV),
+                  executionCount: (existing?.executionCount ?? 0n) + 1n,
+                });
+
                 options.onTaskComplete?.({
                   name: taskName,
                   cached: result.cached,
                   state: 'success',
                   duration: result.duration,
                 });
+
+                // Detect input changes after task completion
+                await this.handleInputChanges(storage, state, options, structure);
               } else {
                 hasFailure = true;
 
@@ -427,7 +576,6 @@ export class LocalOrchestrator implements DataflowOrchestrator {
                 // Skip dependents (events added by step function)
                 const skipEvents = stepTasksSkipped(state, failedResult.toSkip, taskName);
                 for (const skipEvent of skipEvents) {
-                  // skipEvents are always task_skipped events
                   if (skipEvent.type === 'task_skipped') {
                     options.onTaskComplete?.({
                       name: skipEvent.value.task,
@@ -443,8 +591,8 @@ export class LocalOrchestrator implements DataflowOrchestrator {
               if (this.stateStore) {
                 await this.stateStore.update(state);
               }
-            });
-          }).finally(() => {
+            })
+          ).finally(() => {
             execution.runningTasks.delete(taskName);
           });
 
@@ -454,6 +602,10 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         // Wait for at least one task to complete if we can't launch more
         if (execution.runningTasks.size > 0) {
           await Promise.race(execution.runningTasks.values());
+        } else if (hadSyncCompletion) {
+          // A cached task completed synchronously, which may have made new
+          // downstream tasks ready. Continue to re-check at the top of the loop.
+          continue;
         } else if (readyTasks.length === 0 || checkAborted() || hasFailure) {
           break;
         }
@@ -464,11 +616,56 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         await Promise.all(execution.runningTasks.values());
       }
 
+      // Check for stuck state: non-terminal tasks remain but none are ready or running.
+      // When a filter is active, only the filtered task is relevant — non-filtered
+      // tasks are expected to remain pending.
+      const filterValue = state.filter.type === 'some' ? state.filter.value : null;
+      const stuckTasks = [...state.tasks.entries()]
+        .filter(([name, ts]) => {
+          if (ts.status !== 'pending' && ts.status !== 'ready' && ts.status !== 'deferred') {
+            return false;
+          }
+          // When a filter is active, non-filtered tasks staying pending is expected
+          if (filterValue !== null && name !== filterValue) {
+            return false;
+          }
+          return true;
+        })
+        .map(([name, ts]) => `${name} (${ts.status})`)
+        .join(', ');
+      if (stuckTasks.length > 0 && !checkAborted() && !hasFailure) {
+        throw new DataflowError(`Dataflow stuck: ${stuckTasks}`);
+      }
+
       // Check for abort one final time
       if (checkAborted()) {
         stepCancel(state, 'Execution was aborted');
         if (this.stateStore) {
           await this.stateStore.update(state);
+        }
+
+        // Write cancelled DataflowRun record
+        if (wsState) {
+          const cancelledRun: DataflowRun = {
+            runId: execution.runId,
+            workspaceName: state.workspace,
+            packageRef: `${wsState.packageName}@${wsState.packageVersion}`,
+            startedAt: state.startedAt,
+            completedAt: variant('some', new Date()),
+            status: variant('cancelled', {}),
+            inputVersions: new Map(state.inputSnapshot),
+            outputVersions: variant('some', this.buildOutputVersions(state)),
+            taskExecutions: new Map(execution.taskExecutions),
+            summary: {
+              total: BigInt(state.tasks.size),
+              completed: state.executed + state.cached,
+              cached: state.cached,
+              failed: state.failed,
+              skipped: state.skipped,
+              reexecuted: state.reexecuted,
+            },
+          };
+          await storage.refs.dataflowRunWrite(repo, state.workspace, cancelledRun);
         }
 
         // Build partial results for abort error
@@ -477,21 +674,116 @@ export class LocalOrchestrator implements DataflowOrchestrator {
       }
 
       // Finalize (event added by step function)
-      const { result } = stepFinalize(state);
+      const { result } = stepFinalize(state, execution.runId);
       if (this.stateStore) {
         await this.stateStore.update(state);
       }
 
+      // Write final DataflowRun record
+      if (wsState) {
+        let finalStatus: DataflowRun['status'];
+        if (!result.success) {
+          // Find the failed task for the error record
+          const failedTaskEntry = [...state.tasks.entries()]
+            .find(([, ts]) => ts.status === 'failed');
+          const failedTaskName = failedTaskEntry?.[0] ?? 'unknown';
+          const failedError = failedTaskEntry?.[1].error.type === 'some'
+            ? failedTaskEntry[1].error.value
+            : 'Task failed';
+          finalStatus = variant('failed', {
+            failedTask: failedTaskName,
+            error: failedError,
+          });
+        } else {
+          finalStatus = variant('completed', {});
+        }
+
+        const finalRun: DataflowRun = {
+          runId: execution.runId,
+          workspaceName: state.workspace,
+          packageRef: `${wsState.packageName}@${wsState.packageVersion}`,
+          startedAt: state.startedAt,
+          completedAt: variant('some', new Date()),
+          status: finalStatus,
+          inputVersions: new Map(state.inputSnapshot),
+          outputVersions: variant('some', this.buildOutputVersions(state)),
+          taskExecutions: new Map(execution.taskExecutions),
+          summary: {
+            total: BigInt(state.tasks.size),
+            completed: state.executed + state.cached,
+            cached: state.cached,
+            failed: state.failed,
+            skipped: state.skipped,
+            reexecuted: state.reexecuted,
+          },
+        };
+        await storage.refs.dataflowRunWrite(repo, state.workspace, finalRun);
+
+        // Update workspace state with currentRunId on success
+        if (result.success) {
+          const currentWsData = await storage.refs.workspaceRead(repo, state.workspace);
+          if (currentWsData && currentWsData.length > 0) {
+            const currentWsState = wsDecoder(currentWsData);
+            const updatedWsState = {
+              ...currentWsState,
+              currentRunId: variant('some', execution.runId),
+            };
+            const encoder = encodeBeast2For(WorkspaceStateType);
+            await storage.refs.workspaceWrite(repo, state.workspace, encoder(updatedWsState));
+          }
+        }
+      }
+
       execution.resolveCompletion(result);
     } finally {
-      // Release lock if we acquired it
-      if (!execution.externalLock) {
-        await execution.lock.release();
+      // Remove abort listener to avoid leaking execution object
+      execution.abortCleanup?.();
+
+      // Always release the dataflow lock (we always acquire it)
+      await execution.lock.release();
+      // Release shared workspace lock only if we acquired it (not external)
+      if (!execution.externalLock && execution.sharedLock) {
+        await execution.sharedLock.release();
       }
 
       // Clean up execution state
       const key = this.executionKey(repo, state.workspace, state.id);
       this.executions.delete(key);
+    }
+  }
+
+  /**
+   * Detect input changes and invalidate affected tasks.
+   *
+   * Called after each task completion to implement the reactive loop.
+   */
+  private async handleInputChanges(
+    storage: StorageBackend,
+    state: DataflowExecutionState,
+    options: OrchestratorStartOptions,
+    structure: Structure | null
+  ): Promise<void> {
+    const { changes, events: changeEvents } = await stepDetectInputChanges(storage, state, structure);
+
+    // Notify via callbacks
+    for (const evt of changeEvents) {
+      if (evt.type === 'input_changed') {
+        options.onInputChanged?.(evt.value.path, evt.value.previousHash, evt.value.newHash);
+      }
+    }
+
+    if (changes.length > 0) {
+      const mutableState = state as Mutable<DataflowExecutionState>;
+      const { invalidated, events: invEvents } = stepInvalidateTasks(state, changes);
+
+      // Track re-executions (tasks that were completed and are now invalidated)
+      mutableState.reexecuted = state.reexecuted + BigInt(invalidated.length);
+
+      for (const evt of invEvents) {
+        if (evt.type === 'task_invalidated') {
+          options.onTaskInvalidated?.(evt.value.task, evt.value.reason);
+        }
+      }
     }
   }
 
@@ -508,6 +800,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
     state: 'success' | 'failed' | 'error';
     cached: boolean;
     outputHash?: string;
+    executionId?: string;
     exitCode?: number;
     error?: string;
     duration: number;
@@ -529,6 +822,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         state: result.state,
         cached: result.cached,
         outputHash: result.outputHash,
+        executionId: result.executionId,
         exitCode: result.exitCode,
         error: result.error,
         duration: Date.now() - startTime,
@@ -539,6 +833,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         state: result.state,
         cached: result.cached,
         outputHash: result.outputHash ?? undefined,
+        executionId: result.executionId,
         exitCode: result.exitCode ?? undefined,
         error: result.error ?? undefined,
         duration: Date.now() - startTime,
@@ -572,6 +867,38 @@ export class LocalOrchestrator implements DataflowOrchestrator {
     }
 
     return results;
+  }
+
+  /**
+   * Build output versions map from completed task states.
+   */
+  private buildOutputVersions(state: DataflowExecutionState): Map<string, string> {
+    const outputVersions = new Map<string, string>();
+    const graph = state.graph.type === 'some' ? state.graph.value : null;
+    if (graph) {
+      for (const task of graph.tasks) {
+        const ts = state.tasks.get(task.name);
+        if (ts && ts.outputHash.type === 'some') {
+          outputVersions.set(task.output, ts.outputHash.value);
+        }
+      }
+    }
+    return outputVersions;
+  }
+
+  /**
+   * Read workspace structure from storage.
+   */
+  private async readStructure(
+    storage: StorageBackend,
+    repo: string,
+    packageHash: string
+  ): Promise<Structure> {
+    const { PackageObjectType } = await import('@elaraai/e3-types');
+    const pkgData = await storage.objects.read(repo, packageHash);
+    const pkgDecoder = decodeBeast2For(PackageObjectType);
+    const pkgObject = pkgDecoder(Buffer.from(pkgData));
+    return pkgObject.data.structure;
   }
 
   /**

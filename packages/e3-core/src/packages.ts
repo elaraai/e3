@@ -14,8 +14,8 @@ import * as fs from 'fs/promises';
 import { createWriteStream } from 'fs';
 import yauzl from 'yauzl';
 import yazl from 'yazl';
-import { decodeBeast2For } from '@elaraai/east';
-import { PackageObjectType, TaskObjectType, DataflowRunType, ExecutionStatusType } from '@elaraai/e3-types';
+import { decodeBeast2For, encodeBeast2For } from '@elaraai/east';
+import { PackageObjectType, TaskObjectType, DataflowRunType, ExecutionStatusType, DatasetRefType } from '@elaraai/e3-types';
 import type { PackageObject, TaskObject } from '@elaraai/e3-types';
 import {
   PackageNotFoundError,
@@ -128,6 +128,13 @@ export async function packageImport(
           }
           executionFiles.get(execDir)!.set(file, await getData());
         }
+        continue;
+      }
+
+      // Handle data refs: data/<path>.ref
+      if (fileName.startsWith('data/') && fileName.endsWith('.ref')) {
+        // Per-dataset ref files in the zip are redundant — refs are stored
+        // inline in the PackageObject's data.refs field. Skip them.
         continue;
       }
 
@@ -398,11 +405,18 @@ export async function packageExport(
     await collectTreeChildren(irData);
   }
 
-  // Collect the root tree and all its children
-  const rootTreeHash = packageObject.data.value;
-  await addObject(rootTreeHash);
-  const rootTreeData = await storage.objects.read(repo, rootTreeHash);
-  await collectTreeChildren(rootTreeData);
+  // Collect value objects from inline per-dataset refs and write data/ ref files
+  if (packageObject.data.refs instanceof Map) {
+    const refEncoder = encodeBeast2For(DatasetRefType);
+    for (const [refPath, ref] of packageObject.data.refs) {
+      if (ref.type === 'value' && typeof ref.value?.hash === 'string') {
+        await addObject(ref.value.hash);
+      }
+      // Write DatasetRef to data/ dir in zip for roundtrip compatibility
+      const refData = refEncoder(ref);
+      zipfile.addBuffer(Buffer.from(refData), `data/${refPath}.ref`, { mtime: DETERMINISTIC_MTIME });
+    }
+  }
 
   // Write the package ref
   const refPath = `packages/${name}/${version}`;

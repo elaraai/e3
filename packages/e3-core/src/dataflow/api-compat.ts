@@ -149,11 +149,16 @@ export function coreEventToApiEvent(event: ExecutionEvent): ApiDataflowEvent | n
         reason: `Upstream task '${event.value.cause}' failed`,
       };
 
-    // Events without API equivalents
+    // Events without API equivalents.
+    // Reactive events (input_changed, task_invalidated, task_deferred) are
+    // internal to the execution loop and not yet exposed via the API.
     case 'execution_started':
     case 'task_ready':
     case 'execution_completed':
     case 'execution_cancelled':
+    case 'input_changed':
+    case 'task_invalidated':
+    case 'task_deferred':
       return null;
   }
 }

@@ -77,6 +77,12 @@ export interface OrchestratorStartOptions {
   onStdout?: (taskName: string, data: string) => void;
   /** Callback for task stderr */
   onStderr?: (taskName: string, data: string) => void;
+  /** Called when a root input dataset changes during execution */
+  onInputChanged?: (path: string, previousHash: string, newHash: string) => void;
+  /** Called when a task is invalidated for re-execution */
+  onTaskInvalidated?: (taskName: string, reason: string) => void;
+  /** Called when a task is deferred due to inconsistent input versions */
+  onTaskDeferred?: (taskName: string, conflictPath: string) => void;
 }
 
 /**
@@ -187,6 +193,7 @@ export function stateToStatus(state: DataflowExecutionState): ExecutionStatus {
         break;
       case 'pending':
       case 'ready':
+      case 'deferred':
         pending.push(name);
         break;
       case 'failed':

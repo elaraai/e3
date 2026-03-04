@@ -11,7 +11,7 @@ import * as path from 'node:path';
 import yazl from 'yazl';
 import yauzl from 'yauzl';
 import { StringType, decodeBeast2For } from '@elaraai/east';
-import { PackageObjectType } from '@elaraai/e3-types';
+import { PackageObjectType, DatasetRefType } from '@elaraai/e3-types';
 import { addObject, export_ } from './export.js';
 import { package_ } from './package.js';
 import { input } from './input.js';
@@ -134,9 +134,9 @@ describe('export_', () => {
     const refContent = entries.get('packages/empty-pkg/1.0.0')!.toString().trim();
     assert.match(refContent, /^[a-f0-9]{64}$/);
 
-    // Should have at least the package object and root tree
+    // Should have just the package object (no tree objects in new format)
     const objectEntries = Array.from(entries.keys()).filter(k => k.startsWith('objects/'));
-    assert.ok(objectEntries.length >= 2, `Expected at least 2 objects, got ${objectEntries.length}`);
+    assert.ok(objectEntries.length >= 1, `Expected at least 1 object, got ${objectEntries.length}`);
 
     // Decode and verify package object
     const packageObjectPath = `objects/${refContent.slice(0, 2)}/${refContent.slice(2)}.beast2`;
@@ -174,7 +174,7 @@ describe('export_', () => {
     // Should have no tasks (input only)
     assert.strictEqual(packageObject.tasks.size, 0);
 
-    // Structure should have inputs.greeting as a value
+    // Structure should have inputs.greeting as a value with writable flag
     assert.strictEqual(packageObject.data.structure.type, 'struct');
     const inputs = packageObject.data.structure.value.get('inputs');
     assert.ok(inputs, 'Missing inputs in structure');
@@ -182,8 +182,17 @@ describe('export_', () => {
     const greeting = inputs.value.get('greeting');
     assert.ok(greeting, 'Missing greeting in inputs structure');
     assert.strictEqual(greeting.type, 'value');
-    // The value should be a String type
-    assert.strictEqual(greeting.value.type, 'String');
+    // The value should contain a String type and writable flag
+    assert.strictEqual(greeting.value.type.type, 'String');
+    assert.strictEqual(greeting.value.writable, true);
+
+    // Should have a DatasetRef file for the input
+    const refData = entries.get('data/inputs/greeting.ref');
+    assert.ok(refData, 'Missing data/inputs/greeting.ref');
+    const refDecoder = decodeBeast2For(DatasetRefType);
+    const datasetRef = refDecoder(refData);
+    assert.strictEqual(datasetRef.type, 'value');
+    assert.ok(datasetRef.value.hash, 'Missing hash in dataset ref');
   });
 
   it('produces identical output for same package', async () => {

@@ -31,6 +31,14 @@ export {
   DataTreeType,
 } from './dataset.js';
 
+// Per-dataset refs and version vectors (reactive dataflow)
+export {
+  VersionVectorType,
+  type VersionVector,
+  DatasetRefType,
+  type DatasetRef,
+} from './dataset-ref.js';
+
 // Task definitions
 export {
   TaskObjectType,

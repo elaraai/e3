@@ -15,7 +15,7 @@
  * a StorageBackend, the same code can run locally or in the cloud.
  */
 
-import type { ExecutionStatus, LockState, LockOperation, DataflowRun } from '@elaraai/e3-types';
+import type { ExecutionStatus, LockState, LockOperation, DataflowRun, DatasetRef } from '@elaraai/e3-types';
 import type { LockHolderInfo } from '../errors.js';
 
 // Re-export lock types for consumers of this module
@@ -409,7 +409,7 @@ export interface LockService {
     repo: string,
     resource: string,
     operation: LockOperation,
-    options?: { wait?: boolean; timeout?: number }
+    options?: { wait?: boolean; timeout?: number; mode?: 'shared' | 'exclusive' }
   ): Promise<LockHandle | null>;
 
   /**
@@ -631,6 +631,63 @@ export interface RepoStore {
 }
 
 // =============================================================================
+// Dataset Ref Store
+// =============================================================================
+
+/**
+ * Per-dataset reference storage for reactive dataflow.
+ *
+ * Each dataset in a workspace has its own ref file tracking its current
+ * value and version vector. This replaces the single rootHash approach,
+ * enabling concurrent writes and reactive re-execution.
+ *
+ * Ref files are stored at: workspaces/<ws>/data/<path>.ref
+ * where <path> uses directory separators (e.g., inputs/sales.ref).
+ */
+export interface DatasetRefStore {
+  /**
+   * Read a dataset ref.
+   * @param repo - Repository identifier
+   * @param ws - Workspace name
+   * @param path - Dataset path (e.g., "inputs/sales" for .inputs.sales)
+   * @returns DatasetRef or null if ref doesn't exist
+   */
+  read(repo: string, ws: string, path: string): Promise<DatasetRef | null>;
+
+  /**
+   * Write a dataset ref atomically.
+   * @param repo - Repository identifier
+   * @param ws - Workspace name
+   * @param path - Dataset path (e.g., "inputs/sales" for .inputs.sales)
+   * @param ref - The dataset ref to write
+   */
+  write(repo: string, ws: string, path: string, ref: DatasetRef): Promise<void>;
+
+  /**
+   * List all dataset ref paths in a workspace.
+   * @param repo - Repository identifier
+   * @param ws - Workspace name
+   * @returns Array of dataset paths (e.g., ["inputs/sales", "tasks/etl/output"])
+   */
+  list(repo: string, ws: string): Promise<string[]>;
+
+  /**
+   * Remove a single dataset ref.
+   * @param repo - Repository identifier
+   * @param ws - Workspace name
+   * @param path - Dataset path
+   */
+  remove(repo: string, ws: string, path: string): Promise<void>;
+
+  /**
+   * Remove all dataset refs for a workspace.
+   * @param repo - Repository identifier
+   * @param ws - Workspace name
+   */
+  removeAll(repo: string, ws: string): Promise<void>;
+}
+
+// =============================================================================
 // Combined Storage Backend
 // =============================================================================
 
@@ -656,6 +713,9 @@ export interface StorageBackend {
 
   /** Repository lifecycle management */
   readonly repos: RepoStore;
+
+  /** Per-dataset reference storage (reactive dataflow) */
+  readonly datasets: DatasetRefStore;
 
   /**
    * Validate that a repository exists and is properly structured.

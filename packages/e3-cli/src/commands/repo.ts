@@ -142,7 +142,6 @@ export const repoCommand = {
               console.log(`  ${ws}`);
               console.log(`    Package: ${state.packageName}@${state.packageVersion}`);
               console.log(`    Deployed: ${state.deployedAt.toISOString()}`);
-              console.log(`    Updated: ${state.rootUpdatedAt.toISOString()}`);
             } else {
               console.log(`  ${ws} (not deployed)`);
             }

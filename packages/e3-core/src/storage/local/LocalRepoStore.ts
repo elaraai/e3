@@ -14,7 +14,7 @@ import type {
   GcObjectScanResult,
   GcRootScanResult,
 } from '../interfaces.js';
-import type { RefStore } from '../interfaces.js';
+import type { RefStore, DatasetRefStore } from '../interfaces.js';
 import {
   RepoNotFoundError,
   RepoAlreadyExistsError,
@@ -46,10 +46,12 @@ export class LocalRepoStore implements RepoStore {
    * Create a new LocalRepoStore.
    * @param reposDir - Parent directory containing repositories
    * @param refs - RefStore for reading package/workspace/execution refs
+   * @param datasets - DatasetRefStore for reading per-dataset refs (for GC scanning)
    */
   constructor(
     private readonly reposDir: string,
-    private readonly refs: RefStore
+    private readonly refs: RefStore,
+    private readonly datasets?: DatasetRefStore
   ) {}
 
   /**
@@ -316,7 +318,16 @@ export class LocalRepoStore implements RepoStore {
       try {
         const state = decoder(data);
         roots.push(state.packageHash);
-        roots.push(state.rootHash);
+        // Scan per-dataset ref files for value hashes
+        if (this.datasets) {
+          const refPaths = await this.datasets.list(repo, name);
+          for (const refPath of refPaths) {
+            const ref = await this.datasets.read(repo, name, refPath);
+            if (ref && ref.type === 'value') {
+              roots.push(ref.value.hash);
+            }
+          }
+        }
       } catch {
         // Corrupt workspace state - skip
       }

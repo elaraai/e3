@@ -37,6 +37,8 @@ export {
   type GcRootScanResult,
   type GcObjectEntry,
   type GcObjectScanResult,
+  // Dataset refs
+  type DatasetRefStore,
   // Combined backend
   type StorageBackend,
 } from './interfaces.js';
@@ -50,6 +52,7 @@ export {
   LocalLockService,
   LocalLogStore,
   LocalRepoStore,
+  LocalDatasetRefStore,
 } from './local/index.js';
 
 // In-memory implementation (for testing)

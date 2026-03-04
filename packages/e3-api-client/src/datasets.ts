@@ -3,10 +3,10 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import { ArrayType, StringType } from '@elaraai/east';
+import { ArrayType, NullType, StringType, decodeBeast2For } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
-import { get, type RequestOptions } from './http.js';
-import { DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from './types.js';
+import { ApiError, AuthError, get, type RequestOptions, type Response } from './http.js';
+import { ResponseType, DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from './types.js';
 
 function datasetEndpoint(repo: string, workspace: string, path: TreePath): string {
   let endpoint = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`;
@@ -141,11 +141,20 @@ export async function datasetSet(
   );
 
   if (response.status === 401) {
-    throw new Error(`Authentication failed: ${await response.text()}`);
+    throw new AuthError(await response.text());
   }
 
   if (!response.ok) {
     throw new Error(`Failed to set dataset: ${response.status} ${response.statusText}`);
+  }
+
+  // Decode BEAST2 response to check for application-level errors
+  const buffer = await response.arrayBuffer();
+  const decode = decodeBeast2For(ResponseType(NullType));
+  const result = decode(new Uint8Array(buffer)) as Response<null>;
+
+  if (result.type === 'error') {
+    throw new ApiError(result.value.type, result.value.value);
   }
 }
 

@@ -6,11 +6,12 @@
 import { none } from '@elaraai/east';
 import { computeHash } from '../../objects.js';
 import { ObjectNotFoundError, RepoNotFoundError } from '../../errors.js';
-import type { ExecutionStatus, DataflowRun } from '@elaraai/e3-types';
+import type { ExecutionStatus, DataflowRun, DatasetRef } from '@elaraai/e3-types';
 import type {
   StorageBackend,
   ObjectStore,
   RefStore,
+  DatasetRefStore,
   LockService,
   LockHandle,
   LockOperation,
@@ -299,10 +300,18 @@ class InMemoryRefStore implements RefStore {
 
 /**
  * In-memory implementation of LockService for testing.
+ *
+ * Supports shared/exclusive lock modes:
+ * - Multiple shared holders can coexist on the same resource
+ * - Exclusive locks require zero holders
+ * - Shared locks fail if an exclusive holder exists
  */
 /* eslint-disable @typescript-eslint/require-await */
 class InMemoryLockService implements LockService {
-  private locks = new Map<string, LockState>();
+  // Track exclusive locks (at most one per resource)
+  private exclusiveLocks = new Map<string, LockState>();
+  // Track shared lock count per resource
+  private sharedLockCounts = new Map<string, number>();
 
   private makeLockKey(repo: string, resource: string): string {
     return `${repo}:${resource}`;
@@ -312,33 +321,60 @@ class InMemoryLockService implements LockService {
     repo: string,
     resource: string,
     operation: LockOperation,
-    _options?: { wait?: boolean; timeout?: number }
+    options?: { wait?: boolean; timeout?: number; mode?: 'shared' | 'exclusive' }
   ): Promise<LockHandle | null> {
     const key = this.makeLockKey(repo, resource);
-    if (this.locks.has(key)) {
-      return null;
+    const mode = options?.mode ?? 'exclusive';
+
+    if (mode === 'shared') {
+      // Shared mode: fail if exclusive lock is held
+      if (this.exclusiveLocks.has(key)) {
+        return null;
+      }
+      // Increment shared count
+      const count = this.sharedLockCounts.get(key) ?? 0;
+      this.sharedLockCounts.set(key, count + 1);
+
+      return {
+        resource,
+        release: async () => {
+          const current = this.sharedLockCounts.get(key) ?? 0;
+          if (current <= 1) {
+            this.sharedLockCounts.delete(key);
+          } else {
+            this.sharedLockCounts.set(key, current - 1);
+          }
+        },
+      };
+    } else {
+      // Exclusive mode: fail if any lock (shared or exclusive) is held
+      if (this.exclusiveLocks.has(key)) {
+        return null;
+      }
+      if ((this.sharedLockCounts.get(key) ?? 0) > 0) {
+        return null;
+      }
+
+      const now = new Date();
+      const state: LockState = {
+        holder: `.process (pid=${process.pid}, bootId="in-memory", startTime=0, command="test")`,
+        operation,
+        acquiredAt: now,
+        expiresAt: none,
+      };
+      this.exclusiveLocks.set(key, state);
+
+      return {
+        resource,
+        release: async () => {
+          this.exclusiveLocks.delete(key);
+        },
+      };
     }
-
-    const now = new Date();
-    // holder is an East text-encoded variant string
-    const state: LockState = {
-      holder: `.process (pid=${process.pid}, bootId="in-memory", startTime=0, command="test")`,
-      operation,
-      acquiredAt: now,
-      expiresAt: none,
-    };
-    this.locks.set(key, state);
-
-    return {
-      resource,
-      release: async () => {
-        this.locks.delete(key);
-      },
-    };
   }
 
   async getState(repo: string, resource: string): Promise<LockState | null> {
-    return this.locks.get(this.makeLockKey(repo, resource)) ?? null;
+    return this.exclusiveLocks.get(this.makeLockKey(repo, resource)) ?? null;
   }
 
   async isHolderAlive(_holder: string): Promise<boolean> {
@@ -346,7 +382,8 @@ class InMemoryLockService implements LockService {
   }
 
   clear(): void {
-    this.locks.clear();
+    this.exclusiveLocks.clear();
+    this.sharedLockCounts.clear();
   }
 }
 
@@ -403,6 +440,59 @@ class InMemoryLogStore implements LogStore {
 }
 
 /**
+ * In-memory implementation of DatasetRefStore for testing.
+ */
+/* eslint-disable @typescript-eslint/require-await */
+class InMemoryDatasetRefStore implements DatasetRefStore {
+  // Key: "repo:ws:path"
+  private refs = new Map<string, DatasetRef>();
+
+  private makeKey(repo: string, ws: string, path: string): string {
+    return `${repo}:${ws}:${path}`;
+  }
+
+  private makePrefix(repo: string, ws: string): string {
+    return `${repo}:${ws}:`;
+  }
+
+  async read(repo: string, ws: string, path: string): Promise<DatasetRef | null> {
+    return this.refs.get(this.makeKey(repo, ws, path)) ?? null;
+  }
+
+  async write(repo: string, ws: string, path: string, ref: DatasetRef): Promise<void> {
+    this.refs.set(this.makeKey(repo, ws, path), ref);
+  }
+
+  async list(repo: string, ws: string): Promise<string[]> {
+    const prefix = this.makePrefix(repo, ws);
+    const paths: string[] = [];
+    for (const key of this.refs.keys()) {
+      if (key.startsWith(prefix)) {
+        paths.push(key.slice(prefix.length));
+      }
+    }
+    return paths;
+  }
+
+  async remove(repo: string, ws: string, path: string): Promise<void> {
+    this.refs.delete(this.makeKey(repo, ws, path));
+  }
+
+  async removeAll(repo: string, ws: string): Promise<void> {
+    const prefix = this.makePrefix(repo, ws);
+    for (const key of [...this.refs.keys()]) {
+      if (key.startsWith(prefix)) {
+        this.refs.delete(key);
+      }
+    }
+  }
+
+  clear(): void {
+    this.refs.clear();
+  }
+}
+
+/**
  * In-memory implementation of StorageBackend for testing.
  *
  * All data is stored in memory maps. Useful for unit tests
@@ -414,6 +504,7 @@ export class InMemoryStorage implements StorageBackend {
   public readonly locks: InMemoryLockService;
   public readonly logs: InMemoryLogStore;
   public readonly repos: InMemoryRepoStore;
+  public readonly datasets: InMemoryDatasetRefStore;
 
   constructor() {
     this.objects = new InMemoryObjectStore();
@@ -421,6 +512,7 @@ export class InMemoryStorage implements StorageBackend {
     this.locks = new InMemoryLockService();
     this.logs = new InMemoryLogStore();
     this.repos = new InMemoryRepoStore();
+    this.datasets = new InMemoryDatasetRefStore();
   }
 
   async validateRepository(repo: string): Promise<void> {
@@ -439,5 +531,6 @@ export class InMemoryStorage implements StorageBackend {
     this.locks.clear();
     this.logs.clear();
     this.repos.clear();
+    this.datasets.clear();
   }
 }

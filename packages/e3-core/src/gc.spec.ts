@@ -13,7 +13,7 @@ import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { StringType, StructType, encodeBeast2For, variant } from '@elaraai/east';
 import e3 from '@elaraai/e3';
-import { WorkspaceStateType, PackageObjectType, TaskObjectType, DataRefType } from '@elaraai/e3-types';
+import { WorkspaceStateType, PackageObjectType, TaskObjectType, DataRefType, DatasetRefType } from '@elaraai/e3-types';
 import type { WorkspaceState, PackageObject, TaskObject } from '@elaraai/e3-types';
 import { repoGc, collectAllRoots, markReachable, sweepBatch } from './storage/local/gc.js';
 import { objectWrite, objectRead } from './storage/local/LocalObjectStore.js';
@@ -105,7 +105,7 @@ describe('gc', () => {
       const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
-      assert.ok(result.retainedObjects >= 3, `Expected at least 3 retained objects, got ${result.retainedObjects}`);
+      assert.ok(result.retainedObjects >= 2, `Expected at least 2 retained objects, got ${result.retainedObjects}`);
 
       // Verify package object still exists
       const packageData = await objectRead(testRepoPath, importResult.packageHash);
@@ -152,7 +152,7 @@ describe('gc', () => {
       const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       // Some objects may be deleted, but shared-b's objects are retained
-      assert.ok(result.retainedObjects >= 2);
+      assert.ok(result.retainedObjects >= 1);
     });
   });
 
@@ -251,15 +251,6 @@ describe('gc', () => {
   });
 
   describe('object graph traversal', () => {
-    // Helper: create a tree type with DataRef fields
-    const makeTreeType = (fieldNames: string[]) => {
-      const fields: Record<string, typeof DataRefType> = {};
-      for (const name of fieldNames) {
-        fields[name] = DataRefType;
-      }
-      return StructType(fields);
-    };
-
     it('retains transitively referenced objects via tree → value chain', async () => {
       // Create a chain: Package → Tree → Value (leaf)
       // Tree has a 'data' field pointing to a value object
@@ -268,20 +259,15 @@ describe('gc', () => {
       const valueEncoder = encodeBeast2For(StringType);
       const hashValue = await objectWrite(testRepoPath, valueEncoder('hello world'));
 
-      // Create a tree object with one field pointing to the value
-      const treeType = makeTreeType(['data']);
-      const treeEncoder = encodeBeast2For(treeType);
-      const hashTree = await objectWrite(testRepoPath, treeEncoder({
-        data: variant('value', hashValue),
-      }));
-
-      // Create a package object referencing the tree as its root
+      // Create a package object with refs referencing the value
       const pkgEncoder = encodeBeast2For(PackageObjectType);
       const hashPkg = await objectWrite(testRepoPath, pkgEncoder({
         tasks: new Map(),
         data: {
           structure: variant('struct', new Map()),
-          value: hashTree,
+          refs: new Map([
+            ['data', variant('value', { hash: hashValue, versions: new Map() })],
+          ]),
         },
       } as PackageObject));
 
@@ -294,31 +280,23 @@ describe('gc', () => {
       const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
-      assert.strictEqual(result.retainedObjects, 3); // pkg, tree, value all retained
+      assert.strictEqual(result.retainedObjects, 2); // pkg, value retained
 
       // All objects should still exist
       await objectRead(testRepoPath, hashPkg);
-      await objectRead(testRepoPath, hashTree);
       await objectRead(testRepoPath, hashValue);
     });
 
     it('deletes unreachable objects in graph', async () => {
-      // Create a reachable package → tree chain, plus an unreachable orphan
+      // Create a reachable package with empty refs, plus an unreachable orphan
 
-      // Reachable tree (leaf - no children)
-      const treeType = makeTreeType(['x']);
-      const treeEncoder = encodeBeast2For(treeType);
-      const hashTree = await objectWrite(testRepoPath, treeEncoder({
-        x: variant('unassigned', null),
-      }));
-
-      // Reachable package referencing the tree
+      // Reachable package (no children via refs)
       const pkgEncoder = encodeBeast2For(PackageObjectType);
       const hashPkg = await objectWrite(testRepoPath, pkgEncoder({
         tasks: new Map(),
         data: {
           structure: variant('struct', new Map()),
-          value: hashTree,
+          refs: new Map(),
         },
       } as PackageObject));
 
@@ -335,11 +313,10 @@ describe('gc', () => {
       const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 1); // orphan deleted
-      assert.strictEqual(result.retainedObjects, 2); // pkg, tree retained
+      assert.strictEqual(result.retainedObjects, 1); // pkg retained
 
-      // Package and tree exist, orphan is gone
+      // Package exists, orphan is gone
       await objectRead(testRepoPath, hashPkg);
-      await objectRead(testRepoPath, hashTree);
       await assert.rejects(
         async () => await objectRead(testRepoPath, hashOrphan),
         ObjectNotFoundError
@@ -387,10 +364,10 @@ describe('gc', () => {
   });
 
   describe('workspace refs', () => {
-    it('retains objects referenced by workspace state', async () => {
-      // Store objects for root and package
-      const rootData = new Uint8Array([44, 55, 66]);
-      const rootHash = await objectWrite(testRepoPath, rootData);
+    it('retains objects referenced by workspace state and dataset refs', async () => {
+      // Store objects for a dataset value and package
+      const valueData = new Uint8Array([44, 55, 66]);
+      const valueHash = await objectWrite(testRepoPath, valueData);
       const pkgData = new Uint8Array([77, 88, 99]);
       const pkgHash = await objectWrite(testRepoPath, pkgData);
 
@@ -403,21 +380,26 @@ describe('gc', () => {
         packageVersion: '1.0.0',
         packageHash: pkgHash,
         deployedAt: new Date(),
-        rootHash: rootHash,
-        rootUpdatedAt: new Date(),
         currentRunId: variant('none', null),
       };
       const encoder = encodeBeast2For(WorkspaceStateType);
       writeFileSync(join(wsDir, 'myworkspace.beast2'), encoder(state));
 
+      // Create a per-dataset ref file that references valueHash
+      const refDir = join(testRepoPath, 'workspaces', 'myworkspace', 'data');
+      mkdirSync(refDir, { recursive: true });
+      const refEncoder = encodeBeast2For(DatasetRefType);
+      const ref = variant('value', { hash: valueHash, versions: new Map() });
+      writeFileSync(join(refDir, 'some-dataset.ref'), refEncoder(ref));
+
       // Run gc
       const result = await repoGc(storage, testRepoPath, { minAge: 0 });
 
       assert.strictEqual(result.deletedObjects, 0);
-      assert.strictEqual(result.retainedObjects, 2); // both rootHash and pkgHash
+      assert.strictEqual(result.retainedObjects, 2); // both valueHash and pkgHash
 
       // Objects still exist
-      await objectRead(testRepoPath, rootHash);
+      await objectRead(testRepoPath, valueHash);
       await objectRead(testRepoPath, pkgHash);
     });
 
@@ -474,7 +456,6 @@ describe('gc', () => {
 
     it('follows PackageObject → TaskObject → IR chain', async () => {
       const irHash = 'c'.repeat(64);
-      const treeHash = 'd'.repeat(64);
 
       // Encode a TaskObject referencing the IR hash
       const taskEncoder = encodeBeast2For(TaskObjectType);
@@ -485,13 +466,13 @@ describe('gc', () => {
       } as TaskObject);
       const taskHash = 'b'.repeat(64);
 
-      // Encode a PackageObject referencing the task and a root tree
+      // Encode a PackageObject referencing the task
       const pkgEncoder = encodeBeast2For(PackageObjectType);
       const pkgData = pkgEncoder({
         tasks: new Map([['myTask', taskHash]]),
         data: {
           structure: variant('struct', new Map()),
-          value: treeHash,
+          refs: new Map(),
         },
       } as PackageObject);
       const pkgHash = 'a'.repeat(64);
@@ -499,17 +480,15 @@ describe('gc', () => {
       const objects = new Map<string, Uint8Array>();
       objects.set(pkgHash, pkgData);
       objects.set(taskHash, taskData);
-      // treeHash and irHash are NOT in the object store — they are leaves
+      // irHash is NOT in the object store — it is a leaf
 
       const readObject = async (hash: string) => objects.get(hash) ?? null;
       const reachable = await markReachable(readObject, new Set([pkgHash]));
 
-      // Package (read) + task (read) + IR leaf (not read) + tree (not in store, pushed to stack but not found)
+      // Package (read) + task (read) + IR leaf (not read)
       assert.ok(reachable.has(pkgHash), 'package should be reachable');
       assert.ok(reachable.has(taskHash), 'task should be reachable');
       assert.ok(reachable.has(irHash), 'IR leaf should be reachable (marked without reading)');
-      // treeHash was pushed to stack but readObject returns null — not added to reachable
-      assert.ok(!reachable.has(treeHash), 'tree hash should not be reachable when object is missing');
       assert.strictEqual(reachable.size, 3);
     });
 

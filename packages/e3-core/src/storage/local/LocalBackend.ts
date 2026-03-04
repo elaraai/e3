@@ -5,12 +5,13 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { StorageBackend, ObjectStore, RefStore, LockService, LogStore, RepoStore } from '../interfaces.js';
+import type { StorageBackend, ObjectStore, RefStore, LockService, LogStore, RepoStore, DatasetRefStore } from '../interfaces.js';
 import { LocalObjectStore } from './LocalObjectStore.js';
 import { LocalRefStore } from './LocalRefStore.js';
 import { LocalLockService } from './LocalLockService.js';
 import { LocalLogStore } from './LocalLogStore.js';
 import { LocalRepoStore } from './LocalRepoStore.js';
+import { LocalDatasetRefStore } from './LocalDatasetRefStore.js';
 import { RepoNotFoundError } from '../../errors.js';
 
 /**
@@ -60,6 +61,9 @@ export class LocalStorage implements StorageBackend {
   /** Repository lifecycle management */
   public readonly repos: RepoStore;
 
+  /** Per-dataset reference storage (reactive dataflow) */
+  public readonly datasets: DatasetRefStore;
+
   /**
    * Create a new LocalStorage instance.
    *
@@ -72,10 +76,11 @@ export class LocalStorage implements StorageBackend {
     this.refs = new LocalRefStore();
     this.locks = new LocalLockService();
     this.logs = new LocalLogStore();
+    this.datasets = new LocalDatasetRefStore();
     // repos requires reposDir for multi-repo operations
     // If not provided, create a RepoStore that throws on all operations
     this.repos = reposDir
-      ? new LocalRepoStore(reposDir, this.refs)
+      ? new LocalRepoStore(reposDir, this.refs, this.datasets)
       : new NoOpRepoStore();
   }
 

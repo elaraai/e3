@@ -16,3 +16,4 @@ export { LocalRefStore } from './LocalRefStore.js';
 export { LocalLockService } from './LocalLockService.js';
 export { LocalLogStore } from './LocalLogStore.js';
 export { LocalRepoStore } from './LocalRepoStore.js';
+export { LocalDatasetRefStore } from './LocalDatasetRefStore.js';

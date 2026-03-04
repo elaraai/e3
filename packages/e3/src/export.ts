@@ -10,14 +10,15 @@
  * into an e3 repository. The bundle is a valid subset of an e3 repository:
  * - `packages/<name>/<version>` - ref to package object hash
  * - `objects/<ab>/<cdef...>.beast2` - content-addressed objects
+ * - `data/<path>.ref` - per-dataset reference files (beast2 encoded DatasetRef)
  */
 
 import * as fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import yazl from 'yazl';
-import { variant, encodeBeast2For, StructType, printIdentifier, SortedMap, toEastTypeValue, IRType } from '@elaraai/east';
-import type { Structure, PackageObject, DataRef, TaskObject } from '@elaraai/e3-types';
-import { DataRefType, PackageObjectType, TaskObjectType } from '@elaraai/e3-types';
+import { variant, encodeBeast2For, printIdentifier, SortedMap, toEastTypeValue, IRType } from '@elaraai/east';
+import type { Structure, PackageObject, DatasetRef } from '@elaraai/e3-types';
+import { DatasetRefType, PackageObjectType, TaskObjectType } from '@elaraai/e3-types';
 import type { PackageDef, PackageItem } from './types.js';
 
 /**
@@ -25,7 +26,8 @@ import type { PackageDef, PackageItem } from './types.js';
  *
  * The bundle can be imported into an e3 repository using `e3 package import`.
  * It contains all objects needed for the package, plus a ref at
- * `packages/<name>/<version>` pointing to the package object.
+ * `packages/<name>/<version>` pointing to the package object, and per-dataset
+ * reference files in `data/`.
  *
  * @param pkg - The package to export
  * @param outputPath - Path to write the .zip file
@@ -44,100 +46,94 @@ export async function export_(pkg: PackageDef<Record<string, unknown>>, outputPa
 
   // Initialize empty package object that we'll populate as we iterate
   const tasks = new SortedMap<string, string>(); // name -> task object hash
-  const refs = new Map<string, DataRef>(); // path -> data ref (variant of dataset or tree object hash)
-  const trees = new Map<string, variant<'struct', Record<string, string>>>(); // path -> struct of paths
-  const structures = new Map<string, Structure>(); // path -> structure (parallel to trees)
+  const structures = new Map<string, Structure>(); // path -> structure (parallel to tree hierarchy)
+  const refs = new SortedMap<string, DatasetRef>(); // refPath -> DatasetRef
 
-  // Create root tree and structure as first entries
-  trees.set('', variant('struct', {}));
+  // Create root structure as first entry
   structures.set('', variant('struct', new SortedMap()));
 
   // Iterate over package contents and write each object
   // Contents are topologically sorted, so dependencies come before dependents
   for (const item of pkg.contents) {
     if (item.kind === "datatree") {
-      // Trees are accumulated in memory and written after
+      // Trees are accumulated in the structure map
 
-      // Get parent tree
+      // Get parent structure
       const parentPath = item.path.slice(0, -1).map(segment => {
         if (segment.type !== 'field') {
           throw new Error(`Unsupported tree path segment type in path ${item.path}: ${segment.type}`);
         }
         return `.${printIdentifier(segment.value)}`;
       }).join('');
-      const parentTree = trees.get(parentPath);
-      if (!parentTree) {
-        throw new Error(`Missing parent tree at path: ${parentPath}`);
-      }
-      if (parentTree.type !== 'struct') {
-        throw new Error(`Parent tree at path ${parentPath} is not a struct: ${parentTree.type}`);
+
+      const parentStructure = structures.get(parentPath);
+      if (!parentStructure || parentStructure.type !== 'struct') {
+        throw new Error(`Missing or invalid parent structure at path: ${parentPath}`);
       }
 
-      // Add this tree as a child of the parent
+      // Add this tree as a child struct in the structure
       const segment = item.path[item.path.length - 1];
       if (segment.type !== 'field') {
         throw new Error(`Unsupported tree path segment type in path ${item.path}: ${segment.type}`);
       }
       const name = segment.value;
       const path = `${parentPath}.${printIdentifier(name)}`;
-      parentTree.value[name] = path;
-      trees.set(path, variant('struct', {}));
-
-      // Update structure: add nested struct to parent
-      const parentStructure = structures.get(parentPath);
-      if (!parentStructure || parentStructure.type !== 'struct') {
-        throw new Error(`Missing or invalid parent structure at path: ${parentPath}`);
-      }
       const childStructure: Structure = variant('struct', new SortedMap());
       parentStructure.value.set(name, childStructure);
       structures.set(path, childStructure);
 
     } else if (item.kind === "dataset") {
-      // Datasets are serialized and written immediately
+      // Datasets: serialize value to object store, write DatasetRef to data/ dir
 
-      // Get parent tree
+      // Get parent structure
       const parentPath = item.path.slice(0, -1).map(segment => {
         if (segment.type !== 'field') {
           throw new Error(`Unsupported tree path segment type in path ${item.path}: ${segment.type}`);
         }
         return `.${printIdentifier(segment.value)}`;
       }).join('');
-      const parentTree = trees.get(parentPath);
-      if (!parentTree) {
-        throw new Error(`Missing parent tree at path: ${parentPath}`);
-      }
-      if (parentTree.type !== 'struct') {
-        throw new Error(`Parent tree at path ${parentPath} is not a struct: ${parentTree.type}`);
+
+      const parentStructure = structures.get(parentPath);
+      if (!parentStructure || parentStructure.type !== 'struct') {
+        throw new Error(`Missing or invalid parent structure at path: ${parentPath}`);
       }
 
-      // Add this dataset as a child of the parent
       const segment = item.path[item.path.length - 1];
       if (segment.type !== 'field') {
         throw new Error(`Unsupported tree path segment type in path ${item.path}: ${segment.type}`);
       }
       const name = segment.value;
-      const path = `${parentPath}.${printIdentifier(name)}`;
-      parentTree.value[name] = path;
 
-      // Serialize default value (if present) and record DataRef
-      let dataRef: DataRef;
+      // Build the ref path from tree path segments (e.g., "inputs/greeting")
+      const refPath = item.path.map(seg => {
+        if (seg.type !== 'field') {
+          throw new Error(`Unsupported path segment type: ${seg.type}`);
+        }
+        return seg.value;
+      }).join('/');
+
+      // Serialize default value (if present) and build DatasetRef
+      let datasetRef: DatasetRef;
       if (item.default !== undefined) {
         const valueEncoder = encodeBeast2For(item.type);
         const valueData = valueEncoder(item.default);
         const valueHash = addObject(zipfile, Buffer.from(valueData));
-        dataRef = variant('value', valueHash);
+        datasetRef = variant('value', { hash: valueHash, versions: new Map() });
       } else {
-        dataRef = variant('unassigned', null);
+        datasetRef = variant('unassigned', null);
       }
-      refs.set(path, dataRef);
 
-      // Update structure: add value type to parent
-      const parentStructure = structures.get(parentPath);
-      if (!parentStructure || parentStructure.type !== 'struct') {
-        throw new Error(`Missing or invalid parent structure at path: ${parentPath}`);
-      }
+      // Store ref in the package-level refs map
+      refs.set(refPath, datasetRef);
+
+      // Also write DatasetRef to zip as data/<refPath>.ref (for readability/debugging)
+      const refEncoder = encodeBeast2For(DatasetRefType);
+      const refData = refEncoder(datasetRef);
+      zipfile.addBuffer(Buffer.from(refData), `data/${refPath}.ref`, { mtime: DETERMINISTIC_MTIME });
+
+      // Update structure: add value type with writable flag to parent
       const typeValue = toEastTypeValue(item.type);
-      parentStructure.value.set(name, variant('value', typeValue));
+      parentStructure.value.set(name, variant('value', { type: typeValue, writable: item.writable }));
 
     } else if (item.kind === "task") {
       // Tasks are serialized and written immediately
@@ -152,7 +148,7 @@ export async function export_(pkg: PackageDef<Record<string, unknown>>, outputPa
       const commandIrHash = addObject(zipfile, Buffer.from(commandIrData));
 
       // Build TaskObject
-      const taskObject: TaskObject = {
+      const taskObject = {
         commandIr: commandIrHash,
         inputs: inputPaths,
         output: item.output.path,
@@ -171,48 +167,7 @@ export async function export_(pkg: PackageDef<Record<string, unknown>>, outputPa
     }
   }
 
-  // Now we traverse the trees in reverse order to build and write tree objects, finishing with root.
-  const treePaths = Array.from(trees.keys()).reverse();
-  for (const treePath of treePaths) {
-    const tree = trees.get(treePath)!;
-    if (tree.type === 'struct') {
-      // Build tree object with DataRef fields
-      const treeObject: Record<string, DataRef> = {};
-      for (const [fieldName, childPath] of Object.entries(tree.value).sort(([name1], [name2]) => name1 < name2 ? -1 : 1)) {
-        const childRef = refs.get(childPath);
-        if (!childRef) {
-          throw new Error(`Missing hash for tree child at path: ${childPath}`);
-        }
-        treeObject[fieldName] = childRef;
-      }
-
-      // Serialize and write tree object
-      // TODO: I wonder if this is better as a dictionary, like the structure?
-      const TreeType = StructType(
-        Object.fromEntries(
-          Object.keys(treeObject).map((fieldName) => [fieldName, DataRefType])
-        )
-      );
-      const treeEncoder = encodeBeast2For(TreeType);
-      const treeData = treeEncoder(treeObject);
-      const treeHash = addObject(zipfile, Buffer.from(treeData));
-
-      // Record DataRef for this tree
-      const treeRef: DataRef = variant('tree', treeHash);
-      refs.set(treePath, treeRef);
-    } else {
-      throw new Error(`Unsupported tree type at path ${treePath}: ${tree.type satisfies never}`);
-    }
-  }
-
-  // Get the root tree and structure
-  const rootTreeRef = refs.get('');
-  if (!rootTreeRef) {
-    throw new Error('Missing root tree object');
-  }
-  if (rootTreeRef.type !== 'tree') {
-    throw new Error(`Root tree ref is not a tree: ${rootTreeRef.type}`);
-  }
+  // Get the root structure
   const rootStructure = structures.get('');
   if (!rootStructure) {
     throw new Error('Missing root structure');
@@ -223,7 +178,7 @@ export async function export_(pkg: PackageDef<Record<string, unknown>>, outputPa
     tasks,
     data: {
       structure: rootStructure,
-      value: rootTreeRef.value,
+      refs,
     },
   };
   const packageObjectEncoder = encodeBeast2For(PackageObjectType);

@@ -11,11 +11,10 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { variant, StringType, ArrayType, encodeBeast2For, StructType, East, IRType } from '@elaraai/east';
+import { variant, StringType, ArrayType, encodeBeast2For, East, IRType } from '@elaraai/east';
 import {
   TaskObjectType,
   PackageObjectType,
-  DataRefType,
   type TreePath,
   type Structure,
   type DataRef,
@@ -94,7 +93,7 @@ describe('dataflow', () => {
       output: TreePath;
     }>,
     structure: Structure,
-    initialData?: Record<string, { value: unknown; ref: DataRef }>
+    _initialData?: Record<string, { value: unknown; ref: DataRef }>
   ): Promise<string> {
     const taskEncoder = encodeBeast2For(TaskObjectType);
     const tasksMap = new Map<string, string>();
@@ -112,35 +111,12 @@ describe('dataflow', () => {
       tasksMap.set(t.name, taskHash);
     }
 
-    // Build initial data tree
-    // For simplicity, we'll create a flat structure with DataRefs
-    const structFields = (structure as { type: 'struct'; value: Map<string, Structure> }).value;
-    const dataRefFields: Record<string, typeof DataRefType> = {};
-    for (const key of structFields.keys()) {
-      dataRefFields[key] = DataRefType;
-    }
-    const dataTreeType = StructType(dataRefFields);
-    const dataTreeEncoder = encodeBeast2For(dataTreeType);
-
-    // Create data refs for initial data
-    const dataRefs: Record<string, DataRef> = {};
-    for (const key of (structure as { type: 'struct'; value: Map<string, Structure> }).value.keys()) {
-      if (initialData && key in initialData) {
-        dataRefs[key] = initialData[key].ref;
-      } else {
-        // Unassigned by default
-        dataRefs[key] = { type: 'unassigned', value: null } as DataRef;
-      }
-    }
-
-    const dataHash = await objectWrite(repoPath, dataTreeEncoder(dataRefs));
-
-    // Create package object
+    // Create package object (no root tree — per-dataset refs are used instead)
     const pkgEncoder = encodeBeast2For(PackageObjectType);
     const pkgObj = {
       data: {
         structure,
-        value: dataHash,
+        refs: new Map(),
       },
       tasks: tasksMap,
     };
@@ -159,7 +135,7 @@ describe('dataflow', () => {
       // Create a minimal package with no tasks
       const structure: Structure = {
         type: 'struct',
-        value: new Map([['input', { type: 'value', value: StringType }]]),
+        value: new Map([['input', { type: 'value', value: { type: StringType, writable: true } }]]),
       } as unknown as Structure;
 
       await createPackageWithTasks(testRepo, [], structure);
@@ -174,9 +150,9 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['middle', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -379,8 +355,8 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -425,9 +401,9 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['middle', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -478,9 +454,9 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['middle', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -531,8 +507,8 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -572,11 +548,11 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['out1', { type: 'value', value: StringType }],
-          ['out2', { type: 'value', value: StringType }],
-          ['out3', { type: 'value', value: StringType }],
-          ['out4', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out1', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out2', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out3', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out4', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -632,8 +608,8 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -685,8 +661,8 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -724,8 +700,8 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -776,8 +752,8 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -829,9 +805,9 @@ describe('dataflow', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['fast_output', { type: 'value', value: StringType }],
-          ['slow_output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['fast_output', { type: 'value', value: { type: StringType, writable: true } }],
+          ['slow_output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 

@@ -29,9 +29,9 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createTestDir, removeTestDir, runE3Command } from './helpers.js';
+import { createTestDir, removeTestDir, runE3Command, spawnE3Command, waitFor } from './helpers.js';
 
 // SDK imports
 import e3 from '@elaraai/e3';
@@ -556,4 +556,297 @@ describe('end-to-end workflow', () => {
       assert.ok(indicatesFailure, `Should indicate failure: exitCode=${startResult.exitCode}, output=${output}`);
     });
   });
+
+  describe('concurrent set during start', () => {
+    it('allows e3 set while e3 start is running', async () => {
+      // Create a package with a slow custom task (sleep 5s) so we can
+      // reliably issue `e3 set` while the task is in-flight.
+      const input_x = e3.input('x', IntegerType, 10n);
+
+      const task_slow = e3.customTask(
+        'slow',
+        [input_x],
+        IntegerType,
+        ($, inputs, output) => East.str`sleep 5 && cp ${inputs.get(0n)} ${output}`
+      );
+
+      const pkg = e3.package('concurrent-test', '1.0.0', task_slow);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'concurrent-test@1.0.0'], testDir);
+
+      // Start dataflow in background (task sleeps 5s — plenty of time)
+      const startProc = spawnE3Command(['start', repoDir, 'ws'], testDir);
+
+      // Wait until the CLI has actually started the task (look for [START] in output).
+      // This ensures the dataflow lock is held and the task is running.
+      await waitFor(
+        () => startProc.getStdout().includes('[START]'),
+        10000, // timeout — generous for CI
+        50     // poll interval
+      );
+
+      // Run e3 set while start is running — should succeed (shared lock model)
+      const newValuePath = join(testDir, 'val.east');
+      writeFileSync(newValuePath, '42');
+      const setResult = await runE3Command(
+        ['set', repoDir, 'ws.inputs.x', newValuePath],
+        testDir
+      );
+      assert.strictEqual(setResult.exitCode, 0, `set during start should succeed: ${setResult.stderr}`);
+
+      // Wait for start to finish
+      const startResult = await startProc.result;
+      assert.strictEqual(startResult.exitCode, 0, `start failed: ${startResult.stderr}\n${startResult.stdout}`);
+
+      // Verify the input was updated to the concurrent-set value
+      const getInputResult = await runE3Command(['get', repoDir, 'ws.inputs.x'], testDir);
+      assert.strictEqual(getInputResult.exitCode, 0, `get input failed: ${getInputResult.stderr}`);
+      assert.ok(getInputResult.stdout.includes('42'), `Input should be 42, got: ${getInputResult.stdout}`);
+
+      // The first start ran with the original input (10), so the output is 10.
+      // Re-run start — this time it should pick up the new input and produce 42.
+      // (Reactive re-execution within a single start is tested at the unit level
+      // in dataflow-orchestration.spec.ts; the LocalOrchestrator will gain that
+      // capability in a future change.)
+      const start2 = await runE3Command(['start', repoDir, 'ws'], testDir);
+      assert.strictEqual(start2.exitCode, 0, `second start failed: ${start2.stderr}\n${start2.stdout}`);
+
+      const getOutput = await runE3Command(['get', repoDir, 'ws.tasks.slow.output'], testDir);
+      assert.strictEqual(getOutput.exitCode, 0, `get output failed: ${getOutput.stderr}`);
+      assert.ok(getOutput.stdout.includes('42'), `Output should be 42 after re-run, got: ${getOutput.stdout}`);
+    });
+  });
+
+  describe('writable enforcement', () => {
+    it('rejects e3 set on non-writable dataset (task output)', async () => {
+      const input_x = e3.input('x', IntegerType, 10n);
+      const task_double = e3.task(
+        'double',
+        [input_x],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.multiply(2n)
+        )
+      );
+
+      const pkg = e3.package('writable-test', '1.0.0', task_double);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'writable-test@1.0.0'], testDir);
+
+      // Try to set the task output — should fail (not writable)
+      const valuePath = join(testDir, 'val.east');
+      writeFileSync(valuePath, '999');
+      const setResult = await runE3Command(
+        ['set', repoDir, 'ws.tasks.double.output', valuePath],
+        testDir
+      );
+      assert.notStrictEqual(setResult.exitCode, 0, 'set on task output should fail');
+      const output = setResult.stdout + setResult.stderr;
+      assert.ok(
+        output.toLowerCase().includes('not writable'),
+        `Should mention not writable. Got: ${output}`
+      );
+    });
+
+    it('rejects e3 set on function_ir dataset', async () => {
+      const input_x = e3.input('x', IntegerType, 10n);
+      const task_double = e3.task(
+        'double',
+        [input_x],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.multiply(2n)
+        )
+      );
+
+      const pkg = e3.package('writable-test-ir', '1.0.0', task_double);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'writable-test-ir@1.0.0'], testDir);
+
+      // Try to set the function_ir — should fail (not writable)
+      const valuePath = join(testDir, 'val.east');
+      writeFileSync(valuePath, '0');
+      const setResult = await runE3Command(
+        ['set', repoDir, 'ws.tasks.double.function_ir', valuePath],
+        testDir
+      );
+      assert.notStrictEqual(setResult.exitCode, 0, 'set on function_ir should fail');
+      const output = setResult.stdout + setResult.stderr;
+      assert.ok(
+        output.toLowerCase().includes('not writable'),
+        `Should mention not writable. Got: ${output}`
+      );
+    });
+
+    it('allows e3 set on writable input dataset', async () => {
+      const input_x = e3.input('x', IntegerType, 10n);
+      const pkg = e3.package('writable-ok', '1.0.0', input_x);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'writable-ok@1.0.0'], testDir);
+
+      // Set the input — should succeed (writable)
+      const valuePath = join(testDir, 'val.east');
+      writeFileSync(valuePath, '42');
+      const setResult = await runE3Command(
+        ['set', repoDir, 'ws.inputs.x', valuePath],
+        testDir
+      );
+      assert.strictEqual(setResult.exitCode, 0, `set on input should succeed: ${setResult.stderr}`);
+
+      // Verify the value was set
+      const getResult = await runE3Command(['get', repoDir, 'ws.inputs.x'], testDir);
+      assert.ok(getResult.stdout.includes('42'), `Input should be 42, got: ${getResult.stdout}`);
+    });
+  });
+
+  describe('per-dataset ref files', () => {
+    it('creates ref files after deploy', async () => {
+      const input_x = e3.input('x', IntegerType, 10n);
+      const task_double = e3.task(
+        'double',
+        [input_x],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.multiply(2n)
+        )
+      );
+
+      const pkg = e3.package('ref-test', '1.0.0', task_double);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'ref-test@1.0.0'], testDir);
+
+      // After deploy, ref files should exist in workspaces/ws/data/
+      const dataDir = join(repoDir, 'workspaces', 'ws', 'data');
+      assert.ok(existsSync(dataDir), 'workspace data directory should exist');
+
+      // Check for ref files — the structure has inputs.x, tasks.double.output,
+      // tasks.double.function_ir. Ref files end in .ref
+      const refFiles = findRefFiles(dataDir);
+      assert.ok(refFiles.length >= 3, `Should have at least 3 ref files (input, output, function_ir), found ${refFiles.length}: ${refFiles.join(', ')}`);
+
+      // Input should have a value ref (it has a default value)
+      const inputRefPath = join(dataDir, 'inputs', 'x.ref');
+      assert.ok(existsSync(inputRefPath), `Input ref file should exist at ${inputRefPath}`);
+
+      // Verify input has a value (not unassigned)
+      const getResult = await runE3Command(['get', repoDir, 'ws.inputs.x'], testDir);
+      assert.ok(getResult.stdout.includes('10'), `Input default should be 10, got: ${getResult.stdout}`);
+    });
+
+    it('updates ref files after set', async () => {
+      const input_x = e3.input('x', IntegerType, 10n);
+      const pkg = e3.package('ref-set-test', '1.0.0', input_x);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'ref-set-test@1.0.0'], testDir);
+
+      // Read ref file before set
+      const inputRefPath = join(repoDir, 'workspaces', 'ws', 'data', 'inputs', 'x.ref');
+      assert.ok(existsSync(inputRefPath), 'Input ref should exist');
+      const refBefore = readFileSync(inputRefPath);
+
+      // Set a new value
+      const valuePath = join(testDir, 'val.east');
+      writeFileSync(valuePath, '99');
+      await runE3Command(['set', repoDir, 'ws.inputs.x', valuePath], testDir);
+
+      // Ref file should be updated (different content)
+      const refAfter = readFileSync(inputRefPath);
+      assert.ok(!refBefore.equals(refAfter), 'Ref file content should change after set');
+
+      // Verify new value
+      const getResult = await runE3Command(['get', repoDir, 'ws.inputs.x'], testDir);
+      assert.ok(getResult.stdout.includes('99'), `Input should be 99, got: ${getResult.stdout}`);
+    });
+
+    it('populates task output refs after start', async () => {
+      const input_x = e3.input('x', IntegerType, 10n);
+      const task_double = e3.task(
+        'double',
+        [input_x],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.multiply(2n)
+        )
+      );
+
+      const pkg = e3.package('ref-start-test', '1.0.0', task_double);
+      await e3.export(pkg, packageZipPath);
+
+      await runE3Command(['repo', 'create', repoDir], testDir);
+      await runE3Command(['package', 'import', repoDir, packageZipPath], testDir);
+      await runE3Command(['workspace', 'create', repoDir, 'ws'], testDir);
+      await runE3Command(['workspace', 'deploy', repoDir, 'ws', 'ref-start-test@1.0.0'], testDir);
+
+      // Before start, task output status should be unset
+      const statusBefore = await runE3Command(
+        ['status', repoDir, 'ws.tasks.double.output'],
+        testDir
+      );
+      assert.match(statusBefore.stdout, /unset/, 'Task output should be unset before start');
+
+      // Run start
+      const startResult = await runE3Command(['start', repoDir, 'ws'], testDir);
+      assert.strictEqual(startResult.exitCode, 0, `start failed: ${startResult.stderr}\n${startResult.stdout}`);
+
+      // After start, task output should be set with correct value
+      const statusAfter = await runE3Command(
+        ['status', repoDir, 'ws.tasks.double.output'],
+        testDir
+      );
+      assert.match(statusAfter.stdout, /Status: set/, 'Task output should be set after start');
+
+      // Verify value: 10 * 2 = 20
+      const getResult = await runE3Command(['get', repoDir, 'ws.tasks.double.output'], testDir);
+      assert.ok(getResult.stdout.includes('20'), `Output should be 20, got: ${getResult.stdout}`);
+
+      // Output ref file should exist
+      const outputRefPath = join(repoDir, 'workspaces', 'ws', 'data', 'tasks', 'double', 'output.ref');
+      assert.ok(existsSync(outputRefPath), 'Output ref file should exist after start');
+    });
+  });
 });
+
+/**
+ * Recursively find all .ref files in a directory.
+ */
+function findRefFiles(dir: string): string[] {
+  const results: string[] = [];
+  if (!existsSync(dir)) return results;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...findRefFiles(fullPath));
+    } else if (entry.name.endsWith('.ref')) {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}

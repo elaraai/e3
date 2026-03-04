@@ -21,7 +21,7 @@ export interface MockTaskCall {
  * Allows configuring responses per task and records all calls for assertions.
  */
 export class MockTaskRunner implements TaskRunner {
-  private results = new Map<string, TaskResult | ((inputHashes: string[]) => TaskResult)>();
+  private results = new Map<string, TaskResult | ((inputHashes: string[]) => TaskResult | Promise<TaskResult>)>();
   private calls: MockTaskCall[] = [];
   private defaultResult: TaskResult = { state: 'success', cached: false, outputHash: 'mock-hash' };
 
@@ -31,7 +31,7 @@ export class MockTaskRunner implements TaskRunner {
    * @param taskHash - The task hash to configure
    * @param result - Either a static TaskResult or a function that computes result from inputHashes
    */
-  setResult(taskHash: string, result: TaskResult | ((inputHashes: string[]) => TaskResult)): void {
+  setResult(taskHash: string, result: TaskResult | ((inputHashes: string[]) => TaskResult | Promise<TaskResult>)): void {
     this.results.set(taskHash, result);
   }
 
@@ -60,7 +60,6 @@ export class MockTaskRunner implements TaskRunner {
     this.calls = [];
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async execute(
     _storage: StorageBackend,
     taskHash: string,
@@ -71,7 +70,7 @@ export class MockTaskRunner implements TaskRunner {
 
     const configured = this.results.get(taskHash);
     if (configured) {
-      return typeof configured === 'function' ? configured(inputHashes) : configured;
+      return typeof configured === 'function' ? await configured(inputHashes) : configured;
     }
     return this.defaultResult;
   }

@@ -13,15 +13,18 @@
  *
  * State is stored in workspaces/<name>.beast2 as a single atomic file.
  * No state file means the workspace does not exist.
+ *
+ * Per-dataset refs are stored in workspaces/<ws>/data/<path>.ref files.
  */
 
 import { createWriteStream } from 'fs';
 import * as fs from 'fs/promises';
 import yazl from 'yazl';
 import { decodeBeast2For, encodeBeast2For, variant } from '@elaraai/east';
-import { PackageObjectType, WorkspaceStateType, TaskObjectType, DataflowRunType } from '@elaraai/e3-types';
-import type { PackageObject, WorkspaceState, TaskObject } from '@elaraai/e3-types';
+import { PackageObjectType, WorkspaceStateType, TaskObjectType, DataflowRunType, DatasetRefType } from '@elaraai/e3-types';
+import type { PackageObject, WorkspaceState, TaskObject, DatasetRef } from '@elaraai/e3-types';
 import { packageResolve, packageRead } from './packages.js';
+import { writeRefsFromPackage } from './dataset-refs.js';
 import {
   WorkspaceNotFoundError,
   WorkspaceNotDeployedError,
@@ -176,6 +179,9 @@ export async function workspaceRemove(
       throw new WorkspaceNotFoundError(name);
     }
 
+    // Remove all dataset refs for this workspace
+    await storage.datasets.removeAll(repo, name);
+
     await storage.refs.workspaceRemove(repo, name);
   } finally {
     // Only release the lock if we acquired it internally
@@ -229,52 +235,6 @@ export async function workspaceGetPackage(
 }
 
 /**
- * Get the root tree hash for a workspace.
- *
- * @param storage - Storage backend
- * @param repo - Repository identifier
- * @param name - Workspace name
- * @returns Root tree object hash
- * @throws {WorkspaceNotFoundError} If workspace doesn't exist
- * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
- */
-export async function workspaceGetRoot(
-  storage: StorageBackend,
-  repo: string,
-  name: string
-): Promise<string> {
-  const state = await readStateOrThrow(storage, repo, name);
-  return state.rootHash;
-}
-
-/**
- * Atomically update the root tree hash for a workspace.
- *
- * @param storage - Storage backend
- * @param repo - Repository identifier
- * @param name - Workspace name
- * @param hash - New root tree object hash
- * @throws {WorkspaceNotFoundError} If workspace doesn't exist
- * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
- */
-export async function workspaceSetRoot(
-  storage: StorageBackend,
-  repo: string,
-  name: string,
-  hash: string
-): Promise<void> {
-  const state = await readStateOrThrow(storage, repo, name);
-
-  const newState: WorkspaceState = {
-    ...state,
-    rootHash: hash,
-    rootUpdatedAt: new Date(),
-  };
-
-  await writeState(storage, repo, name, newState);
-}
-
-/**
  * Options for workspace deployment.
  */
 export interface WorkspaceDeployOptions {
@@ -290,7 +250,8 @@ export interface WorkspaceDeployOptions {
  * Deploy a package to a workspace.
  *
  * Creates the workspace if it doesn't exist. Writes state file atomically
- * containing deployment info and root hash.
+ * containing deployment info. Initializes per-dataset ref files from the
+ * package's data/ directory.
  *
  * Acquires a workspace lock to prevent conflicts with running dataflows
  * or concurrent deploys. Throws WorkspaceLockError if the workspace is
@@ -330,14 +291,18 @@ export async function workspaceDeploy(
     const packageHash = await packageResolve(storage, repo, pkgName, pkgVersion);
     const pkg = await packageRead(storage, repo, pkgName, pkgVersion);
 
+    // Remove any existing dataset refs
+    await storage.datasets.removeAll(repo, name);
+
+    // Initialize per-dataset ref files from the package
+    await writeRefsFromPackage(storage, repo, name, pkg.data.structure, pkg.data.refs);
+
     const now = new Date();
     const state: WorkspaceState = {
       packageName: pkgName,
       packageVersion: pkgVersion,
       packageHash,
       deployedAt: now,
-      rootHash: pkg.data.value,
-      rootUpdatedAt: now,
       currentRunId: variant('none', null),
     };
 
@@ -370,16 +335,16 @@ const DETERMINISTIC_MTIME = new Date(0);
  *
  * 1. Read workspace state
  * 2. Read deployed package structure using stored packageHash
- * 3. Create new PackageObject with data.value set to current rootHash
- * 4. Collect all referenced objects
- * 5. Write to .zip
+ * 3. Create new PackageObject with current structure
+ * 4. Collect all referenced objects from dataset refs
+ * 5. Write per-dataset refs and objects to .zip
  *
  * @param storage - Storage backend
  * @param repo - Repository identifier
  * @param name - Workspace name
  * @param zipPath - Path to write the .zip file
  * @param outputName - Package name (default: deployed package name)
- * @param version - Package version (default: <pkgVersion>-<rootHash[0..8]>)
+ * @param version - Package version (default: <pkgVersion>-<short hash>)
  * @returns Export result with package info
  * @throws {WorkspaceNotFoundError} If workspace doesn't exist
  * @throws {WorkspaceNotDeployedError} If workspace exists but has no package deployed
@@ -404,14 +369,25 @@ export async function workspaceExport(
 
   // Determine output name and version
   const finalName = outputName ?? state.packageName;
-  const finalVersion = version ?? `${state.packageVersion}-${state.rootHash.slice(0, 8)}`;
+  // For version, use a short identifier from the workspace name + timestamp
+  const finalVersion = version ?? `${state.packageVersion}-${Date.now().toString(36)}`;
 
-  // Create new PackageObject with updated root
+  // Read all workspace refs for the package
+  const refList = await storage.datasets.list(repo, name);
+  const workspaceRefs = new Map<string, DatasetRef>();
+  for (const refPath of refList) {
+    const ref = await storage.datasets.read(repo, name, refPath);
+    if (ref) {
+      workspaceRefs.set(refPath, ref);
+    }
+  }
+
+  // Create new PackageObject with inline refs
   const newPkgObject: PackageObject = {
     tasks: deployedPkgObject.tasks,
     data: {
       structure: deployedPkgObject.data.structure,
-      value: state.rootHash,
+      refs: workspaceRefs,
     },
   };
 
@@ -436,7 +412,7 @@ export async function workspaceExport(
     zipfile.addBuffer(Buffer.from(data), objPath, { mtime: DETERMINISTIC_MTIME });
   };
 
-  // Helper to collect children from a tree object (same as packages.ts)
+  // Helper to collect children from a beast2 object via hash scanning
   const collectTreeChildren = async (treeData: Uint8Array): Promise<void> => {
     const dataStr = Buffer.from(treeData).toString('latin1');
     const hashPattern = /[a-f0-9]{64}/g;
@@ -463,20 +439,26 @@ export async function workspaceExport(
   const taskDecoder = decodeBeast2For(TaskObjectType);
   for (const taskHash of newPkgObject.tasks.values()) {
     await addObject(taskHash);
-    // Task objects contain commandIr hashes that must also be exported
     const taskData = await storage.objects.read(repo, taskHash);
     const taskObject: TaskObject = taskDecoder(Buffer.from(taskData));
-    // The commandIr is a hash reference to an IR object
     await addObject(taskObject.commandIr);
-    // Recursively collect any objects referenced by the IR
     const irData = await storage.objects.read(repo, taskObject.commandIr);
     await collectTreeChildren(irData);
   }
 
-  // Collect the root tree and all its children
-  await addObject(state.rootHash);
-  const rootTreeData = await storage.objects.read(repo, state.rootHash);
-  await collectTreeChildren(rootTreeData);
+  // Write ref files to zip and collect value objects
+  const refEncoder = encodeBeast2For(DatasetRefType);
+
+  for (const [refPath, ref] of workspaceRefs) {
+    // Write the DatasetRef to data/ dir in zip
+    const refData = refEncoder(ref);
+    zipfile.addBuffer(Buffer.from(refData), `data/${refPath}.ref`, { mtime: DETERMINISTIC_MTIME });
+
+    // Add the value object if present
+    if (ref.type === 'value') {
+      await addObject(ref.value.hash);
+    }
+  }
 
   // Write the package ref
   const refPath = `packages/${finalName}/${finalVersion}`;
@@ -501,12 +483,10 @@ export async function workspaceExport(
         const taskData = await storage.objects.read(repo, taskHash);
         const task: TaskObject = taskDecoder(Buffer.from(taskData));
 
-        // Compute inputsHash
+        // Compute inputsHash from workspace refs
         const inputHashes: string[] = [];
         for (const inputPath of task.inputs) {
           try {
-            // Read input hash from the workspace at export time
-            // These should match what was used during execution
             const { workspaceGetDatasetHash } = await import('./trees.js');
             const { hash } = await workspaceGetDatasetHash(storage, repo, name, inputPath);
             if (hash) inputHashes.push(hash);

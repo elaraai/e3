@@ -36,6 +36,10 @@ function makeState(overrides: Partial<DataflowExecutionState> = {}): DataflowExe
     error: none,
     events: [],
     eventSeq: 0n,
+    versionVectors: new Map(),
+    inputSnapshot: new Map(),
+    taskOutputPaths: [],
+    reexecuted: 0n,
     ...overrides,
   };
 }

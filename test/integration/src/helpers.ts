@@ -170,6 +170,10 @@ export interface RunningCliProcess {
   result: Promise<CliResult>;
   /** The child process PID */
   pid: number;
+  /** Get current stdout output (accumulated so far) */
+  getStdout: () => string;
+  /** Get current stderr output (accumulated so far) */
+  getStderr: () => string;
 }
 
 /**
@@ -227,5 +231,7 @@ export function spawnE3Command(
     kill: (signal: NodeJS.Signals) => child.kill(signal),
     result,
     pid: child.pid!,
+    getStdout: () => stdout,
+    getStderr: () => stderr,
   };
 }

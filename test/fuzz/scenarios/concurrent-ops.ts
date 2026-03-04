@@ -89,36 +89,25 @@ export async function testConcurrentWritesDuringExecution(): Promise<ScenarioRes
 
     // Check what happened
     const startSucceeded = startResult.exitCode === 0;
-    const LOCK_ERROR_MSG = 'Workspace is locked by another process with PID:';
-    const isLockError = (r: { stdout: string; stderr: string }) =>
-      r.stdout.includes(LOCK_ERROR_MSG);
     const writeSuccesses = writeResults.filter(r => r.exitCode === 0).length;
     const writeFailures = writeResults.filter(r => r.exitCode !== 0).length;
-    const lockErrors = writeResults.filter(r => r.exitCode !== 0 && isLockError(r)).length;
 
     // Get final output
     const getResult = await runE3Command(['get', repoDir, 'ws.tasks.compute.output'], testDir);
 
     removeTestDir(testDir);
 
-    // Verify expected behavior:
-    // - Start should succeed (or fail with lock if a set got there first)
-    // - Some operations should fail with lock errors (proves locking is working)
-    const startLockError = isLockError(startResult);
-    if (!startSucceeded && !startLockError) {
-      throw new Error(`Start command failed with non-lock error: stdout=${startResult.stdout}, stderr=${startResult.stderr}`);
+    // Verify expected behavior with shared locks:
+    // - Start should succeed
+    // - Writes use shared locks, so they should coexist with start
+    // - Any write failures are unexpected (shared locks allow concurrent access)
+    if (!startSucceeded) {
+      throw new Error(`Start command failed: stdout=${startResult.stdout}, stderr=${startResult.stderr}`);
     }
 
-    // Any failures must be lock errors
-    const nonLockErrors = writeResults.filter(r => r.exitCode !== 0 && !isLockError(r));
-    if (nonLockErrors.length > 0) {
-      throw new Error(`Writes failed with unexpected errors: ${nonLockErrors.map(r => `stdout=${r.stdout}, stderr=${r.stderr}`).join('; ')}`);
-    }
-
-    // We expect at least some lock errors to prove locking is working
-    const totalLockErrors = lockErrors + (startLockError ? 1 : 0);
-    if (totalLockErrors === 0) {
-      throw new Error(`Expected some operations to fail with lock errors, but all succeeded. Locking may not be working.`);
+    if (writeFailures > 0) {
+      const failedWrites = writeResults.filter(r => r.exitCode !== 0);
+      throw new Error(`Writes failed with unexpected errors: ${failedWrites.map(r => `stdout=${r.stdout}, stderr=${r.stderr}`).join('; ')}`);
     }
 
     return {
@@ -127,7 +116,6 @@ export async function testConcurrentWritesDuringExecution(): Promise<ScenarioRes
         startSucceeded,
         writeSuccesses,
         writeFailures,
-        lockErrors,
         finalOutput: getResult.stdout.trim(),
       },
       duration: Date.now() - startTime,

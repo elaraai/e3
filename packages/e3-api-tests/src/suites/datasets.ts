@@ -26,6 +26,7 @@ import {
   datasetGet,
   datasetGetStatus,
   datasetSet,
+  dataflowExecute,
 } from '@elaraai/e3-api-client';
 
 import type { TestContext } from '../context.js';
@@ -262,6 +263,143 @@ export function datasetTests(setup: TestSetup<TestContext>): void {
       assert.strictEqual(inputItem2.value.size.type, 'some', 'updated input size should be some');
       assert.strictEqual(inputItem2.value.hash.value.length, 64, 'updated hash should be 64-char hex');
       assert.ok(inputItem2.value.size.value > 0n, 'updated input size should be positive');
+    });
+
+    describe('writable enforcement', { concurrency: true }, () => {
+      it('datasetSet rejects write to task output', async (t) => {
+        const ctx = await setup(t);
+        const opts = await ctx.opts();
+
+        const zipPath = await createPackageZip(ctx.tempDir, 'writable-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'writable-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'writable-ws', 'writable-pkg@1.0.0', opts);
+
+        // Attempt to set the task output (not writable)
+        const encode = encodeBeast2For(IntegerType);
+        const outputPath = [
+          variant('field', 'tasks'),
+          variant('field', 'compute'),
+          variant('field', 'output'),
+        ];
+
+        await assert.rejects(
+          () => datasetSet(ctx.config.baseUrl, ctx.repoName, 'writable-ws', outputPath, encode(99n), opts),
+          (err: Error) => {
+            assert.ok(err.message.includes('not writable') || err.message.includes('internal'),
+              `Expected writable error, got: ${err.message}`);
+            return true;
+          },
+          'datasetSet on task output should be rejected'
+        );
+
+        // Verify the output is still unassigned
+        const status = await datasetGetStatus(ctx.config.baseUrl, ctx.repoName, 'writable-ws', outputPath, opts);
+        assert.strictEqual(status.refType, 'unassigned');
+      });
+
+      it('datasetSet rejects write to function_ir', async (t) => {
+        const ctx = await setup(t);
+        const opts = await ctx.opts();
+
+        const zipPath = await createPackageZip(ctx.tempDir, 'writable2-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'writable2-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'writable2-ws', 'writable2-pkg@1.0.0', opts);
+
+        // Attempt to set the task function_ir (not writable)
+        const encode = encodeBeast2For(IntegerType);
+        const irPath = [
+          variant('field', 'tasks'),
+          variant('field', 'compute'),
+          variant('field', 'function_ir'),
+        ];
+
+        await assert.rejects(
+          () => datasetSet(ctx.config.baseUrl, ctx.repoName, 'writable2-ws', irPath, encode(99n), opts),
+          (err: Error) => {
+            assert.ok(err.message.includes('not writable') || err.message.includes('internal'),
+              `Expected writable error, got: ${err.message}`);
+            return true;
+          },
+          'datasetSet on function_ir should be rejected'
+        );
+      });
+
+      it('datasetSet succeeds on writable input', async (t) => {
+        const ctx = await setup(t);
+        const opts = await ctx.opts();
+
+        const zipPath = await createPackageZip(ctx.tempDir, 'writable3-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'writable3-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'writable3-ws', 'writable3-pkg@1.0.0', opts);
+
+        // Set writable input — should succeed
+        const encode = encodeBeast2For(IntegerType);
+        const decode = decodeBeast2For(IntegerType);
+        const inputPath = [
+          variant('field', 'inputs'),
+          variant('field', 'value'),
+        ];
+
+        await datasetSet(ctx.config.baseUrl, ctx.repoName, 'writable3-ws', inputPath, encode(42n), opts);
+
+        // Verify the value was written
+        const retrieved = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'writable3-ws', inputPath, opts);
+        assert.strictEqual(decode(retrieved), 42n);
+      });
+    });
+
+    describe('input change propagation', { concurrency: true }, () => {
+      it('output reflects input after execution', async (t) => {
+        const ctx = await setup(t);
+        const opts = await ctx.opts();
+
+        // createPackageZip: input "value" (default 10n), task "compute" (value * 2)
+        const zipPath = await createPackageZip(ctx.tempDir, 'prop-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'prop-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'prop-ws', 'prop-pkg@1.0.0', opts);
+
+        // Execute with default input (10n) — output should be 20n
+        const result = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'prop-ws', { force: true }, opts);
+        assert.strictEqual(result.success, true);
+
+        const decode = decodeBeast2For(IntegerType);
+        const outputPath = [
+          variant('field', 'tasks'),
+          variant('field', 'compute'),
+          variant('field', 'output'),
+        ];
+
+        const output1 = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'prop-ws', outputPath, opts);
+        assert.strictEqual(decode(output1), 20n);
+
+        // Change input to 42n and re-execute
+        const encode = encodeBeast2For(IntegerType);
+        const inputPath = [
+          variant('field', 'inputs'),
+          variant('field', 'value'),
+        ];
+        await datasetSet(ctx.config.baseUrl, ctx.repoName, 'prop-ws', inputPath, encode(42n), opts);
+
+        const result2 = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'prop-ws', { force: false }, opts);
+        assert.strictEqual(result2.success, true);
+        assert.ok(result2.executed > 0n, 'task should re-execute with changed input');
+
+        // Output should now be 84n
+        const output2 = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'prop-ws', outputPath, opts);
+        assert.strictEqual(decode(output2), 84n);
+      });
     });
   });
 }

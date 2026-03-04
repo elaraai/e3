@@ -13,6 +13,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
+import { IntegerType, StringType, encodeBeast2For, decodeBeast2For, variant } from '@elaraai/east';
 import {
   packageImport,
   workspaceCreate,
@@ -23,6 +24,8 @@ import {
   dataflowExecution,
   dataflowCancel,
   dataflowGraph,
+  datasetSet,
+  datasetGet,
   taskLogs,
   ApiError,
 } from '@elaraai/e3-api-client';
@@ -531,6 +534,66 @@ export function dataflowTests(setup: TestSetup<TestContext>): void {
           assert.ok(err instanceof Error);
           // Expect error about no active execution
         }
+      });
+    });
+
+    // Concurrent set during execution - tests that datasetSet is not blocked by dataflowStart
+    describe('concurrent set during execution', () => {
+      it('datasetSet succeeds while dataflow is running', async (t) => {
+        const ctx = await withSlow(t);
+        const opts = await ctx.opts();
+
+        // Start slow execution (30s sleep task)
+        await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'slow-ws', { force: true }, opts);
+
+        // Wait for execution to start
+        await new Promise(r => setTimeout(r, 500));
+
+        // datasetSet should succeed concurrently — not blocked by the dataflow lock
+        const encode = encodeBeast2For(StringType);
+        const inputPath = [
+          variant('field', 'inputs'),
+          variant('field', 'value'),
+        ];
+
+        // This should NOT throw a lock error
+        await datasetSet(ctx.config.baseUrl, ctx.repoName, 'slow-ws', inputPath, encode('updated'), opts);
+
+        // Cancel the slow execution so the test doesn't wait 30s
+        await dataflowCancel(ctx.config.baseUrl, ctx.repoName, 'slow-ws', opts);
+      });
+
+      it('set input during execution then re-execute reflects new value', async (t) => {
+        const ctx = await setup(t);
+        const opts = await ctx.opts();
+
+        // Use compute package: input "value" (Integer, default 10n), task "compute" (value * 2)
+        const zipPath = await createPackageZip(ctx.tempDir, 'conc-pkg', '1.0.0');
+        const packageZip = readFileSync(zipPath);
+        await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+
+        await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'conc-ws', opts);
+        await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'conc-ws', 'conc-pkg@1.0.0', opts);
+
+        // First execution with default input (10n) → output should be 20n
+        const result1 = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'conc-ws', { force: true }, opts);
+        assert.strictEqual(result1.success, true);
+
+        // Change input to 7n
+        const encode = encodeBeast2For(IntegerType);
+        const decode = decodeBeast2For(IntegerType);
+        const inputPath = [variant('field', 'inputs'), variant('field', 'value')];
+        await datasetSet(ctx.config.baseUrl, ctx.repoName, 'conc-ws', inputPath, encode(7n), opts);
+
+        // Re-execute — task should run (input changed, cache miss)
+        const result2 = await dataflowExecute(ctx.config.baseUrl, ctx.repoName, 'conc-ws', { force: false }, opts);
+        assert.strictEqual(result2.success, true);
+        assert.ok(result2.executed > 0n, `Expected task to re-execute, got executed=${result2.executed}`);
+
+        // Output should be 14n (7 * 2)
+        const outputPath = [variant('field', 'tasks'), variant('field', 'compute'), variant('field', 'output')];
+        const output = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'conc-ws', outputPath, opts);
+        assert.strictEqual(decode(output), 14n);
       });
     });
 

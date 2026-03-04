@@ -15,22 +15,23 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { variant, StringType, ArrayType, encodeBeast2For, StructType, East, IRType } from '@elaraai/east';
+import { variant, StringType, ArrayType, encodeBeast2For, East, IRType } from '@elaraai/east';
 import {
   TaskObjectType,
   PackageObjectType,
-  DataRefType,
   type TreePath,
   type Structure,
-  type DataRef,
+  type DatasetRef,
 } from '@elaraai/e3-types';
 import { dataflowExecute } from './dataflow.js';
+import { datasetWrite } from './trees.js';
 import { objectWrite } from './storage/local/LocalObjectStore.js';
 import { workspaceDeploy } from './workspaces.js';
 import { workspaceSetDataset } from './trees.js';
 import { createTestRepo, removeTestRepo } from './test-helpers.js';
 import { LocalStorage } from './storage/local/index.js';
 import { MockTaskRunner } from './execution/MockTaskRunner.js';
+import { inputsHash } from './executions.js';
 import type { StorageBackend } from './storage/interfaces.js';
 import type { TaskExecuteOptions } from './execution/interfaces.js';
 
@@ -92,7 +93,6 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       output: TreePath;
     }>,
     structure: Structure,
-    initialData?: Record<string, { value: unknown; ref: DataRef }>
   ): Promise<Map<string, string>> {
     const taskEncoder = encodeBeast2For(TaskObjectType);
     const tasksMap = new Map<string, string>();
@@ -108,30 +108,12 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       tasksMap.set(t.name, taskHash);
     }
 
-    const structFields = (structure as { type: 'struct'; value: Map<string, Structure> }).value;
-    const dataRefFields: Record<string, typeof DataRefType> = {};
-    for (const key of structFields.keys()) {
-      dataRefFields[key] = DataRefType;
-    }
-    const dataTreeType = StructType(dataRefFields);
-    const dataTreeEncoder = encodeBeast2For(dataTreeType);
-
-    const dataRefs: Record<string, DataRef> = {};
-    for (const key of (structure as { type: 'struct'; value: Map<string, Structure> }).value.keys()) {
-      if (initialData && key in initialData) {
-        dataRefs[key] = initialData[key].ref;
-      } else {
-        dataRefs[key] = { type: 'unassigned', value: null } as DataRef;
-      }
-    }
-
-    const dataHash = await objectWrite(repoPath, dataTreeEncoder(dataRefs));
-
+    // Create package object (no root tree — per-dataset refs are used instead)
     const pkgEncoder = encodeBeast2For(PackageObjectType);
     const pkgObj = {
       data: {
         structure,
-        value: dataHash,
+        refs: new Map(),
       },
       tasks: tasksMap,
     };
@@ -150,10 +132,10 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['middle1', { type: 'value', value: StringType }],
-          ['middle2', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle1', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle2', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -163,7 +145,7 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const outputPath: TreePath = [variant('field', 'output')];
 
       const inputEncoder = encodeBeast2For(StringType);
-      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+      const _inputHash = await objectWrite(testRepo, inputEncoder('test'));
 
       const taskHashes = await createPackageWithTasks(
         testRepo,
@@ -173,12 +155,6 @@ describe('dataflow orchestration with MockTaskRunner', () => {
           { name: 'task-c', command: ['echo'], inputs: [middle2Path], output: outputPath },
         ],
         structure,
-        {
-          input: {
-            value: 'test',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
@@ -208,17 +184,17 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['out_a', { type: 'value', value: StringType }],
-          ['out_b', { type: 'value', value: StringType }],
-          ['out_c', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out_a', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out_b', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out_c', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
       const inputPath: TreePath = [variant('field', 'input')];
 
       const inputEncoder = encodeBeast2For(StringType);
-      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+      const _inputHash = await objectWrite(testRepo, inputEncoder('test'));
 
       const taskHashes = await createPackageWithTasks(
         testRepo,
@@ -228,12 +204,6 @@ describe('dataflow orchestration with MockTaskRunner', () => {
           { name: 'task-c', command: ['echo'], inputs: [inputPath], output: [variant('field', 'out_c')] },
         ],
         structure,
-        {
-          input: {
-            value: 'test',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
@@ -267,18 +237,18 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['out1', { type: 'value', value: StringType }],
-          ['out2', { type: 'value', value: StringType }],
-          ['out3', { type: 'value', value: StringType }],
-          ['out4', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out1', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out2', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out3', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out4', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
       const inputPath: TreePath = [variant('field', 'input')];
 
       const inputEncoder = encodeBeast2For(StringType);
-      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+      const _inputHash = await objectWrite(testRepo, inputEncoder('test'));
 
       const taskHashes = await createPackageWithTasks(
         testRepo,
@@ -289,12 +259,6 @@ describe('dataflow orchestration with MockTaskRunner', () => {
           { name: 'task-4', command: ['echo'], inputs: [inputPath], output: [variant('field', 'out4')] },
         ],
         structure,
-        {
-          input: {
-            value: 'test',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
@@ -342,8 +306,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -351,18 +315,12 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const outputPath: TreePath = [variant('field', 'output')];
 
       const inputEncoder = encodeBeast2For(StringType);
-      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+      const _inputHash = await objectWrite(testRepo, inputEncoder('test'));
 
       const taskHashes = await createPackageWithTasks(
         testRepo,
         [{ name: 'task', command: ['echo'], inputs: [inputPath], output: outputPath }],
         structure,
-        {
-          input: {
-            value: 'test',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
@@ -411,10 +369,10 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['middle1', { type: 'value', value: StringType }],
-          ['middle2', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle1', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle2', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -424,7 +382,7 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const outputPath: TreePath = [variant('field', 'output')];
 
       const inputEncoder = encodeBeast2For(StringType);
-      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+      const _inputHash = await objectWrite(testRepo, inputEncoder('test'));
 
       const taskHashes = await createPackageWithTasks(
         testRepo,
@@ -434,12 +392,6 @@ describe('dataflow orchestration with MockTaskRunner', () => {
           { name: 'task-c', command: ['echo'], inputs: [middle2Path], output: outputPath },
         ],
         structure,
-        {
-          input: {
-            value: 'test',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
@@ -487,8 +439,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -496,18 +448,12 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const outputPath: TreePath = [variant('field', 'output')];
 
       const inputEncoder = encodeBeast2For(StringType);
-      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+      const _inputHash = await objectWrite(testRepo, inputEncoder('test'));
 
       const taskHashes = await createPackageWithTasks(
         testRepo,
         [{ name: 'task', command: ['echo'], inputs: [inputPath], output: outputPath }],
         structure,
-        {
-          input: {
-            value: 'test',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
@@ -538,8 +484,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -547,18 +493,12 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const outputPath: TreePath = [variant('field', 'output')];
 
       const inputEncoder = encodeBeast2For(StringType);
-      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+      const _inputHash = await objectWrite(testRepo, inputEncoder('test'));
 
       const taskHashes = await createPackageWithTasks(
         testRepo,
         [{ name: 'task', command: ['echo'], inputs: [inputPath], output: outputPath }],
         structure,
-        {
-          input: {
-            value: 'test',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
@@ -597,8 +537,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -612,12 +552,6 @@ describe('dataflow orchestration with MockTaskRunner', () => {
         testRepo,
         [{ name: 'task', command: ['echo'], inputs: [inputPath], output: outputPath }],
         structure,
-        {
-          input: {
-            value: 'specific-value',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'specific-value', StringType);
@@ -648,8 +582,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -657,18 +591,12 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const outputPath: TreePath = [variant('field', 'output')];
 
       const inputEncoder = encodeBeast2For(StringType);
-      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+      const _inputHash = await objectWrite(testRepo, inputEncoder('test'));
 
       const taskHashes = await createPackageWithTasks(
         testRepo,
         [{ name: 'my-task', command: ['echo'], inputs: [inputPath], output: outputPath }],
         structure,
-        {
-          input: {
-            value: 'test',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
@@ -696,8 +624,8 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const structure: Structure = {
         type: 'struct',
         value: new Map([
-          ['input', { type: 'value', value: StringType }],
-          ['output', { type: 'value', value: StringType }],
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
         ]),
       } as unknown as Structure;
 
@@ -705,18 +633,12 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const outputPath: TreePath = [variant('field', 'output')];
 
       const inputEncoder = encodeBeast2For(StringType);
-      const inputHash = await objectWrite(testRepo, inputEncoder('test'));
+      const _inputHash = await objectWrite(testRepo, inputEncoder('test'));
 
       const taskHashes = await createPackageWithTasks(
         testRepo,
         [{ name: 'task', command: ['echo'], inputs: [inputPath], output: outputPath }],
         structure,
-        {
-          input: {
-            value: 'test',
-            ref: { type: 'value', value: inputHash } as DataRef,
-          },
-        }
       );
       await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
       await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
@@ -745,6 +667,652 @@ describe('dataflow orchestration with MockTaskRunner', () => {
       const call = mockRunner.getCalls()[0];
       assert.ok(call.options?.onStdout, 'onStdout should be passed to runner');
       assert.ok(call.options?.onStderr, 'onStderr should be passed to runner');
+    });
+  });
+
+  describe('reactive dataflow', () => {
+    it('reaches fixpoint without re-execution when inputs unchanged', async () => {
+      // Normal execution, no input changes → same behavior as before
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const middlePath: TreePath = [variant('field', 'middle')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: middlePath },
+          { name: 'task-b', command: ['echo'], inputs: [middlePath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      for (const [name, hash] of taskHashes) {
+        mockRunner.setResult(hash, {
+          state: 'success',
+          cached: false,
+          outputHash: `output-${name}`,
+        });
+      }
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.executed, 2);
+      assert.strictEqual(result.reexecuted, 0);
+    });
+
+    it('re-executes downstream tasks when input changes during execution', async () => {
+      // Setup: input → taskA → output
+      // MockTaskRunner for taskA: during execution, write new value to input ref
+      // After taskA completes, reactive loop detects change, invalidates taskA
+      // taskA re-runs with new input
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'initial-value', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount === 1) {
+          // On first execution, simulate a concurrent input change
+          const newHash = await datasetWrite(storage, testRepo, 'changed-value', StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      // Should have executed task-a twice: once initially, once after input change
+      assert.strictEqual(callCount, 2);
+      assert.strictEqual(result.reexecuted, 1);
+      // executed counts final unique tasks, not total calls
+      assert.strictEqual(result.executed, 1);
+    });
+
+    it('re-executes chain when input changes during execution', async () => {
+      // Setup: input → taskA → middle → taskB → output
+      // During taskA execution, input changes
+      // taskA should re-run, then taskB should run with new output
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const middlePath: TreePath = [variant('field', 'middle')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: middlePath },
+          { name: 'task-b', command: ['echo'], inputs: [middlePath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'initial-value', StringType);
+
+      let taskACallCount = 0;
+      let taskBCallCount = 0;
+
+      const taskAHash = taskHashes.get('task-a')!;
+      const taskBHash = taskHashes.get('task-b')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        taskACallCount++;
+        if (taskACallCount === 1) {
+          // On first execution, simulate a concurrent input change
+          const newHash = await datasetWrite(storage, testRepo, 'changed-value', StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `middle-v${taskACallCount}`,
+        };
+      });
+
+      mockRunner.setResult(taskBHash, (_inputHashes) => {
+        taskBCallCount++;
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${taskBCallCount}`,
+        };
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      // taskA should run twice (initial + re-execution after input change)
+      assert.strictEqual(taskACallCount, 2);
+      // taskB should run once (blocked until taskA re-executes, then runs with fresh data)
+      assert.strictEqual(taskBCallCount, 1);
+      // One re-execution (taskA)
+      assert.strictEqual(result.reexecuted, 1);
+    });
+
+    it('tracks reexecuted count correctly', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'v1', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount <= 2) {
+          // First two calls: write a new input value
+          const newHash = await datasetWrite(storage, testRepo, `v${callCount + 1}`, StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      // Should execute 3 times total: initial + 2 re-executions
+      assert.strictEqual(callCount, 3);
+      assert.strictEqual(result.reexecuted, 2);
+    });
+
+    it('calls onInputChanged callback', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'initial', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount === 1) {
+          const newHash = await datasetWrite(storage, testRepo, 'changed', StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const inputChanges: Array<{ path: string; previousHash: string; newHash: string }> = [];
+
+      await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+        onInputChanged: (path, previousHash, newHash) => {
+          inputChanges.push({ path, previousHash, newHash });
+        },
+      });
+
+      assert.strictEqual(inputChanges.length, 1);
+      assert.strictEqual(inputChanges[0]!.path, '.input');
+      assert.ok(inputChanges[0]!.previousHash.length > 0);
+      assert.ok(inputChanges[0]!.newHash.length > 0);
+      assert.notStrictEqual(inputChanges[0]!.previousHash, inputChanges[0]!.newHash);
+    });
+
+    it('calls onTaskInvalidated callback', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'initial', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount === 1) {
+          const newHash = await datasetWrite(storage, testRepo, 'changed', StringType);
+          const ref: DatasetRef = variant('value', { hash: newHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const invalidated: Array<{ name: string; reason: string }> = [];
+
+      await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+        onTaskInvalidated: (name, reason) => {
+          invalidated.push({ name, reason });
+        },
+      });
+
+      assert.strictEqual(invalidated.length, 1);
+      assert.strictEqual(invalidated[0]!.name, 'task-a');
+      assert.ok(invalidated[0]!.reason.includes('.input'), `Reason should mention input path, got: ${invalidated[0]!.reason}`);
+    });
+
+    it('handles no-op change (same hash)', async () => {
+      // Input "changes" but to same hash value → no invalidation
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'same-value', StringType);
+
+      let callCount = 0;
+      const taskAHash = taskHashes.get('task-a')!;
+
+      mockRunner.setResult(taskAHash, async (_inputHashes) => {
+        callCount++;
+        if (callCount === 1) {
+          // Write the same value — hash should not change
+          const sameHash = await datasetWrite(storage, testRepo, 'same-value', StringType);
+          const ref: DatasetRef = variant('value', { hash: sameHash, versions: new Map() });
+          await storage.datasets.write(testRepo, 'test-ws', 'input', ref);
+        }
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: `output-v${callCount}`,
+        };
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+
+      assert.strictEqual(result.success, true);
+      // Should NOT re-execute since the hash is the same
+      assert.strictEqual(callCount, 1);
+      assert.strictEqual(result.reexecuted, 0);
+    });
+  });
+
+  describe('DataflowRun recording', () => {
+    it('records correct outputVersions with task output hashes', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [{ name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath }],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      mockRunner.setResult(taskHashes.get('task-a')!, {
+        state: 'success',
+        cached: false,
+        outputHash: 'task-a-output-hash',
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+      assert.strictEqual(result.success, true);
+
+      const run = await storage.refs.dataflowRunGetLatest(testRepo, 'test-ws');
+      assert.ok(run, 'DataflowRun should exist');
+      assert.strictEqual(run.outputVersions.type, 'some');
+      const outputVersions = run.outputVersions.value;
+      assert.strictEqual(outputVersions.get('.output'), 'task-a-output-hash');
+      assert.strictEqual(outputVersions.has('.input'), false, 'Input should not appear in outputVersions');
+    });
+
+    it('records outputVersions for all completed tasks in a chain', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['middle', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const middlePath: TreePath = [variant('field', 'middle')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: middlePath },
+          { name: 'task-b', command: ['echo'], inputs: [middlePath], output: outputPath },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      mockRunner.setResult(taskHashes.get('task-a')!, {
+        state: 'success',
+        cached: false,
+        outputHash: 'middle-hash',
+      });
+      mockRunner.setResult(taskHashes.get('task-b')!, {
+        state: 'success',
+        cached: false,
+        outputHash: 'output-hash',
+      });
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+      });
+      assert.strictEqual(result.success, true);
+
+      const run = await storage.refs.dataflowRunGetLatest(testRepo, 'test-ws');
+      assert.ok(run, 'DataflowRun should exist');
+      assert.strictEqual(run.outputVersions.type, 'some');
+      const outputVersions = run.outputVersions.value;
+      assert.strictEqual(outputVersions.get('.middle'), 'middle-hash');
+      assert.strictEqual(outputVersions.get('.output'), 'output-hash');
+    });
+
+    it('records partial outputVersions when execution is cancelled', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [{ name: 'task-a', command: ['echo'], inputs: [inputPath], output: outputPath }],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      const controller = new AbortController();
+
+      // Task aborts during execution
+      mockRunner.setResult(taskHashes.get('task-a')!, async () => {
+        controller.abort();
+        // Small delay to let abort propagate
+        await new Promise(resolve => setTimeout(resolve, 10));
+        return {
+          state: 'success' as const,
+          cached: false,
+          outputHash: 'task-a-output-hash',
+        };
+      });
+
+      const { DataflowAbortedError } = await import('./errors.js');
+
+      await assert.rejects(
+        dataflowExecute(storage, testRepo, 'test-ws', {
+          runner: mockRunner,
+          signal: controller.signal,
+        }),
+        (err: Error) => {
+          assert.ok(err instanceof DataflowAbortedError);
+          return true;
+        }
+      );
+
+      const run = await storage.refs.dataflowRunGetLatest(testRepo, 'test-ws');
+      assert.ok(run, 'DataflowRun should exist after cancellation');
+      assert.strictEqual(run.status.type, 'cancelled');
+      assert.strictEqual(run.outputVersions.type, 'some');
+      // Input should not appear in outputVersions even on cancellation
+      assert.strictEqual(run.outputVersions.value.has('.input'), false);
+    });
+  });
+
+  describe('abort cleanup', () => {
+    it('removes abort listener after normal completion', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['output', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+      const outputPath: TreePath = [variant('field', 'output')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [{ name: 'task', command: ['echo'], inputs: [inputPath], output: outputPath }],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      mockRunner.setResult(taskHashes.get('task')!, {
+        state: 'success',
+        cached: false,
+        outputHash: 'output-hash',
+      });
+
+      const controller = new AbortController();
+
+      const result = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+        signal: controller.signal,
+      });
+
+      assert.strictEqual(result.success, true);
+
+      // After execution completes, aborting should not throw.
+      // If the abort listener were still attached, it could attempt to write
+      // to a cleaned-up state store and throw.
+      assert.doesNotThrow(() => controller.abort());
+    });
+  });
+
+  describe('cache-hit mutex', () => {
+    it('correctly handles cache hit during concurrent execution', async () => {
+      const structure: Structure = {
+        type: 'struct',
+        value: new Map([
+          ['input', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out_a', { type: 'value', value: { type: StringType, writable: true } }],
+          ['out_b', { type: 'value', value: { type: StringType, writable: true } }],
+        ]),
+      } as unknown as Structure;
+
+      const inputPath: TreePath = [variant('field', 'input')];
+
+      const taskHashes = await createPackageWithTasks(
+        testRepo,
+        [
+          { name: 'task-a', command: ['echo'], inputs: [inputPath], output: [variant('field', 'out_a')] },
+          { name: 'task-b', command: ['echo'], inputs: [inputPath], output: [variant('field', 'out_b')] },
+        ],
+        structure,
+      );
+      await workspaceDeploy(storage, testRepo, 'test-ws', 'test', '1.0.0');
+      await workspaceSetDataset(storage, testRepo, 'test-ws', inputPath, 'test', StringType);
+
+      // First run: both tasks execute and capture input hashes
+      const capturedInputHashes = new Map<string, string[]>();
+      for (const [name, hash] of taskHashes) {
+        mockRunner.setResult(hash, (inputHashesArr) => {
+          capturedInputHashes.set(name, [...inputHashesArr]);
+          return {
+            state: 'success' as const,
+            cached: false,
+            outputHash: `output-${name}`,
+          };
+        });
+      }
+
+      const result1 = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+        concurrency: 4,
+      });
+      assert.strictEqual(result1.success, true);
+      assert.strictEqual(result1.executed, 2);
+
+      // Write execution cache entries so the second run finds cached outputs.
+      // The orchestrator's stepPrepareTask checks the execution store.
+      // The executionId must be UUIDv7 format for LocalRefStore to find it.
+      const now = new Date();
+      const fakeUuid = '01900000-0000-7000-8000-000000000001';
+      for (const [name, hash] of taskHashes) {
+        const captured = capturedInputHashes.get(name);
+        assert.ok(captured, `Should have captured input hashes for ${name}`);
+        const inHash = inputsHash(captured);
+        await storage.refs.executionWrite(testRepo, hash, inHash, fakeUuid, variant('success', {
+          executionId: fakeUuid,
+          inputHashes: captured,
+          outputHash: `output-${name}`,
+          startedAt: now,
+          completedAt: now,
+        }));
+      }
+
+      // Second run: both tasks should be inline cache hits (workspace output matches)
+      mockRunner.clearCalls();
+      const result2 = await dataflowExecute(storage, testRepo, 'test-ws', {
+        runner: mockRunner,
+        concurrency: 4,
+      });
+
+      assert.strictEqual(result2.success, true);
+      assert.strictEqual(result2.cached, 2);
+      assert.strictEqual(result2.executed, 0);
+      // MockRunner should not have been called — cache resolved inline
+      assert.strictEqual(mockRunner.getCalls().length, 0);
     });
   });
 });

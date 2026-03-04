@@ -52,6 +52,8 @@ export interface DatasetDef<T extends EastType = EastType, Path extends TreePath
   readonly type: T;
   /** Optional default value (only for input datasets) */
   readonly default?: ValueTypeOf<T>;
+  /** Whether this dataset can be written to by users */
+  readonly writable: boolean;
   /** Dependencies: all trees, datasets and tasks this dataset depends on */
   readonly deps: Set<DataTreeDef | DatasetDef | TaskDef>;
 }
