@@ -17,6 +17,7 @@ import type { TreePath, Structure } from '@elaraai/e3-types';
 import { stepInvalidateTasks, stepDetectInputChanges, stepCheckVersionConsistency } from './steps.js';
 import type { DataflowExecutionState, TaskState, Mutable } from './types.js';
 import type { DataflowGraph } from '../dataflow.js';
+import { InMemoryStateStore } from './state-store/InMemoryStateStore.js';
 import { createTestRepo, removeTestRepo } from '../test-helpers.js';
 import { LocalStorage } from '../storage/local/index.js';
 import { workspaceDeploy } from '../workspaces.js';
@@ -447,5 +448,53 @@ describe('stepCheckVersionConsistency', () => {
       () => stepCheckVersionConsistency(state, 'nonexistent'),
       { message: /nonexistent.*not found/ },
     );
+  });
+});
+
+describe('InMemoryStateStore cloneState isolation', () => {
+  it('isolates versionVectors across reads', async () => {
+    const store = new InMemoryStateStore();
+    const graph: DataflowGraph = { tasks: [] };
+    const tasks = new Map<string, TaskState>();
+    const state = makeState(graph, tasks);
+    state.versionVectors.set('.x', new Map([['.x', 'hash-1']]));
+    await store.create(state);
+
+    // Read, mutate the inner map, then read again
+    const read1 = await store.read(state.repo, state.workspace, state.id);
+    read1!.versionVectors.get('.x')!.set('.y', 'leaked');
+
+    const read2 = await store.read(state.repo, state.workspace, state.id);
+    // The mutation on read1 must not be visible in read2
+    assert.equal(read2!.versionVectors.get('.x')!.has('.y'), false);
+  });
+
+  it('isolates inputSnapshot across reads', async () => {
+    const store = new InMemoryStateStore();
+    const graph: DataflowGraph = { tasks: [] };
+    const tasks = new Map<string, TaskState>();
+    const state = makeState(graph, tasks);
+    state.inputSnapshot.set('.input', 'hash-1');
+    await store.create(state);
+
+    const read1 = await store.read(state.repo, state.workspace, state.id);
+    read1!.inputSnapshot.set('.leaked', 'bad');
+
+    const read2 = await store.read(state.repo, state.workspace, state.id);
+    assert.equal(read2!.inputSnapshot.has('.leaked'), false);
+  });
+
+  it('isolates taskOutputPaths across reads', async () => {
+    const store = new InMemoryStateStore();
+    const graph: DataflowGraph = { tasks: [] };
+    const tasks = new Map<string, TaskState>();
+    const state = makeState(graph, tasks, { taskOutputPaths: ['.output'] });
+    await store.create(state);
+
+    const read1 = await store.read(state.repo, state.workspace, state.id);
+    read1!.taskOutputPaths.push('.leaked');
+
+    const read2 = await store.read(state.repo, state.workspace, state.id);
+    assert.equal(read2!.taskOutputPaths.length, 1);
   });
 });
