@@ -264,6 +264,12 @@ export class InMemoryStateStore implements ExecutionStateStore {
       completedAt = some(new Date(state.completedAt.value.getTime()));
     }
 
+    // Deep clone versionVectors (Map<string, Map<string, string>>)
+    const versionVectors = new Map<string, Map<string, string>>();
+    for (const [k, v] of state.versionVectors) {
+      versionVectors.set(k, new Map(v));
+    }
+
     return {
       ...state,
       startedAt: new Date(state.startedAt.getTime()),
@@ -271,6 +277,9 @@ export class InMemoryStateStore implements ExecutionStateStore {
       graph,
       tasks,
       events: [...state.events],
+      versionVectors,
+      inputSnapshot: new Map(state.inputSnapshot),
+      taskOutputPaths: [...state.taskOutputPaths],
     } as DataflowExecutionState;
   }
 }
