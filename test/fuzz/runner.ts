@@ -35,6 +35,13 @@ import {
   testWideDAG,
   testDiamondChain,
 } from './scenarios/stress.js';
+import {
+  testReactiveSetDuringChain,
+  testReactiveDiamondConsistency,
+  testConcurrentSetDifferentDatasets,
+  testReactiveRapidMutations,
+  testConcurrentStartsWithSharedInput,
+} from './scenarios/reactive-dataflow.js';
 
 export interface RunnerConfig {
   /** Number of iterations to run */
@@ -104,6 +111,13 @@ const scenarios: Scenario[] = [
   { name: 'stress-deep-dag', fn: testDeepDAG },
   { name: 'stress-wide-dag', fn: testWideDAG },
   { name: 'stress-diamond-chain', fn: testDiamondChain },
+
+  // Reactive dataflow - concurrent mutations, VV consistency, fixpoint convergence
+  { name: 'reactive-set-during-chain', fn: testReactiveSetDuringChain },
+  { name: 'reactive-diamond-consistency', fn: testReactiveDiamondConsistency },
+  { name: 'reactive-concurrent-set-different', fn: testConcurrentSetDifferentDatasets },
+  { name: 'reactive-rapid-mutations', fn: testReactiveRapidMutations },
+  { name: 'reactive-concurrent-starts-shared', fn: testConcurrentStartsWithSharedInput },
 ];
 
 /**

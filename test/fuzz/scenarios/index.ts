@@ -33,3 +33,10 @@ export {
   testWideDAG,
   testDiamondChain,
 } from './stress.js';
+export {
+  testReactiveSetDuringChain,
+  testReactiveDiamondConsistency,
+  testConcurrentSetDifferentDatasets,
+  testReactiveRapidMutations,
+  testConcurrentStartsWithSharedInput,
+} from './reactive-dataflow.js';

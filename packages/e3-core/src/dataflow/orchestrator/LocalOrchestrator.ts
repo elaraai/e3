@@ -403,6 +403,11 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         // Get ready tasks
         const readyTasks = stepGetReady(state);
 
+        // Track whether any task was completed synchronously (via cache hit)
+        // in this iteration. If so, new downstream tasks may have become ready
+        // that aren't in the stale readyTasks array.
+        let hadSyncCompletion = false;
+
         // Launch tasks up to concurrency limit if no failure and not aborted
         const concurrencyLimit = Number(state.concurrency);
         while (
@@ -445,6 +450,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
 
           // Check cache
           if (prepared.cachedOutputHash !== null) {
+            hadSyncCompletion = true;
             // Cache hit — wrap in mutex to serialize with concurrent .then() callbacks
             await execution.mutex.runExclusive(async () => {
               // Write ref with merged VV and update state
@@ -596,6 +602,10 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         // Wait for at least one task to complete if we can't launch more
         if (execution.runningTasks.size > 0) {
           await Promise.race(execution.runningTasks.values());
+        } else if (hadSyncCompletion) {
+          // A cached task completed synchronously, which may have made new
+          // downstream tasks ready. Continue to re-check at the top of the loop.
+          continue;
         } else if (readyTasks.length === 0 || checkAborted() || hasFailure) {
           break;
         }
@@ -606,9 +616,21 @@ export class LocalOrchestrator implements DataflowOrchestrator {
         await Promise.all(execution.runningTasks.values());
       }
 
-      // Check for stuck state: non-terminal tasks remain but none are ready or running
+      // Check for stuck state: non-terminal tasks remain but none are ready or running.
+      // When a filter is active, only the filtered task is relevant — non-filtered
+      // tasks are expected to remain pending.
+      const filterValue = state.filter.type === 'some' ? state.filter.value : null;
       const stuckTasks = [...state.tasks.entries()]
-        .filter(([, ts]) => ts.status === 'pending' || ts.status === 'ready' || ts.status === 'deferred')
+        .filter(([name, ts]) => {
+          if (ts.status !== 'pending' && ts.status !== 'ready' && ts.status !== 'deferred') {
+            return false;
+          }
+          // When a filter is active, non-filtered tasks staying pending is expected
+          if (filterValue !== null && name !== filterValue) {
+            return false;
+          }
+          return true;
+        })
         .map(([name, ts]) => `${name} (${ts.status})`)
         .join(', ');
       if (stuckTasks.length > 0 && !checkAborted() && !hasFailure) {
