@@ -36,6 +36,9 @@ An e3 repository holds and manages datasets and East programs, and automatically
  - **dataflow** - the DAG of tasks and datasets to be executed in a workspace
  - **execution** - a single run of a task, identified by `(taskHash, inputsHash, executionId)` where executionId is a UUIDv7
  - **dataflow run** - a complete execution of a workspace's dataflow, tracking which task executions were used
+ - **per-dataset ref** - each dataset has its own atomic `.ref` file (`workspaces/<ws>/data/<path>.ref`) instead of a single root tree hash, enabling concurrent per-dataset writes
+ - **version vector** - a `Map<string, string>` tracking which root input content hashes contributed to each dataset, used to detect stale reads in diamond dependencies
+ - **reactive execution** - after each task completes, the orchestrator detects root input changes, invalidates affected tasks, and re-executes until a fixpoint is reached
 
 ## References
 
@@ -44,5 +47,6 @@ Instructions in STANDARDS.md must be followed at all times.
 See USAGE.md for how to use e3.
 See design/e3-mvp*.md for the current design spec.
 See design/e3-execution-history.md for execution history and provenance tracking.
+See design/e3-reactive-dataflow.md for reactive execution, per-dataset refs, and version vectors.
 
 You can find the East language implementation at ../east
