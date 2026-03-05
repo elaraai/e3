@@ -565,9 +565,8 @@ export async function testConcurrentStartsWithSharedInput(): Promise<ScenarioRes
     const startResults = allResults.slice(0, numStarts);
     const setResults = allResults.slice(numStarts);
 
-    const LOCK_ERROR_MSG = 'Workspace is locked by another process with PID:';
     const isLockError = (r: { stdout: string; stderr: string }) =>
-      r.stdout.includes(LOCK_ERROR_MSG);
+      r.stderr.includes('is locked by another process');
 
     const startSuccesses = startResults.filter(r => r.exitCode === 0).length;
     const startLockErrors = startResults.filter(r => r.exitCode !== 0 && isLockError(r)).length;
