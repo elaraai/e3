@@ -90,7 +90,14 @@ const STATUS_CODES: Record<number, string> = {
   403: 'forbidden',
   404: 'not_found',
   405: 'method_not_allowed',
+  409: 'conflict',
   415: 'unsupported_media_type',
+  422: 'unprocessable_entity',
+  429: 'too_many_requests',
+  500: 'internal_server_error',
+  502: 'bad_gateway',
+  503: 'service_unavailable',
+  504: 'gateway_timeout',
 };
 
 /**
@@ -225,7 +232,7 @@ async function decodeResponse<T extends EastType>(
   // Handle HTTP-level errors
   if (!response.ok) {
     const text = await response.text();
-    const error = parseErrorBody(text, STATUS_CODES[response.status] ?? 'error');
+    const error = parseErrorBody(text, STATUS_CODES[response.status] ?? `http_${response.status}`);
     if (response.status === 401) {
       throw new AuthError(error.details as string ?? 'Authentication required');
     }

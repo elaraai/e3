@@ -15,8 +15,9 @@ import {
   workspaceRemove,
   workspaceGetState,
   workspaceStatus,
-  WorkspaceLockError,
+  packageImport,
   LocalStorage,
+  WorkspaceExistsError,
   type WorkspaceStatusResult,
 } from '@elaraai/e3-core';
 import {
@@ -26,8 +27,10 @@ import {
   workspaceList as workspaceListRemote,
   workspaceRemove as workspaceRemoveRemote,
   workspaceStatus as workspaceStatusRemote,
+  packageImport as packageImportRemote,
+  ApiError,
 } from '@elaraai/e3-api-client';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { parseRepoLocation, parsePackageSpec, formatError, exitError } from '../utils.js';
 
 export const workspaceCommand = {
@@ -71,11 +74,6 @@ export const workspaceCommand = {
 
       console.log(`Deployed ${name}@${version} to workspace: ${ws}`);
     } catch (err) {
-      if (err instanceof WorkspaceLockError) {
-        console.log('');
-        console.log(`Workspace is locked by another process with PID: ${err.holder?.pid ?? 'unknown'}`);
-        process.exit(1);
-      }
       exitError(formatError(err));
     }
   },
@@ -113,6 +111,67 @@ export const workspaceCommand = {
         console.log(`  Output: ${zipPath}`);
         console.log(`  Size: ${zipBytes.length} bytes`);
       }
+    } catch (err) {
+      exitError(formatError(err));
+    }
+  },
+
+  /**
+   * Import a package zip into a workspace (creates workspace if needed).
+   */
+  async import(repoArg: string, ws: string, zipPath: string): Promise<void> {
+    try {
+      const location = await parseRepoLocation(repoArg);
+
+      let name: string;
+      let version: string;
+      let packageHash: string;
+      let objectCount: number;
+
+      if (location.type === 'local') {
+        const storage = new LocalStorage();
+
+        // Import the package
+        const result = await packageImport(storage, location.path, zipPath);
+        name = result.name;
+        version = result.version;
+        packageHash = result.packageHash;
+        objectCount = result.objectCount;
+
+        // Create workspace (ignore if already exists)
+        try {
+          await workspaceCreate(storage, location.path, ws);
+        } catch (err) {
+          if (!(err instanceof WorkspaceExistsError)) throw err;
+        }
+
+        // Deploy
+        await workspaceDeploy(storage, location.path, ws, name, version);
+      } else {
+        // Remote import
+        const zipBytes = readFileSync(zipPath);
+        const result = await packageImportRemote(location.baseUrl, location.repo, new Uint8Array(zipBytes), { token: location.token });
+        name = result.name;
+        version = result.version;
+        packageHash = result.packageHash;
+        objectCount = Number(result.objectCount);
+
+        // Create workspace (ignore if already exists)
+        try {
+          await workspaceCreateRemote(location.baseUrl, location.repo, ws, { token: location.token });
+        } catch (err) {
+          if (!(err instanceof ApiError && err.code === 'workspace_exists')) throw err;
+        }
+
+        // Deploy
+        const packageRef = `${name}@${version}`;
+        await workspaceDeployRemote(location.baseUrl, location.repo, ws, packageRef, { token: location.token });
+      }
+
+      console.log(`Imported ${name}@${version}`);
+      console.log(`  Package hash: ${packageHash.slice(0, 12)}...`);
+      console.log(`  Objects: ${objectCount}`);
+      console.log(`Deployed to workspace: ${ws}`);
     } catch (err) {
       exitError(formatError(err));
     }
@@ -184,11 +243,6 @@ export const workspaceCommand = {
         console.log(`Removed workspace: ${ws}`);
       }
     } catch (err) {
-      if (err instanceof WorkspaceLockError) {
-        console.log('');
-        console.log(`Workspace is locked by another process with PID: ${err.holder?.pid ?? 'unknown'}`);
-        process.exit(1);
-      }
       exitError(formatError(err));
     }
   },

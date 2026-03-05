@@ -22,6 +22,7 @@ import {
   normalizeServerUrl,
   type CredentialEntry,
 } from '../credentials.js';
+import { formatError, exitError } from '../utils.js';
 
 /**
  * Try to open a URL in the default browser.
@@ -90,9 +91,7 @@ export function createAuthCommand(): Command {
         // Print just the token, suitable for: curl -H "Authorization: Bearer $(e3 auth token <server>)"
         console.log(token);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'unknown error';
-        console.error(message);
-        process.exit(1);
+        exitError(formatError(err));
       }
     });
 
@@ -153,10 +152,7 @@ export function createLoginCommand(): Command {
       try {
         discovery = await fetchDiscovery(serverUrl);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'unknown error';
-        console.error(`Failed to connect to server: ${message}`);
-        console.error('Make sure the server is running with --oidc enabled.');
-        process.exit(1);
+        exitError(`Failed to connect to server: ${formatError(err)}\nMake sure the server is running with --oidc enabled.`);
       }
 
       // Start device authorization
@@ -164,9 +160,7 @@ export function createLoginCommand(): Command {
       try {
         deviceAuth = await startDeviceAuth(discovery);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'unknown error';
-        console.error(`Failed to start login: ${message}`);
-        process.exit(1);
+        exitError(`Failed to start login: ${formatError(err)}`);
       }
 
       // Display user code and URL (unless in quiet CI mode)
@@ -210,9 +204,7 @@ export function createLoginCommand(): Command {
         console.log(`\nSuccessfully logged in as: ${payload.sub ?? 'unknown'}`);
         console.log(`Token expires: ${entry.expiresAt}`);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'unknown error';
-        console.error(`\nLogin failed: ${message}`);
-        process.exit(1);
+        exitError(`Login failed: ${formatError(err)}`);
       }
     });
 }

@@ -19,7 +19,6 @@ import {
   LocalStorage,
   LocalOrchestrator,
   FileStateStore,
-  WorkspaceLockError,
   type TaskCompletedCallback,
 } from '@elaraai/e3-core';
 import {
@@ -100,10 +99,6 @@ export async function startCommand(
         console.log(`  Completed before abort: ${completed}`);
       }
       process.exit(130); // Standard exit code for SIGINT (128 + 2)
-    } else if (err instanceof WorkspaceLockError) {
-      console.log('');
-      console.log(`Workspace is locked by another process with PID: ${err.holder?.pid ?? 'unknown'}`);
-      process.exit(1);
     }
     exitError(formatError(err));
   }

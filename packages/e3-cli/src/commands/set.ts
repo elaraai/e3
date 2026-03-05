@@ -16,7 +16,7 @@
 
 import { readFile } from 'fs/promises';
 import { extname } from 'path';
-import { WorkspaceLockError, workspaceSetDataset, LocalStorage } from '@elaraai/e3-core';
+import { workspaceSetDataset, LocalStorage } from '@elaraai/e3-core';
 import { datasetSet as datasetSetRemote } from '@elaraai/e3-api-client';
 import {
   decodeBeast2,
@@ -160,11 +160,6 @@ export async function setCommand(
 
     console.log(`Set ${pathSpec} from ${filePath}`);
   } catch (err) {
-    if (err instanceof WorkspaceLockError) {
-      console.log('');
-      console.log(`Workspace is locked by another process with PID: ${err.holder?.pid ?? 'unknown'}`);
-      process.exit(1);
-    }
     exitError(formatError(err));
   }
 }

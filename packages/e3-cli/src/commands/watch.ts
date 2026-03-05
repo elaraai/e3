@@ -29,7 +29,7 @@ import {
   InMemoryStateStore,
   type TaskCompletedCallback,
 } from '@elaraai/e3-core';
-import { resolveRepo, formatError } from '../utils.js';
+import { resolveRepo, formatError, exitError } from '../utils.js';
 
 interface WatchOptions {
   start?: boolean;
@@ -143,8 +143,7 @@ export async function watchCommand(
 
   // Validate source file exists
   if (!fs.existsSync(absoluteSourcePath)) {
-    console.error(`Error: Source file not found: ${absoluteSourcePath}`);
-    process.exit(1);
+    exitError(`Source file not found: ${absoluteSourcePath}`);
   }
 
   console.log(`Watching: ${sourceFile}`);
@@ -177,7 +176,7 @@ export async function watchCommand(
       console.log(`[${timestamp()}] Loaded: ${pkg.name}@${pkg.version} (${watchedFiles.length} files)`);
     } catch (err) {
       console.log(`[${timestamp()}] Error loading package:`);
-      console.log(`  ${err instanceof Error ? err.message : String(err)}`);
+      console.log(`  ${formatError(err)}`);
       return null;
     }
 
@@ -187,7 +186,7 @@ export async function watchCommand(
       await e3.export(pkg, tempZip);
     } catch (err) {
       console.log(`[${timestamp()}] Error exporting package:`);
-      console.log(`  ${err instanceof Error ? err.message : String(err)}`);
+      console.log(`  ${formatError(err)}`);
       return null;
     }
 
@@ -197,7 +196,7 @@ export async function watchCommand(
       await packageImport(deployStorage, repoPath, tempZip);
     } catch (err) {
       console.log(`[${timestamp()}] Error importing package:`);
-      console.log(`  ${err instanceof Error ? err.message : String(err)}`);
+      console.log(`  ${formatError(err)}`);
       return null;
     } finally {
       // Clean up temp file
@@ -218,7 +217,7 @@ export async function watchCommand(
         console.log(`[${timestamp()}] Created workspace: ${workspace}`);
       } catch (err) {
         console.log(`[${timestamp()}] Error creating workspace:`);
-        console.log(`  ${err instanceof Error ? err.message : String(err)}`);
+        console.log(`  ${formatError(err)}`);
         return null;
       }
     }
@@ -229,7 +228,7 @@ export async function watchCommand(
       console.log(`[${timestamp()}] Deployed to workspace: ${workspace}`);
     } catch (err) {
       console.log(`[${timestamp()}] Error deploying:`);
-      console.log(`  ${err instanceof Error ? err.message : String(err)}`);
+      console.log(`  ${formatError(err)}`);
       return null;
     }
 
@@ -276,7 +275,7 @@ export async function watchCommand(
         console.log(`[${timestamp()}] Dataflow aborted`);
       } else {
         console.log(`[${timestamp()}] Dataflow error:`);
-        console.log(`  ${err instanceof Error ? err.message : String(err)}`);
+        console.log(`  ${formatError(err)}`);
       }
     }
   }

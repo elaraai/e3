@@ -137,6 +137,14 @@ program
       .action(workspaceCommand.export)
   )
   .addCommand(
+    new Command('import')
+      .description('Import a package zip into a workspace (creates workspace if needed)')
+      .argument('<repo>', 'Repository path or URL')
+      .argument('<ws>', 'Workspace name')
+      .argument('<zipPath>', 'Input .zip path')
+      .action(workspaceCommand.import)
+  )
+  .addCommand(
     new Command('list')
       .description('List workspaces')
       .argument('<repo>', 'Repository path')

@@ -111,12 +111,27 @@ export function parsePackageSpec(spec: string): { name: string; version: string 
 }
 
 /**
- * Format error for CLI output.
+ * Format an error into a human-readable CLI message.
+ *
+ * Handles three error categories:
+ * - {@link ApiError} — humanizes the error code (e.g. `"package_not_found"` → `"Package not found"`)
+ *   and appends details if present (string details verbatim, objects as JSON).
+ * - Standard `Error` — returns `.message`.
+ * - Other values — coerces to string via `String()`.
+ *
+ * The returned string is intended for `exitError()` which prefixes it with `"Error: "`.
+ *
+ * @param err - The caught error value (may be any type)
+ * @returns A single-line, human-readable error description
  */
 export function formatError(err: unknown): string {
   if (err instanceof ApiError) {
     // Humanize the error code: "execution_not_found" → "Execution not found"
     const message = err.code.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+    if (err.details != null) {
+      const detail = typeof err.details === 'string' ? err.details : JSON.stringify(err.details);
+      return `${message}: ${detail}`;
+    }
     return message;
   }
   if (err instanceof Error) {
