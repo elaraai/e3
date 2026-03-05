@@ -172,9 +172,8 @@ export async function testMultipleSimultaneousStarts(): Promise<ScenarioResult> 
 
     const results = await Promise.all(startPromises);
 
-    const LOCK_ERROR_MSG = 'Workspace is locked by another process with PID:';
     const isLockError = (r: { stdout: string; stderr: string }) =>
-      r.stdout.includes(LOCK_ERROR_MSG);
+      r.stderr.includes('is locked by another process');
     const successes = results.filter(r => r.exitCode === 0).length;
     const failures = results.filter(r => r.exitCode !== 0).length;
     const lockErrors = results.filter(r => r.exitCode !== 0 && isLockError(r)).length;
@@ -409,9 +408,8 @@ export async function testInterleavedMultiWorkspace(): Promise<ScenarioResult> {
     }
 
     const results = await Promise.all(ops);
-    const LOCK_ERROR_MSG = 'Workspace is locked by another process with PID:';
     const isLockError = (r: { stdout: string; stderr: string }) =>
-      r.stdout.includes(LOCK_ERROR_MSG);
+      r.stderr.includes('is locked by another process');
     const successes = results.filter(r => r.exitCode === 0).length;
     const lockErrors = results.filter(r => r.exitCode !== 0 && isLockError(r)).length;
 
