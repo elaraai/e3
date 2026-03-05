@@ -577,6 +577,249 @@ export function transferTests(
       });
     });
 
+    describe('workspace import', { concurrency: true }, () => {
+      it('imports workspace zip to local repo with preserved datasets', async (t) => {
+        const ctx = await withTransfer(t);
+        const { workDir } = ctx;
+        const { path: localRepo1, cleanup: cleanup1 } = await createLocalTestRepo(ctx.tempDir);
+        const { path: localRepo2, cleanup: cleanup2 } = await createLocalTestRepo(ctx.tempDir);
+        const exportZip = join(ctx.tempDir, `ws-import-local-${Date.now()}.zip`);
+        const wsName = `ws-src-${Date.now()}`;
+
+        try {
+          // 1. Create package, deploy, set input, execute
+          const pkgZip = await createPackageZip(ctx.tempDir, 'ws-import-pkg', '1.0.0');
+          let result = await runE3Command(['package', 'import', localRepo1, pkgZip], workDir);
+          assert.strictEqual(result.exitCode, 0, `Import failed: ${result.stderr}`);
+
+          result = await runE3Command(['workspace', 'create', localRepo1, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['workspace', 'deploy', localRepo1, wsName, 'ws-import-pkg@1.0.0'], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          const valueFile = join(ctx.tempDir, `value-${Date.now()}.east`);
+          writeFileSync(valueFile, '25');
+          result = await runE3Command(['set', localRepo1, `${wsName}.inputs.value`, valueFile], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['start', localRepo1, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0, `Start failed: ${result.stderr}`);
+
+          // 2. Export workspace
+          result = await runE3Command(
+            ['workspace', 'export', localRepo1, wsName, exportZip, '--name', 'ws-import-snap'],
+            workDir
+          );
+          assert.strictEqual(result.exitCode, 0, `Export failed: ${result.stderr}`);
+
+          // 3. Use workspace import into second local repo
+          const destWs = `ws-dest-${Date.now()}`;
+          result = await runE3Command(['workspace', 'import', localRepo2, destWs, exportZip], workDir);
+          assert.strictEqual(result.exitCode, 0, `Workspace import failed: stdout=${result.stdout}, stderr=${result.stderr}`);
+          assert.match(result.stdout, /Imported ws-import-snap@/);
+          assert.match(result.stdout, /Deployed to workspace/);
+
+          // 4. Verify preserved input value
+          result = await runE3Command(['get', localRepo2, `${destWs}.inputs.value`], workDir);
+          assert.strictEqual(result.exitCode, 0, `Get input failed: ${result.stderr}`);
+          assert.match(result.stdout, /25/);
+
+          // 5. Execute and verify output (25 * 2 = 50)
+          result = await runE3Command(['start', localRepo2, destWs], workDir);
+          assert.strictEqual(result.exitCode, 0, `Start dest failed: ${result.stderr}`);
+
+          result = await runE3Command(['get', localRepo2, `${destWs}.tasks.compute.output`], workDir);
+          assert.strictEqual(result.exitCode, 0, `Get output failed: ${result.stderr}`);
+          assert.match(result.stdout, /50/);
+        } finally {
+          cleanup1();
+          cleanup2();
+        }
+      });
+
+      it('imports workspace zip to remote repo with execution history', async (t) => {
+        const ctx = await withTransfer(t);
+        const { remoteUrl, workDir } = ctx;
+        const env = getCredentialsEnv();
+        const { path: localRepo, cleanup } = await createLocalTestRepo(ctx.tempDir);
+        const exportZip = join(ctx.tempDir, `ws-import-remote-${Date.now()}.zip`);
+        const wsName = `ws-src-remote-${Date.now()}`;
+
+        try {
+          // 1. Create package, deploy, execute locally
+          const pkgZip = await createPackageZip(ctx.tempDir, 'ws-import-remote-pkg', '1.0.0');
+          let result = await runE3Command(['package', 'import', localRepo, pkgZip], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['workspace', 'create', localRepo, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['workspace', 'deploy', localRepo, wsName, 'ws-import-remote-pkg@1.0.0'], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['start', localRepo, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0, `Start failed: ${result.stderr}`);
+
+          // Verify local output (10 * 2 = 20)
+          result = await runE3Command(['get', localRepo, `${wsName}.tasks.compute.output`], workDir);
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /20/);
+
+          // 2. Export workspace
+          result = await runE3Command(
+            ['workspace', 'export', localRepo, wsName, exportZip, '--name', 'ws-import-remote-snap'],
+            workDir
+          );
+          assert.strictEqual(result.exitCode, 0, `Export failed: ${result.stderr}`);
+
+          // 3. Use workspace import to remote
+          const destWs = `ws-dest-remote-${Date.now()}`;
+          result = await runE3Command(['workspace', 'import', remoteUrl, destWs, exportZip], workDir, { env });
+          assert.strictEqual(result.exitCode, 0, `Workspace import failed: stdout=${result.stdout}, stderr=${result.stderr}`);
+          assert.match(result.stdout, /Imported ws-import-remote-snap@/);
+          assert.match(result.stdout, /Deployed to workspace/);
+
+          // 4. Execute on remote — execution history should allow cache hit
+          result = await runE3Command(['start', remoteUrl, destWs], workDir, { env });
+          assert.strictEqual(result.exitCode, 0, `Remote start failed: ${result.stderr}`);
+
+          result = await runE3Command(['get', remoteUrl, `${destWs}.tasks.compute.output`], workDir, { env });
+          assert.strictEqual(result.exitCode, 0, `Get remote output failed: ${result.stderr}`);
+          assert.match(result.stdout, /20/);
+
+          // Cleanup
+          await runE3Command(['workspace', 'remove', remoteUrl, destWs], workDir, { env });
+        } finally {
+          cleanup();
+        }
+      });
+
+      it('imports diamond workspace preserving complex dataflow state', async (t) => {
+        const ctx = await withTransfer(t);
+        const { workDir } = ctx;
+        const { path: localRepo1, cleanup: cleanup1 } = await createLocalTestRepo(ctx.tempDir);
+        const { path: localRepo2, cleanup: cleanup2 } = await createLocalTestRepo(ctx.tempDir);
+        const exportZip = join(ctx.tempDir, `ws-import-diamond-${Date.now()}.zip`);
+        const wsName = `ws-diamond-${Date.now()}`;
+
+        try {
+          // 1. Create diamond package: a, b -> left(a+b), right(a*b) -> merge(left+right)
+          const pkgZip = await createDiamondPackageZip(ctx.tempDir, 'ws-import-diamond', '1.0.0');
+          let result = await runE3Command(['package', 'import', localRepo1, pkgZip], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['workspace', 'create', localRepo1, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['workspace', 'deploy', localRepo1, wsName, 'ws-import-diamond@1.0.0'], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          // Set custom inputs: a=20, b=3
+          const aFile = join(ctx.tempDir, `a-${Date.now()}.east`);
+          writeFileSync(aFile, '20');
+          result = await runE3Command(['set', localRepo1, `${wsName}.inputs.a`, aFile], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          const bFile = join(ctx.tempDir, `b-${Date.now()}.east`);
+          writeFileSync(bFile, '3');
+          result = await runE3Command(['set', localRepo1, `${wsName}.inputs.b`, bFile], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['start', localRepo1, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0, `Start failed: ${result.stderr}`);
+
+          // Verify: left=23, right=60, merge=83
+          result = await runE3Command(['get', localRepo1, `${wsName}.tasks.merge.output`], workDir);
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /83/);
+
+          // 2. Export workspace
+          result = await runE3Command(
+            ['workspace', 'export', localRepo1, wsName, exportZip, '--name', 'diamond-snap'],
+            workDir
+          );
+          assert.strictEqual(result.exitCode, 0, `Export failed: ${result.stderr}`);
+
+          // 3. Workspace import into second local repo
+          const destWs = `ws-diamond-dest-${Date.now()}`;
+          result = await runE3Command(['workspace', 'import', localRepo2, destWs, exportZip], workDir);
+          assert.strictEqual(result.exitCode, 0, `Workspace import failed: stdout=${result.stdout}, stderr=${result.stderr}`);
+
+          // 4. Verify inputs preserved
+          result = await runE3Command(['get', localRepo2, `${destWs}.inputs.a`], workDir);
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /20/, 'Input a should be preserved as 20');
+
+          result = await runE3Command(['get', localRepo2, `${destWs}.inputs.b`], workDir);
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /3/, 'Input b should be preserved as 3');
+
+          // 5. Execute and verify merge output
+          result = await runE3Command(['start', localRepo2, destWs], workDir);
+          assert.strictEqual(result.exitCode, 0, `Start dest failed: ${result.stderr}`);
+
+          result = await runE3Command(['get', localRepo2, `${destWs}.tasks.merge.output`], workDir);
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /83/, 'Diamond merge should produce 83');
+        } finally {
+          cleanup1();
+          cleanup2();
+        }
+      });
+
+      it('workspace import is idempotent', async (t) => {
+        const ctx = await withTransfer(t);
+        const { workDir } = ctx;
+        const { path: localRepo1, cleanup: cleanup1 } = await createLocalTestRepo(ctx.tempDir);
+        const { path: localRepo2, cleanup: cleanup2 } = await createLocalTestRepo(ctx.tempDir);
+        const exportZip = join(ctx.tempDir, `ws-import-idemp-${Date.now()}.zip`);
+        const wsName = `ws-idemp-src-${Date.now()}`;
+
+        try {
+          // 1. Create package, deploy, execute, export
+          const pkgZip = await createPackageZip(ctx.tempDir, 'ws-import-idemp', '1.0.0');
+          let result = await runE3Command(['package', 'import', localRepo1, pkgZip], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['workspace', 'create', localRepo1, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['workspace', 'deploy', localRepo1, wsName, 'ws-import-idemp@1.0.0'], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(['start', localRepo1, wsName], workDir);
+          assert.strictEqual(result.exitCode, 0);
+
+          result = await runE3Command(
+            ['workspace', 'export', localRepo1, wsName, exportZip, '--name', 'idemp-snap'],
+            workDir
+          );
+          assert.strictEqual(result.exitCode, 0, `Export failed: ${result.stderr}`);
+
+          // 2. First workspace import
+          const destWs = `ws-idemp-dest-${Date.now()}`;
+          result = await runE3Command(['workspace', 'import', localRepo2, destWs, exportZip], workDir);
+          assert.strictEqual(result.exitCode, 0, `First import failed: stdout=${result.stdout}, stderr=${result.stderr}`);
+
+          // 3. Second workspace import — should succeed (idempotent)
+          result = await runE3Command(['workspace', 'import', localRepo2, destWs, exportZip], workDir);
+          assert.strictEqual(result.exitCode, 0, `Second import failed (not idempotent): stdout=${result.stdout}, stderr=${result.stderr}`);
+
+          // 4. Verify data still correct after double import
+          result = await runE3Command(['start', localRepo2, destWs], workDir);
+          assert.strictEqual(result.exitCode, 0, `Start after double import failed: ${result.stderr}`);
+
+          result = await runE3Command(['get', localRepo2, `${destWs}.tasks.compute.output`], workDir);
+          assert.strictEqual(result.exitCode, 0);
+          assert.match(result.stdout, /20/); // 10 * 2 = 20 (default input)
+        } finally {
+          cleanup1();
+          cleanup2();
+        }
+      });
+    });
+
     describe('error handling', { concurrency: true }, () => {
       it('returns error when exporting non-existent package', async (t) => {
         const ctx = await withTransfer(t);
