@@ -29,6 +29,7 @@ e3 workspace create <repo> <name>           # Create empty workspace
 e3 workspace deploy <repo> <ws> <pkg>[@<ver>]  # Deploy package to workspace
 e3 workspace export <repo> <ws> <path.zip>  # Export workspace as package
     [--name <pkg>] [--version <ver>]        # Default: <pkg>@<ver>-<hash>
+e3 workspace import <repo> <ws> <path.zip>  # Import package zip into workspace
 e3 workspace list <repo>                    # List workspaces
 e3 workspace remove <repo> <ws>             # Remove workspace
 ```

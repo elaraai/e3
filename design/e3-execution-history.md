@@ -468,10 +468,11 @@ Exported workspace prod
   Executions: 3
   Total size: 45.2 MB
 
-# Import on another machine
-$ e3 package import . prod-backup.zip
+# Import on another machine and deploy to workspace in one step
+$ e3 workspace import . prod prod-backup.zip
 Imported forecast-model@1.0.0
   Executions: 3 (marked as imported from user@machine-a)
+Deployed to workspace: prod
 ```
 
 ## Import Collision Handling

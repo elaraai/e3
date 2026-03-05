@@ -144,6 +144,7 @@ e3 package remove <repo> <pkg>           # Remove package
 e3 workspace create <repo> <name>           # Create workspace
 e3 workspace deploy <repo> <ws> <pkg[@ver]> # Deploy package
 e3 workspace export <repo> <ws> <zipPath>   # Export workspace
+e3 workspace import <repo> <ws> <zipPath>   # Import package zip into workspace
 e3 workspace list <repo>                    # List workspaces
 e3 workspace status <repo> <ws>             # Show workspace status
 e3 workspace remove <repo> <ws>             # Remove workspace

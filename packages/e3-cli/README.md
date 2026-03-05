@@ -34,6 +34,7 @@ e3 package remove <repo> <pkg>        # Remove a package
 e3 workspace create <repo> <name>     # Create empty workspace
 e3 workspace deploy <repo> <ws> <pkg> # Deploy package to workspace
 e3 workspace export <repo> <ws> <zip> # Export workspace as package
+e3 workspace import <repo> <ws> <zip> # Import package zip into workspace
 e3 workspace list <repo>              # List workspaces
 e3 workspace status <repo> <ws>       # Show workspace status
 e3 workspace remove <repo> <ws>       # Remove workspace

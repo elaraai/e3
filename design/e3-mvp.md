@@ -96,11 +96,8 @@ $ e3 start . production
 $ e3 workspace export . production ./handoff.zip
 Exporting acme-forecast-0.21.1-a3f8b2c1 to handoff.zip... done
 
-# Colleague imports it
-$ e3 package import . ./handoff.zip
-Installing acme-forecast@0.21.1-a3f8b2c1... done
-
-$ e3 workspace deploy . analysis acme-forecast@0.21.1-a3f8b2c1
+# Colleague imports it into a workspace in one step
+$ e3 workspace import . analysis ./handoff.zip
 # Now they have your exact data state
 ```
 
