@@ -20,6 +20,10 @@ export function createObjectRoutes(
     const repoPath = getRepoPath(repo);
     const hash = c.req.param('hash')!;
 
+    if (!/^[a-f0-9]{64}$/.test(hash)) {
+      return sendError(NullType, variant('internal', { message: `invalid hash format: ${hash}` }));
+    }
+
     try {
       const data = await storage.objects.read(repoPath, hash);
       return new Response(data, {

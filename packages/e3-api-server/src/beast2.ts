@@ -17,7 +17,7 @@ export async function decodeBody<T extends EastType>(
   type: T
 ): Promise<ValueTypeOf<T>> {
   const contentType = c.req.header('content-type');
-  if (contentType !== BEAST2_CONTENT_TYPE && contentType !== 'application/beast2') {
+  if (contentType !== BEAST2_CONTENT_TYPE) {
     throw new Error(`Expected Content-Type: ${BEAST2_CONTENT_TYPE}, got ${contentType}`);
   }
 

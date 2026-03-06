@@ -85,7 +85,7 @@ describe('getDataset', () => {
 
     const treePath = [variant('field', 'inputs'), variant('field', 'big')];
     const requestUrl = `http://localhost:3000/api/repos/${REPO}/workspaces/${WS}/datasets/inputs/big`;
-    const response = await getDataset(storage, REPO, WS, treePath, requestUrl);
+    const response = await getDataset(storage, REPO, WS, treePath, REPO, requestUrl);
 
     assert.equal(response.status, 307);
     assert.equal(response.headers.get('X-Content-SHA256'), hash);
@@ -111,7 +111,7 @@ describe('getDataset', () => {
 
     const treePath = [variant('field', 'inputs'), variant('field', 'small')];
     const requestUrl = `http://localhost:3000/api/repos/${REPO}/workspaces/${WS}/datasets/inputs/small`;
-    const response = await getDataset(storage, REPO, WS, treePath, requestUrl);
+    const response = await getDataset(storage, REPO, WS, treePath, REPO, requestUrl);
 
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('Content-Type'), BEAST2_CONTENT_TYPE);

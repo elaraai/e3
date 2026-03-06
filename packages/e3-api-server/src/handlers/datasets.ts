@@ -48,6 +48,7 @@ export async function getDataset(
   repoPath: string,
   workspace: string,
   treePath: TreePath,
+  repo?: string,
   requestUrl?: string
 ): Promise<Response> {
   try {
@@ -65,27 +66,24 @@ export async function getDataset(
       return sendError(NullType, errorToVariant(new Error('Dataset is null')));
     }
 
-    // Check object size for redirect decision
-    const { size } = await storage.objects.stat(repoPath, hash);
-
-    if (requestUrl && size > SIZE_THRESHOLD) {
-      // Extract repo name from repoPath for the redirect URL
-      const origin = new URL(requestUrl).origin;
-      // Parse the repo name from the request URL path
-      const match = new URL(requestUrl).pathname.match(/^\/api\/repos\/([^/]+)\//);
-      const repo = match ? match[1]! : '';
-      const objectUrl = `${origin}/api/repos/${repo}/objects/${hash}`;
-      return new Response(null, {
-        status: 307,
-        headers: {
-          'Location': objectUrl,
-          'X-Content-Length': String(size),
-          'X-Content-SHA256': hash,
-        },
-      });
+    // When serving via API, check size to decide whether to redirect
+    if (repo && requestUrl) {
+      const { size } = await storage.objects.stat(repoPath, hash);
+      if (size > SIZE_THRESHOLD) {
+        const origin = new URL(requestUrl).origin;
+        const objectUrl = `${origin}/api/repos/${encodeURIComponent(repo)}/objects/${hash}`;
+        return new Response(null, {
+          status: 307,
+          headers: {
+            'Location': objectUrl,
+            'X-Content-Length': String(size),
+            'X-Content-SHA256': hash,
+          },
+        });
+      }
     }
 
-    // Small object — inline response
+    // Inline response
     const data = await storage.objects.read(repoPath, hash);
     return new Response(data, {
       status: 200,

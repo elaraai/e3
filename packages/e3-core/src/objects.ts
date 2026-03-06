@@ -15,7 +15,7 @@ import * as crypto from 'crypto';
 /**
  * MIME type for BEAST2 binary encoding.
  */
-export const BEAST2_CONTENT_TYPE = 'application/vnd.elara.beast2';
+export const BEAST2_CONTENT_TYPE = 'application/beast2';
 
 /**
  * Calculate SHA256 hash of data.

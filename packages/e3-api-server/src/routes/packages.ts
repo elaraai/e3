@@ -46,7 +46,7 @@ export function createPackageRoutes(
     const contentType = c.req.header('content-type');
     let archive: Uint8Array;
 
-    if (contentType === BEAST2_CONTENT_TYPE || contentType === 'application/beast2') {
+    if (contentType === BEAST2_CONTENT_TYPE) {
       // BEAST2 encoded blob
       archive = await decodeBody(c, BlobType);
     } else {
