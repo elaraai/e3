@@ -488,18 +488,14 @@ export class LocalOrchestrator implements DataflowOrchestrator {
               await this.handleInputChanges(storage, state, options, structure);
 
               // Update state store
-              if (this.stateStore) {
-                await this.stateStore.update(state);
-              }
+              await this.persistState(execution, state);
             });
             continue;
           }
 
           // Mark as started (event added by step function)
           stepTaskStarted(state, taskName);
-          if (this.stateStore) {
-            await this.stateStore.update(state);
-          }
+          await this.persistState(execution, state);
           options.onTaskStart?.(taskName);
 
           // Launch task execution
@@ -588,9 +584,7 @@ export class LocalOrchestrator implements DataflowOrchestrator {
               }
 
               // Update state store
-              if (this.stateStore) {
-                await this.stateStore.update(state);
-              }
+              await this.persistState(execution, state);
             })
           ).finally(() => {
             execution.runningTasks.delete(taskName);
@@ -899,6 +893,19 @@ export class LocalOrchestrator implements DataflowOrchestrator {
     const pkgDecoder = decodeBeast2For(PackageObjectType);
     const pkgObject = pkgDecoder(Buffer.from(pkgData));
     return pkgObject.data.structure;
+  }
+
+  /**
+   * Persist state, skipping the write when execution has been aborted
+   * and the state doesn't yet reflect cancellation (defense-in-depth).
+   */
+  private async persistState(
+    execution: RunningExecution,
+    state: DataflowExecutionState
+  ): Promise<void> {
+    if (!this.stateStore) return;
+    if (execution.aborted && state.status !== 'cancelled') return;
+    await this.stateStore.update(state);
   }
 
   /**

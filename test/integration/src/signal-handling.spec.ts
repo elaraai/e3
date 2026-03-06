@@ -226,9 +226,9 @@ describe('signal handling', () => {
       // Send SIGINT (triggers immediate persistence)
       proc.kill('SIGINT');
 
-      // Wait just long enough for the signal handler to fire and start persistence
-      // (50ms should be plenty for the async updateStatus to begin)
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Wait long enough for the signal handler to fire and complete persistence
+      // (the async chain: read → decode → mutate → encode → write → rename needs time under CI load)
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Send SIGKILL to forcibly terminate (simulating impatient user)
       proc.kill('SIGKILL');

@@ -56,6 +56,44 @@ function makeState(
   } as DataflowExecutionState;
 }
 
+describe('InMemoryStateStore cancelled guard', () => {
+  it('does not overwrite cancelled status with running', async () => {
+    const store = new InMemoryStateStore();
+    const graph: DataflowGraph = { tasks: [] };
+    const tasks = new Map<string, TaskState>();
+    const state = makeState(graph, tasks);
+    await store.create(state);
+
+    // Mark as cancelled via updateStatus
+    await store.updateStatus(state.repo, state.workspace, state.id, 'cancelled', { error: 'Cancelled' });
+
+    // Attempt to overwrite with a running state
+    const runningState = { ...state, status: 'running' } as DataflowExecutionState;
+    await store.update(runningState);
+
+    // Verify status remains cancelled
+    const read = await store.read(state.repo, state.workspace, state.id);
+    assert.strictEqual(read!.status, 'cancelled');
+  });
+
+  it('allows overwriting cancelled with cancelled', async () => {
+    const store = new InMemoryStateStore();
+    const graph: DataflowGraph = { tasks: [] };
+    const tasks = new Map<string, TaskState>();
+    const state = makeState(graph, tasks);
+    await store.create(state);
+
+    await store.updateStatus(state.repo, state.workspace, state.id, 'cancelled', { error: 'First cancel' });
+
+    // Update with cancelled status should succeed
+    const cancelledState = { ...state, status: 'cancelled' } as DataflowExecutionState;
+    await store.update(cancelledState);
+
+    const read = await store.read(state.repo, state.workspace, state.id);
+    assert.strictEqual(read!.status, 'cancelled');
+  });
+});
+
 describe('InMemoryStateStore cloneState isolation', () => {
   it('isolates versionVectors across reads', async () => {
     const store = new InMemoryStateStore();
