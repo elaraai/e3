@@ -5,7 +5,7 @@
 
 import { Hono } from 'hono';
 import { BlobType } from '@elaraai/east';
-import type { StorageBackend } from '@elaraai/e3-core';
+import { BEAST2_CONTENT_TYPE, type StorageBackend } from '@elaraai/e3-core';
 import {
   listPackages,
   getPackage,
@@ -46,7 +46,7 @@ export function createPackageRoutes(
     const contentType = c.req.header('content-type');
     let archive: Uint8Array;
 
-    if (contentType === 'application/beast2') {
+    if (contentType === BEAST2_CONTENT_TYPE || contentType === 'application/beast2') {
       // BEAST2 encoded blob
       archive = await decodeBody(c, BlobType);
     } else {

@@ -5,6 +5,7 @@
 
 import { encodeBeast2For, decodeBeast2For } from '@elaraai/east';
 import type { EastType, ValueTypeOf } from '@elaraai/east';
+import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-core';
 import { ResponseType, ErrorType } from './types.js';
 
 /**
@@ -114,7 +115,7 @@ export async function get<T extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'GET',
     headers: {
-      'Accept': 'application/beast2',
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
   });
@@ -139,8 +140,8 @@ export async function post<Req extends EastType, Res extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/beast2',
-      'Accept': 'application/beast2',
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
     body: encode(body),
@@ -166,8 +167,8 @@ export async function put<Req extends EastType, Res extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/beast2',
-      'Accept': 'application/beast2',
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
     body: encode(body),
@@ -190,7 +191,7 @@ export async function del<T extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'DELETE',
     headers: {
-      'Accept': 'application/beast2',
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
   });
@@ -212,7 +213,7 @@ export async function putEmpty<T extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'PUT',
     headers: {
-      'Accept': 'application/beast2',
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
   });

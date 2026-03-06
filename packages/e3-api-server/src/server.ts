@@ -20,6 +20,8 @@ import { createDatasetRoutes } from './routes/datasets.js';
 import { createTaskRoutes } from './routes/tasks.js';
 import { createExecutionRoutes } from './routes/executions.js';
 import { createRepositoryRoutes } from './routes/repository.js';
+import { createObjectRoutes } from './routes/objects.js';
+import { createTransferRoutes } from './routes/transfer.js';
 
 export type { AuthConfig } from './middleware/auth.js';
 export type { OidcConfig } from './auth/index.js';
@@ -143,6 +145,8 @@ export async function createServer(config: ServerConfig): Promise<Server> {
 
   // Single-repo mode: validate repo name and handle disabled operations
   // Runs AFTER auth middleware (so unauthorized users get 401, not 404/405)
+  // Uses JSON error responses with HTTP error status codes because middleware
+  // cannot know the BEAST2 success type expected by the handler.
   if (isSingleRepoMode) {
     app.use('/api/repos/:repo/*', async (c, next) => {
       const method = c.req.method;
@@ -182,6 +186,8 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   // In single-repo mode, this is handled by the middleware above
   // Skip validation for PUT/DELETE on /api/repos/:repo (repo create/remove)
   // Skip validation for /api/repos/:repo/delete/* (repo deletion status - repo may already be deleted)
+  // Uses JSON error responses with HTTP 404 because middleware cannot know
+  // the BEAST2 success type expected by the handler.
   if (!isSingleRepoMode) {
     app.use('/api/repos/:repo/*', async (c, next) => {
       // Skip validation for repo create/remove operations at the repo level
@@ -207,14 +213,14 @@ export async function createServer(config: ServerConfig): Promise<Server> {
       // Check repo metadata for status
       const metadata = await storage.repos.getMetadata(repo);
       if (!metadata) {
-        return sendError(NullType, variant('repository_not_found', { repo }));
+        return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
       }
 
       // If repo is in 'deleting' state, treat as not found for most operations
       // Exception: status endpoint shows 'deleting' state (but we still check repo exists above)
       const statusMatch = reqPath.match(/^\/api\/repos\/[^/]+\/status$/);
       if (metadata.status === 'deleting' && !statusMatch) {
-        return sendError(NullType, variant('repository_not_found', { repo }));
+        return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
       }
 
       // Also validate the repo structure (for backwards compat with repos without metadata)
@@ -223,7 +229,7 @@ export async function createServer(config: ServerConfig): Promise<Server> {
         await storage.validateRepository(repoPath);
       } catch (err) {
         if (err instanceof RepoNotFoundError) {
-          return sendError(NullType, variant('repository_not_found', { repo }));
+          return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
         }
         throw err;
       }
@@ -344,6 +350,12 @@ export async function createServer(config: ServerConfig): Promise<Server> {
 
   // Execution/Dataflow routes: /api/repos/:repo/workspaces/:ws/dataflow/*
   app.route('/api/repos/:repo/workspaces/:ws/dataflow', createExecutionRoutes(storage, getRepoPath));
+
+  // Object routes: /api/repos/:repo/objects/:hash
+  app.route('/api/repos/:repo/objects', createObjectRoutes(storage, getRepoPath));
+
+  // Transfer routes: /api/repos/:repo/transfer/*
+  app.route('/api/repos/:repo/transfer', createTransferRoutes(storage, getRepoPath));
 
   let httpServer: ServerType | null = null;
   let actualPort = port;

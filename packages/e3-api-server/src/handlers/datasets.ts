@@ -13,7 +13,7 @@ import {
   workspaceGetTree,
   type TreeNode,
 } from '@elaraai/e3-core';
-import type { StorageBackend } from '@elaraai/e3-core';
+import { BEAST2_CONTENT_TYPE, type StorageBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
 import { DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from '../types.js';
@@ -35,14 +35,20 @@ export async function listDatasets(
   }
 }
 
+const SIZE_THRESHOLD = 1 * 1024 * 1024; // 1 MB
+
 /**
  * Get dataset value as raw BEAST2 bytes.
+ *
+ * For objects > 1MB, returns a 307 redirect to the object endpoint.
+ * The requestUrl is used to construct the redirect Location header.
  */
 export async function getDataset(
   storage: StorageBackend,
   repoPath: string,
   workspace: string,
-  treePath: TreePath
+  treePath: TreePath,
+  requestUrl?: string
 ): Promise<Response> {
   try {
     if (treePath.length === 0) {
@@ -59,11 +65,35 @@ export async function getDataset(
       return sendError(NullType, errorToVariant(new Error('Dataset is null')));
     }
 
-    // Return raw BEAST2 bytes directly from object store
+    // Check object size for redirect decision
+    const { size } = await storage.objects.stat(repoPath, hash);
+
+    if (requestUrl && size > SIZE_THRESHOLD) {
+      // Extract repo name from repoPath for the redirect URL
+      const origin = new URL(requestUrl).origin;
+      // Parse the repo name from the request URL path
+      const match = new URL(requestUrl).pathname.match(/^\/api\/repos\/([^/]+)\//);
+      const repo = match ? match[1]! : '';
+      const objectUrl = `${origin}/api/repos/${repo}/objects/${hash}`;
+      return new Response(null, {
+        status: 307,
+        headers: {
+          'Location': objectUrl,
+          'X-Content-Length': String(size),
+          'X-Content-SHA256': hash,
+        },
+      });
+    }
+
+    // Small object — inline response
     const data = await storage.objects.read(repoPath, hash);
     return new Response(data, {
       status: 200,
-      headers: { 'Content-Type': 'application/beast2' },
+      headers: {
+        'Content-Type': BEAST2_CONTENT_TYPE,
+        'Content-Length': String(data.byteLength),
+        'X-Content-SHA256': hash,
+      },
     });
   } catch (err) {
     return sendError(NullType, errorToVariant(err));

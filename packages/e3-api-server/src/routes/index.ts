@@ -9,3 +9,5 @@ export { createWorkspaceRoutes } from './workspaces.js';
 export { createDatasetRoutes } from './datasets.js';
 export { createTaskRoutes } from './tasks.js';
 export { createExecutionRoutes } from './executions.js';
+export { createObjectRoutes } from './objects.js';
+export { createTransferRoutes } from './transfer.js';

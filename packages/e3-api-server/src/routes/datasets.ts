@@ -69,7 +69,7 @@ export function createDatasetRoutes(
     if (list)                        return listDatasets(storage, repoPath, ws, treePath);
     if (status)                      return getDatasetStatus(storage, repoPath, ws, treePath);
 
-    return getDataset(storage, repoPath, ws, treePath);
+    return getDataset(storage, repoPath, ws, treePath, c.req.url);
   });
 
   // PUT /api/repos/:repo/workspaces/:ws/datasets/* - Set dataset value

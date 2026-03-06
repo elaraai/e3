@@ -3,10 +3,22 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import { ArrayType, NullType, StringType, decodeBeast2For } from '@elaraai/east';
+import { ArrayType, NullType, StringType, decodeBeast2For, encodeBeast2For } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
+import { BEAST2_CONTENT_TYPE, computeHash } from '@elaraai/e3-core';
 import { ApiError, AuthError, get, type RequestOptions, type Response } from './http.js';
-import { ResponseType, DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from './types.js';
+import {
+  ResponseType,
+  DatasetStatusDetailType,
+  ListEntryType,
+  TransferUploadRequestType,
+  TransferUploadResponseType,
+  TransferDoneResponseType,
+  type ListEntry,
+  type DatasetStatusDetail,
+  type TransferUploadResponse,
+  type TransferDoneResponse,
+} from './types.js';
 
 function datasetEndpoint(repo: string, workspace: string, path: TreePath): string {
   let endpoint = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`;
@@ -84,14 +96,14 @@ export async function datasetGet(
   workspace: string,
   path: TreePath,
   options: RequestOptions
-): Promise<Uint8Array> {
+): Promise<{ data: Uint8Array; hash: string; size: number }> {
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
   const response = await fetch(
     `${url}/api/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}`,
     {
       method: 'GET',
       headers: {
-        'Accept': 'application/beast2',
+        'Accept': BEAST2_CONTENT_TYPE,
         'Authorization': `Bearer ${options.token}`,
       },
     }
@@ -106,11 +118,19 @@ export async function datasetGet(
   }
 
   const buffer = await response.arrayBuffer();
-  return new Uint8Array(buffer);
+  const data = new Uint8Array(buffer);
+  const hash = response.headers.get('X-Content-SHA256') ?? '';
+  const size = parseInt(response.headers.get('Content-Length') ?? '0', 10);
+  return { data, hash, size };
 }
+
+const SIZE_THRESHOLD = 1 * 1024 * 1024; // 1 MB
 
 /**
  * Set a dataset value from raw BEAST2 bytes.
+ *
+ * For payloads > 1MB, uses a transfer flow (init → upload → complete) to
+ * avoid inline body size limits. For smaller payloads, uses inline PUT.
  *
  * @param url - Base URL of the e3 API server
  * @param repo - Repository name
@@ -127,14 +147,19 @@ export async function datasetSet(
   data: Uint8Array,
   options: RequestOptions
 ): Promise<void> {
+  if (data.byteLength > SIZE_THRESHOLD) {
+    return datasetSetTransfer(url, repo, workspace, path, data, options);
+  }
+
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
   const response = await fetch(
     `${url}/api/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}`,
     {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/beast2',
-        'Authorization': `Bearer ${options.token}`,
+        'Content-Type': BEAST2_CONTENT_TYPE,
+        'Accept': BEAST2_CONTENT_TYPE,
+        ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
       },
       body: data,
     }
@@ -155,6 +180,96 @@ export async function datasetSet(
 
   if (result.type === 'error') {
     throw new ApiError(result.value.type, result.value.value);
+  }
+}
+
+/**
+ * Set a large dataset using the transfer flow (init → upload → complete).
+ */
+async function datasetSetTransfer(
+  url: string,
+  repo: string,
+  workspace: string,
+  path: TreePath,
+  data: Uint8Array,
+  options: RequestOptions
+): Promise<void> {
+  const hash = computeHash(data);
+  const pathStr = path.map(p => p.value).join('/');
+  const repoEncoded = encodeURIComponent(repo);
+  const authHeaders: Record<string, string> = {};
+  if (options.token) {
+    authHeaders['Authorization'] = `Bearer ${options.token}`;
+  }
+
+  // 1. Init transfer (BEAST2 request/response)
+  const encodeInit = encodeBeast2For(TransferUploadRequestType);
+  const initRes = await fetch(`${url}/api/repos/${repoEncoded}/transfer/upload`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Accept': BEAST2_CONTENT_TYPE,
+      ...authHeaders,
+    },
+    body: encodeInit({ workspace, path: pathStr, hash, size: BigInt(data.byteLength) }),
+  });
+
+  if (initRes.status === 401) {
+    throw new AuthError(await initRes.text());
+  }
+  if (!initRes.ok) {
+    throw new Error(`Transfer init failed: ${initRes.status} ${initRes.statusText}`);
+  }
+
+  const initBuffer = new Uint8Array(await initRes.arrayBuffer());
+  const decodeInit = decodeBeast2For(ResponseType(TransferUploadResponseType));
+  const initResult = decodeInit(initBuffer) as Response<TransferUploadResponse>;
+  if (initResult.type === 'error') {
+    throw new ApiError(initResult.value.type, initResult.value.value);
+  }
+
+  const init = initResult.value;
+
+  // Dedup — object already exists, ref updated
+  if (init.type === 'completed') return;
+
+  // 2. Upload to staging (raw BEAST2 bytes as body)
+  const uploadRes = await fetch(init.value.uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Accept': BEAST2_CONTENT_TYPE,
+      ...authHeaders,
+    },
+    body: data,
+  });
+
+  if (!uploadRes.ok) {
+    throw new Error(`Transfer upload failed: ${uploadRes.status} ${uploadRes.statusText}`);
+  }
+
+  // 3. Complete — server verifies hash + updates ref (BEAST2 response)
+  const doneRes = await fetch(`${url}/api/repos/${repoEncoded}/transfer/${init.value.transferId}/done`, {
+    method: 'POST',
+    headers: {
+      'Accept': BEAST2_CONTENT_TYPE,
+      ...authHeaders,
+    },
+  });
+
+  if (!doneRes.ok) {
+    throw new Error(`Transfer complete failed: ${doneRes.status} ${doneRes.statusText}`);
+  }
+
+  const doneBuffer = new Uint8Array(await doneRes.arrayBuffer());
+  const decodeDone = decodeBeast2For(ResponseType(TransferDoneResponseType));
+  const doneResult = decodeDone(doneBuffer) as Response<TransferDoneResponse>;
+  if (doneResult.type === 'error') {
+    throw new ApiError(doneResult.value.type, doneResult.value.value);
+  }
+
+  if (doneResult.value.type === 'error') {
+    throw new Error(`Transfer failed: ${doneResult.value.value.message}`);
   }
 }
 

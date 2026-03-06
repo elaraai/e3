@@ -592,7 +592,7 @@ export function dataflowTests(setup: TestSetup<TestContext>): void {
 
         // Output should be 14n (7 * 2)
         const outputPath = [variant('field', 'tasks'), variant('field', 'compute'), variant('field', 'output')];
-        const output = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'conc-ws', outputPath, opts);
+        const { data: output } = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'conc-ws', outputPath, opts);
         assert.strictEqual(decode(output), 14n);
       });
     });

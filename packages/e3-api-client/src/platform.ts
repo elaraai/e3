@@ -436,7 +436,7 @@ const PlatformImpl: PlatformFunction[] = [
   platform_dataset_get.implement(
     async (url: string, repo: string, workspace: string, path: ValueTypeOf<typeof TreePathType>, token: string) => {
       try {
-        return await datasetGet(url, repo, workspace, path, { token });
+        return (await datasetGet(url, repo, workspace, path, { token })).data;
       } catch (err: any) {
         throw new EastError(`Failed to get dataset in ${workspace}: ${err.message}`, {
           location: [{ filename: 'e3_dataset_get', line: 0n, column: 0n }],
