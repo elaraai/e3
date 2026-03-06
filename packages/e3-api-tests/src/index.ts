@@ -69,6 +69,7 @@ export { dataflowTests } from './suites/dataflow.js';
 export { platformTests } from './suites/platform.js';
 export { cliTests } from './suites/cli.js';
 export { transferTests } from './suites/transfer.js';
+export { packageTransferTests } from './suites/package-transfer.js';
 
 import type { TestContext } from './context.js';
 import type { TestSetup } from './setup.js';
@@ -81,6 +82,7 @@ import { dataflowTests } from './suites/dataflow.js';
 import { platformTests } from './suites/platform.js';
 import { cliTests } from './suites/cli.js';
 import { transferTests } from './suites/transfer.js';
+import { packageTransferTests } from './suites/package-transfer.js';
 
 /**
  * Register all API test suites (excluding CLI tests).
@@ -96,6 +98,7 @@ export function allApiTests(setup: TestSetup<TestContext>): void {
   datasetTests(setup);
   datasetTransferTests(setup);
   dataflowTests(setup);
+  packageTransferTests(setup);
   platformTests(setup);
 }
 

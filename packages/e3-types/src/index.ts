@@ -76,6 +76,21 @@ export {
   // Backwards compatibility
   PackageDatasetsType,
   type PackageDatasets,
+  // Package transfer types
+  PackageTransferInitRequestType,
+  type PackageTransferInitRequest,
+  PackageTransferInitResponseType,
+  type PackageTransferInitResponse,
+  PackageExportRequestType,
+  type PackageExportRequest,
+  PackageJobResponseType,
+  type PackageJobResponse,
+  PackageImportResultType,
+  type PackageImportResult,
+  PackageExportResultType,
+  type PackageExportResult,
+  PackageJobStatusType,
+  type PackageJobStatus,
 } from './package.js';
 
 // Workspace state

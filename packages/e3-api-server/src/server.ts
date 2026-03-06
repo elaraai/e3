@@ -22,6 +22,7 @@ import { createExecutionRoutes } from './routes/executions.js';
 import { createRepositoryRoutes } from './routes/repository.js';
 import { createObjectRoutes } from './routes/objects.js';
 import { createTransferRoutes } from './routes/transfer.js';
+import { createPackageTransferRoutes } from './routes/package-transfer.js';
 
 export type { AuthConfig } from './middleware/auth.js';
 export type { OidcConfig } from './auth/index.js';
@@ -148,32 +149,27 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   // Uses JSON error responses with HTTP error status codes because middleware
   // cannot know the BEAST2 success type expected by the handler.
   if (isSingleRepoMode) {
-    app.use('/api/repos/:repo/*', async (c, next) => {
-      const method = c.req.method;
+    // Block repo-level PUT (create) and DELETE (remove) in single-repo mode
+    app.put('/api/repos/:repo', (c) => {
+      return c.json({
+        error: 'method_not_allowed',
+        message: 'Repository creation is disabled in single-repo mode'
+      }, 405);
+    });
 
-      // PUT (create repo) is always disabled in single-repo mode
-      if (method === 'PUT') {
+    app.delete('/api/repos/:repo', (c) => {
+      const repo = c.req.param('repo');
+      if (repo === 'default') {
         return c.json({
           error: 'method_not_allowed',
-          message: 'Repository creation is disabled in single-repo mode'
+          message: 'Repository deletion is disabled in single-repo mode'
         }, 405);
       }
+      return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
+    });
 
-      // For DELETE (remove repo), check if it's the 'default' repo
-      if (method === 'DELETE') {
-        // DELETE on 'default' → 405 (deletion disabled)
-        // DELETE on other repos → 404 (repo doesn't exist)
-        const repo = c.req.param('repo');
-        if (repo === 'default') {
-          return c.json({
-            error: 'method_not_allowed',
-            message: 'Repository deletion is disabled in single-repo mode'
-          }, 405);
-        }
-        return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
-      }
-
-      // For other methods (GET, POST, etc.), validate repo name
+    // Validate repo name for all sub-routes
+    app.use('/api/repos/:repo/*', async (c, next) => {
       const repo = c.req.param('repo');
       if (repo !== 'default') {
         return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
@@ -335,6 +331,9 @@ export async function createServer(config: ServerConfig): Promise<Server> {
 
   // Repository status and GC: /api/repos/:repo/status, /api/repos/:repo/gc
   app.route('/api/repos/:repo', createRepositoryRoutes(storage, getRepoPath));
+
+  // Package transfer routes (must be before general package routes)
+  app.route('/api/repos/:repo/packages/transfer', createPackageTransferRoutes(storage, getRepoPath));
 
   // Package routes: /api/repos/:repo/packages/*
   app.route('/api/repos/:repo/packages', createPackageRoutes(storage, getRepoPath));

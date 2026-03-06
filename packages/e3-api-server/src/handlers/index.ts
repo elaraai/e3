@@ -8,8 +8,6 @@ export { getStatus, startGc, getGcStatus } from './repository.js';
 export {
   listPackages,
   getPackage,
-  importPackage,
-  exportPackage,
   deletePackage,
 } from './packages.js';
 
