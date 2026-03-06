@@ -4,7 +4,7 @@
  */
 
 import { Hono } from 'hono';
-import { mkdir, writeFile, readFile, unlink, stat } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { NullType, variant } from '@elaraai/east';

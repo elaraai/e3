@@ -11,6 +11,7 @@
  * flows are tested via integration tests against the actual server.
  */
 
+/* eslint-disable @typescript-eslint/require-await */
 import { randomUUID } from 'node:crypto';
 import { variant } from '@elaraai/east';
 
@@ -44,11 +45,11 @@ class InMemoryDatasetUploadStore implements DatasetUploadStore {
     this.records.delete(id);
   }
 
-  async getUploadUrl(id: string, repo: string, hash: string): Promise<string> {
+  async getUploadUrl(id: string, _repo: string, _hash: string): Promise<string> {
     return `${this.baseUrl}/api/uploads/${id}`;
   }
 
-  async commitObject(repo: string, hash: string, uploadId: string): Promise<void> {
+  async commitObject(_repo: string, _hash: string, uploadId: string): Promise<void> {
     // Mock — just remove the record. Real verification happens in integration tests.
     this.records.delete(uploadId);
   }
@@ -113,11 +114,11 @@ class InMemoryPackageImportStore implements PackageImportStore {
     this.records.delete(id);
   }
 
-  async getUploadUrl(id: string, repo: string): Promise<string> {
+  async getUploadUrl(id: string, _repo: string): Promise<string> {
     return `${this.baseUrl}/api/uploads/${id}`;
   }
 
-  async execute(id: string, repo: string): Promise<void> {
+  async execute(id: string, _repo: string): Promise<void> {
     const record = this.records.get(id);
     if (!record) throw new Error(`Package import ${id} not found`);
 
@@ -161,11 +162,11 @@ class InMemoryPackageExportStore implements PackageExportStore {
     this.records.delete(id);
   }
 
-  async getDownloadUrl(id: string, repo: string): Promise<string> {
+  async getDownloadUrl(id: string, _repo: string): Promise<string> {
     return `${this.baseUrl}/api/downloads/${id}`;
   }
 
-  async execute(id: string, repo: string): Promise<void> {
+  async execute(id: string, _repo: string): Promise<void> {
     const record = this.records.get(id);
     if (!record) throw new Error(`Package export ${id} not found`);
 
