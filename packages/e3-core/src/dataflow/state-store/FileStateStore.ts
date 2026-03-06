@@ -132,6 +132,18 @@ export class FileStateStore implements ExecutionStateStore {
 
   async update(state: DataflowExecutionState): Promise<void> {
     const path = this.statePath(state.workspace);
+    // Guard: never overwrite 'cancelled' with a non-cancelled status
+    if (state.status !== 'cancelled') {
+      try {
+        const existing = await fs.readFile(path);
+        const current = decode(existing);
+        if (current.status === 'cancelled') {
+          return;
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+    }
     const data = encode(state);
     await this.atomicWrite(path, data);
   }

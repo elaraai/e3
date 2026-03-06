@@ -106,6 +106,14 @@ export class InMemoryStateStore implements ExecutionStateStore {
       throw new Error(`Execution ${state.id} not found in ${key}`);
     }
 
+    // Guard: never overwrite 'cancelled' with a non-cancelled status
+    if (state.status !== 'cancelled') {
+      const current = wsStates.get(state.id)!;
+      if (current.status === 'cancelled') {
+        return;
+      }
+    }
+
     wsStates.set(state.id, this.cloneState(state));
   }
 
