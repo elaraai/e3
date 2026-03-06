@@ -7,8 +7,8 @@ import * as path from 'node:path';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve, type ServerType } from '@hono/node-server';
-import { LocalStorage, RepoAlreadyExistsError, RepoNotFoundError } from '@elaraai/e3-core';
-import type { StorageBackend } from '@elaraai/e3-core';
+import { LocalStorage, RepoAlreadyExistsError, RepoNotFoundError, InMemoryTransferBackend } from '@elaraai/e3-core';
+import type { StorageBackend, TransferBackend } from '@elaraai/e3-core';
 import { createAuthMiddleware, type AuthConfig } from './middleware/auth.js';
 import { createOidcProvider, type OidcProvider, type OidcConfig } from './auth/index.js';
 import { sendError, sendSuccessWithStatus, sendSuccess } from './beast2.js';
@@ -20,6 +20,10 @@ import { createDatasetRoutes } from './routes/datasets.js';
 import { createTaskRoutes } from './routes/tasks.js';
 import { createExecutionRoutes } from './routes/executions.js';
 import { createRepositoryRoutes } from './routes/repository.js';
+import { createObjectRoutes } from './routes/objects.js';
+import { createTransferRoutes } from './routes/transfer.js';
+import { createPackageTransferRoutes } from './routes/package-transfer.js';
+import { createDataEndpoints } from './routes/data.js';
 
 export type { AuthConfig } from './middleware/auth.js';
 export type { OidcConfig } from './auth/index.js';
@@ -124,6 +128,18 @@ export async function createServer(config: ServerConfig): Promise<Server> {
     app.route('/', oidcProvider.routes);
   }
 
+  // Transfer backend for presigned URL object transfer
+  const transferBackend: TransferBackend = new InMemoryTransferBackend({ baseUrl: '' });
+
+  // Data routes (no auth — capability-URL pattern via UUID)
+  // Must be mounted BEFORE auth middleware so they bypass JWT validation.
+  // In cloud deployments these URLs are S3 presigned URLs that reject auth headers.
+  const pkgTransfer = createPackageTransferRoutes(storage, getRepoPath, transferBackend);
+  const dsTransfer = createTransferRoutes(storage, getRepoPath, transferBackend);
+  const dataEndpoints = createDataEndpoints(transferBackend, storage, getRepoPath);
+  app.route('/api/uploads', dataEndpoints.uploads);
+  app.route('/api/downloads', dataEndpoints.downloads);
+
   // Apply auth middleware to all repo-specific routes if configured
   // If OIDC is enabled but auth is not separately configured, use OIDC keys for validation
   if (auth) {
@@ -143,33 +159,30 @@ export async function createServer(config: ServerConfig): Promise<Server> {
 
   // Single-repo mode: validate repo name and handle disabled operations
   // Runs AFTER auth middleware (so unauthorized users get 401, not 404/405)
+  // Uses JSON error responses with HTTP error status codes because middleware
+  // cannot know the BEAST2 success type expected by the handler.
   if (isSingleRepoMode) {
-    app.use('/api/repos/:repo/*', async (c, next) => {
-      const method = c.req.method;
+    // Block repo-level PUT (create) and DELETE (remove) in single-repo mode
+    app.put('/api/repos/:repo', (c) => {
+      return c.json({
+        error: 'method_not_allowed',
+        message: 'Repository creation is disabled in single-repo mode'
+      }, 405);
+    });
 
-      // PUT (create repo) is always disabled in single-repo mode
-      if (method === 'PUT') {
+    app.delete('/api/repos/:repo', (c) => {
+      const repo = c.req.param('repo');
+      if (repo === 'default') {
         return c.json({
           error: 'method_not_allowed',
-          message: 'Repository creation is disabled in single-repo mode'
+          message: 'Repository deletion is disabled in single-repo mode'
         }, 405);
       }
+      return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
+    });
 
-      // For DELETE (remove repo), check if it's the 'default' repo
-      if (method === 'DELETE') {
-        // DELETE on 'default' → 405 (deletion disabled)
-        // DELETE on other repos → 404 (repo doesn't exist)
-        const repo = c.req.param('repo');
-        if (repo === 'default') {
-          return c.json({
-            error: 'method_not_allowed',
-            message: 'Repository deletion is disabled in single-repo mode'
-          }, 405);
-        }
-        return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
-      }
-
-      // For other methods (GET, POST, etc.), validate repo name
+    // Validate repo name for all sub-routes
+    app.use('/api/repos/:repo/*', async (c, next) => {
       const repo = c.req.param('repo');
       if (repo !== 'default') {
         return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
@@ -182,6 +195,8 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   // In single-repo mode, this is handled by the middleware above
   // Skip validation for PUT/DELETE on /api/repos/:repo (repo create/remove)
   // Skip validation for /api/repos/:repo/delete/* (repo deletion status - repo may already be deleted)
+  // Uses JSON error responses with HTTP 404 because middleware cannot know
+  // the BEAST2 success type expected by the handler.
   if (!isSingleRepoMode) {
     app.use('/api/repos/:repo/*', async (c, next) => {
       // Skip validation for repo create/remove operations at the repo level
@@ -207,14 +222,14 @@ export async function createServer(config: ServerConfig): Promise<Server> {
       // Check repo metadata for status
       const metadata = await storage.repos.getMetadata(repo);
       if (!metadata) {
-        return sendError(NullType, variant('repository_not_found', { repo }));
+        return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
       }
 
       // If repo is in 'deleting' state, treat as not found for most operations
       // Exception: status endpoint shows 'deleting' state (but we still check repo exists above)
       const statusMatch = reqPath.match(/^\/api\/repos\/[^/]+\/status$/);
       if (metadata.status === 'deleting' && !statusMatch) {
-        return sendError(NullType, variant('repository_not_found', { repo }));
+        return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
       }
 
       // Also validate the repo structure (for backwards compat with repos without metadata)
@@ -223,7 +238,7 @@ export async function createServer(config: ServerConfig): Promise<Server> {
         await storage.validateRepository(repoPath);
       } catch (err) {
         if (err instanceof RepoNotFoundError) {
-          return sendError(NullType, variant('repository_not_found', { repo }));
+          return c.json({ error: 'not_found', message: `Repository '${repo}' not found` }, 404);
         }
         throw err;
       }
@@ -330,20 +345,30 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   // Repository status and GC: /api/repos/:repo/status, /api/repos/:repo/gc
   app.route('/api/repos/:repo', createRepositoryRoutes(storage, getRepoPath));
 
+  // Package transfer routes: repo-level import/export + package-level export trigger
+  app.route('/api/repos/:repo', pkgTransfer.repoApi);
+  app.route('/api/repos/:repo/packages', pkgTransfer.pkgApi);
+
   // Package routes: /api/repos/:repo/packages/*
   app.route('/api/repos/:repo/packages', createPackageRoutes(storage, getRepoPath));
 
   // Workspace routes: /api/repos/:repo/workspaces/*
   app.route('/api/repos/:repo/workspaces', createWorkspaceRoutes(storage, getRepoPath));
 
+  // Dataset transfer auth routes (init + commit) mount alongside dataset routes
+  app.route('/api/repos/:repo/workspaces/:ws/datasets', dsTransfer.api);
+
   // Dataset routes: /api/repos/:repo/workspaces/:ws/datasets/*
-  app.route('/api/repos/:repo/workspaces/:ws/datasets', createDatasetRoutes(storage, getRepoPath));
+  app.route('/api/repos/:repo/workspaces/:ws/datasets', createDatasetRoutes(storage, getRepoPath, transferBackend));
 
   // Task routes: /api/repos/:repo/workspaces/:ws/tasks/*
   app.route('/api/repos/:repo/workspaces/:ws/tasks', createTaskRoutes(storage, getRepoPath));
 
   // Execution/Dataflow routes: /api/repos/:repo/workspaces/:ws/dataflow/*
   app.route('/api/repos/:repo/workspaces/:ws/dataflow', createExecutionRoutes(storage, getRepoPath));
+
+  // Object routes: /api/repos/:repo/objects/:hash
+  app.route('/api/repos/:repo/objects', createObjectRoutes(storage, getRepoPath));
 
   let httpServer: ServerType | null = null;
   let actualPort = port;

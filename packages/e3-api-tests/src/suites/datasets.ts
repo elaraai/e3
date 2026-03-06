@@ -91,7 +91,7 @@ export function datasetTests(setup: TestSetup<TestContext>): void {
       await datasetSet(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', path, data, opts);
 
       // Get and decode
-      const retrieved = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', path, opts);
+      const { data: retrieved } = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', path, opts);
       assert.ok(retrieved instanceof Uint8Array);
 
       const decoded = decode(retrieved);
@@ -117,7 +117,7 @@ export function datasetTests(setup: TestSetup<TestContext>): void {
       await datasetSet(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', path, encode('second'), opts);
 
       // Verify new value
-      const retrieved = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', path, opts);
+      const { data: retrieved } = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'dataset-ws', path, opts);
       const decoded = decode(retrieved);
       assert.strictEqual(decoded, 'second');
     });
@@ -352,7 +352,7 @@ export function datasetTests(setup: TestSetup<TestContext>): void {
         await datasetSet(ctx.config.baseUrl, ctx.repoName, 'writable3-ws', inputPath, encode(42n), opts);
 
         // Verify the value was written
-        const retrieved = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'writable3-ws', inputPath, opts);
+        const { data: retrieved } = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'writable3-ws', inputPath, opts);
         assert.strictEqual(decode(retrieved), 42n);
       });
     });
@@ -381,7 +381,7 @@ export function datasetTests(setup: TestSetup<TestContext>): void {
           variant('field', 'output'),
         ];
 
-        const output1 = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'prop-ws', outputPath, opts);
+        const { data: output1 } = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'prop-ws', outputPath, opts);
         assert.strictEqual(decode(output1), 20n);
 
         // Change input to 42n and re-execute
@@ -397,7 +397,7 @@ export function datasetTests(setup: TestSetup<TestContext>): void {
         assert.ok(result2.executed > 0n, 'task should re-execute with changed input');
 
         // Output should now be 84n
-        const output2 = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'prop-ws', outputPath, opts);
+        const { data: output2 } = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'prop-ws', outputPath, opts);
         assert.strictEqual(decode(output2), 84n);
       });
     });

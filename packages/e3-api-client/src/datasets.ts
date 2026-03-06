@@ -3,10 +3,22 @@
  * Licensed under BSL 1.1. See LICENSE for details.
  */
 
-import { ArrayType, NullType, StringType, decodeBeast2For } from '@elaraai/east';
+import { ArrayType, NullType, StringType, decodeBeast2For, encodeBeast2For } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
-import { ApiError, AuthError, get, type RequestOptions, type Response } from './http.js';
-import { ResponseType, DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from './types.js';
+import { BEAST2_CONTENT_TYPE, computeHash } from '@elaraai/e3-core';
+import { ApiError, fetchWithAuth, get, type RequestOptions, type Response } from './http.js';
+import {
+  ResponseType,
+  DatasetStatusDetailType,
+  ListEntryType,
+  TransferUploadRequestType,
+  TransferUploadResponseType,
+  TransferDoneResponseType,
+  type ListEntry,
+  type DatasetStatusDetail,
+  type TransferUploadResponse,
+  type TransferDoneResponse,
+} from './types.js';
 
 function datasetEndpoint(repo: string, workspace: string, path: TreePath): string {
   let endpoint = `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets`;
@@ -84,21 +96,36 @@ export async function datasetGet(
   workspace: string,
   path: TreePath,
   options: RequestOptions
-): Promise<Uint8Array> {
+): Promise<{ data: Uint8Array; hash: string; size: number }> {
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${url}/api/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}`,
     {
       method: 'GET',
-      headers: {
-        'Accept': 'application/beast2',
-        'Authorization': `Bearer ${options.token}`,
-      },
-    }
+      headers: { 'Accept': BEAST2_CONTENT_TYPE },
+      redirect: 'manual',
+    },
+    options
   );
 
-  if (response.status === 401) {
-    throw new Error(`Authentication failed: ${await response.text()}`);
+  // Handle 307 redirect — follow WITHOUT auth headers (target is a no-auth data endpoint)
+  if (response.status === 307) {
+    const location = response.headers.get('Location');
+    if (!location) throw new Error('307 redirect missing Location header');
+    // Resolve relative URLs against the request origin
+    const redirectUrl = location.startsWith('/') ? `${url}${location}` : location;
+    const redirectResponse = await fetch(redirectUrl, {
+      method: 'GET',
+      headers: { 'Accept': BEAST2_CONTENT_TYPE },
+    });
+    if (!redirectResponse.ok) {
+      throw new Error(`Failed to get dataset (redirect): ${redirectResponse.status} ${redirectResponse.statusText}`);
+    }
+    const buffer = await redirectResponse.arrayBuffer();
+    const data = new Uint8Array(buffer);
+    const hash = redirectResponse.headers.get('X-Content-SHA256') ?? response.headers.get('X-Content-SHA256') ?? '';
+    const size = parseInt(redirectResponse.headers.get('Content-Length') ?? response.headers.get('X-Content-Length') ?? '0', 10);
+    return { data, hash, size };
   }
 
   if (!response.ok) {
@@ -106,11 +133,19 @@ export async function datasetGet(
   }
 
   const buffer = await response.arrayBuffer();
-  return new Uint8Array(buffer);
+  const data = new Uint8Array(buffer);
+  const hash = response.headers.get('X-Content-SHA256') ?? '';
+  const size = parseInt(response.headers.get('Content-Length') ?? '0', 10);
+  return { data, hash, size };
 }
+
+const SIZE_THRESHOLD = 1 * 1024 * 1024; // 1 MB
 
 /**
  * Set a dataset value from raw BEAST2 bytes.
+ *
+ * For payloads > 1MB, uses a transfer flow (init → upload → complete) to
+ * avoid inline body size limits. For smaller payloads, uses inline PUT.
  *
  * @param url - Base URL of the e3 API server
  * @param repo - Repository name
@@ -127,22 +162,23 @@ export async function datasetSet(
   data: Uint8Array,
   options: RequestOptions
 ): Promise<void> {
+  if (data.byteLength > SIZE_THRESHOLD) {
+    return datasetSetTransfer(url, repo, workspace, path, data, options);
+  }
+
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${url}/api/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/datasets/${pathStr}`,
     {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/beast2',
-        'Authorization': `Bearer ${options.token}`,
+        'Content-Type': BEAST2_CONTENT_TYPE,
+        'Accept': BEAST2_CONTENT_TYPE,
       },
       body: data,
-    }
+    },
+    options
   );
-
-  if (response.status === 401) {
-    throw new AuthError(await response.text());
-  }
 
   if (!response.ok) {
     throw new Error(`Failed to set dataset: ${response.status} ${response.statusText}`);
@@ -155,6 +191,87 @@ export async function datasetSet(
 
   if (result.type === 'error') {
     throw new ApiError(result.value.type, result.value.value);
+  }
+}
+
+/**
+ * Set a large dataset using the transfer flow (init → upload → complete).
+ */
+async function datasetSetTransfer(
+  url: string,
+  repo: string,
+  workspace: string,
+  path: TreePath,
+  data: Uint8Array,
+  options: RequestOptions
+): Promise<void> {
+  const hash = computeHash(data);
+  const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
+  const repoEncoded = encodeURIComponent(repo);
+  const wsEncoded = encodeURIComponent(workspace);
+
+  // 1. Init transfer (BEAST2 request/response)
+  const encodeInit = encodeBeast2For(TransferUploadRequestType);
+  const initRes = await fetchWithAuth(
+    `${url}/api/repos/${repoEncoded}/workspaces/${wsEncoded}/datasets/${pathStr}/upload`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Accept': BEAST2_CONTENT_TYPE,
+    },
+    body: encodeInit({ hash, size: BigInt(data.byteLength) }),
+  }, options);
+
+  if (!initRes.ok) {
+    throw new Error(`Transfer init failed: ${initRes.status} ${initRes.statusText}`);
+  }
+
+  const initBuffer = new Uint8Array(await initRes.arrayBuffer());
+  const decodeInit = decodeBeast2For(ResponseType(TransferUploadResponseType));
+  const initResult = decodeInit(initBuffer) as Response<TransferUploadResponse>;
+  if (initResult.type === 'error') {
+    throw new ApiError(initResult.value.type, initResult.value.value);
+  }
+
+  const init = initResult.value;
+
+  // Dedup — object already exists, ref updated
+  if (init.type === 'completed') return;
+
+  // 2. Upload to staging (no auth — URL may be a presigned S3 URL)
+  const uploadRes = await fetch(init.value.uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Accept': BEAST2_CONTENT_TYPE,
+    },
+    body: data,
+  });
+
+  if (!uploadRes.ok) {
+    throw new Error(`Transfer upload failed: ${uploadRes.status} ${uploadRes.statusText}`);
+  }
+
+  // 3. Commit — server verifies hash + updates ref (BEAST2 response)
+  const commitRes = await fetchWithAuth(
+    `${url}/api/repos/${repoEncoded}/workspaces/${wsEncoded}/datasets/${pathStr}/upload/${init.value.id}`, {
+    method: 'POST',
+    headers: { 'Accept': BEAST2_CONTENT_TYPE },
+  }, options);
+
+  if (!commitRes.ok) {
+    throw new Error(`Transfer commit failed: ${commitRes.status} ${commitRes.statusText}`);
+  }
+
+  const commitBuffer = new Uint8Array(await commitRes.arrayBuffer());
+  const decodeDone = decodeBeast2For(ResponseType(TransferDoneResponseType));
+  const commitResult = decodeDone(commitBuffer) as Response<TransferDoneResponse>;
+  if (commitResult.type === 'error') {
+    throw new ApiError(commitResult.value.type, commitResult.value.value);
+  }
+
+  if (commitResult.value.type === 'error') {
+    throw new Error(`Transfer failed: ${commitResult.value.value.message}`);
   }
 }
 

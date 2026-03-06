@@ -14,6 +14,9 @@ import { join } from 'node:path';
 import yauzl from 'yauzl';
 import { repoInit } from './storage/local/repository.js';
 
+// Re-export InMemoryStorage for test consumers
+export { InMemoryStorage } from './storage/in-memory/InMemoryStorage.js';
+
 /**
  * Creates a temporary directory for testing
  * @returns Path to temporary directory

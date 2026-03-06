@@ -19,6 +19,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { tmpdir } from 'os';
 import { decodeBeast2 } from '@elaraai/east';
 import type { RepoStore, GcObjectEntry, GcRootScanResult, StorageBackend } from '../interfaces.js';
 
@@ -356,6 +357,15 @@ export async function repoGc(
     // Not a fatal error
   }
 
+  // Step 5: Clean up orphaned transfer staging files
+  try {
+    const transferResult = await cleanupTransferStaging(minAge, dryRun);
+    deletedPartials += transferResult.deleted;
+    partialSkippedYoung += transferResult.skippedYoung;
+  } catch {
+    // Not a fatal error
+  }
+
   return {
     deletedObjects: totalDeleted,
     deletedPartials,
@@ -413,6 +423,47 @@ async function cleanupPartials(
     }
   } catch {
     // Objects directory doesn't exist
+  }
+
+  return { deleted, skippedYoung };
+}
+
+/**
+ * Clean up orphaned transfer staging files from the OS temp directory.
+ * These are created by the transfer upload flow and should be cleaned up
+ * after the transfer completes, but may be left behind on crashes.
+ */
+async function cleanupTransferStaging(
+  minAge: number,
+  dryRun: boolean
+): Promise<{ deleted: number; skippedYoung: number }> {
+  const stagingDir = path.join(tmpdir(), 'e3-transfers');
+  const now = Date.now();
+  let deleted = 0;
+  let skippedYoung = 0;
+
+  try {
+    const files = await fs.readdir(stagingDir);
+    for (const file of files) {
+      if (!file.endsWith('.partial')) continue;
+      const filePath = path.join(stagingDir, file);
+      try {
+        const fileStat = await fs.stat(filePath);
+        const age = now - fileStat.mtimeMs;
+        if (minAge > 0 && age < minAge) {
+          skippedYoung++;
+          continue;
+        }
+        if (!dryRun) {
+          await fs.unlink(filePath);
+        }
+        deleted++;
+      } catch {
+        // Skip files we can't stat or delete
+      }
+    }
+  } catch {
+    // Staging directory doesn't exist — nothing to clean
   }
 
   return { deleted, skippedYoung };

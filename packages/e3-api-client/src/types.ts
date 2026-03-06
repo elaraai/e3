@@ -737,6 +737,25 @@ export const DatasetStatusDetailType = StructType({
 });
 
 // =============================================================================
+// Transfer Types (re-exported from e3-types)
+// =============================================================================
+
+import {
+  TransferUploadRequestType,
+  TransferUploadResponseType,
+  TransferDoneResponseType,
+  PackageImportStatusType,
+  PackageExportStatusType,
+} from '@elaraai/e3-types';
+export {
+  TransferUploadRequestType,
+  TransferUploadResponseType,
+  TransferDoneResponseType,
+  PackageImportStatusType,
+  PackageExportStatusType,
+};
+
+// =============================================================================
 // Value type aliases
 // =============================================================================
 
@@ -777,6 +796,7 @@ export type ExecutionListItem = ValueTypeOf<typeof ExecutionListItemType>;
 export type TreeKind = ValueTypeOf<typeof TreeKindType>;
 export type ListEntry = ValueTypeOf<typeof ListEntryType>;
 export type DatasetStatusDetail = ValueTypeOf<typeof DatasetStatusDetailType>;
+export type { TransferUploadRequest, TransferUploadResponse, TransferDoneResponse, PackageImportStatus, PackageExportStatus } from '@elaraai/e3-types';
 
 // =============================================================================
 // Namespace export for convenience
@@ -868,4 +888,11 @@ export const ApiTypes = {
 
   // Dataset Status Detail (single dataset)
   DatasetStatusDetailType,
+
+  // Transfer
+  TransferUploadRequestType,
+  TransferUploadResponseType,
+  TransferDoneResponseType,
+  PackageImportStatusType,
+  PackageExportStatusType,
 } as const;

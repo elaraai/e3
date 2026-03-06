@@ -60,7 +60,7 @@ export async function getCommand(
       value = dataset.value;
     } else {
       // Remote: get raw BEAST2 bytes and decode
-      const beast2Data = await datasetGetRemote(
+      const { data: beast2Data } = await datasetGetRemote(
         location.baseUrl,
         location.repo,
         ws,

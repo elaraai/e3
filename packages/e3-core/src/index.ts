@@ -48,7 +48,7 @@ export {
 } from './storage/local/gc.js';
 
 // Object storage
-export { computeHash } from './objects.js';
+export { computeHash, BEAST2_CONTENT_TYPE } from './objects.js';
 
 // Local object storage functions (for backwards compatibility)
 export {
@@ -312,3 +312,6 @@ export {
   isExistsError,
   wrapError,
 } from './errors.js';
+
+// Transfer backend
+export * from './transfer/index.js';

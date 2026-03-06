@@ -5,6 +5,7 @@
 
 import { encodeBeast2For, decodeBeast2For } from '@elaraai/east';
 import type { EastType, ValueTypeOf } from '@elaraai/east';
+import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-core';
 import { ResponseType, ErrorType } from './types.js';
 
 /**
@@ -53,6 +54,28 @@ export class AuthError extends Error {
     super(`Authentication failed: ${message}`);
     this.name = 'AuthError';
   }
+}
+
+/**
+ * Fetch with consistent auth header injection and 401 → AuthError handling.
+ *
+ * Use this for multi-step transfer flows where raw `fetch` is needed
+ * (e.g. upload/download to presigned URLs, polling endpoints).
+ */
+export async function fetchWithAuth(
+  input: string,
+  init: RequestInit,
+  options: RequestOptions
+): Promise<globalThis.Response> {
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+  if (options.token) {
+    headers['Authorization'] = `Bearer ${options.token}`;
+  }
+  const response = await fetch(input, { ...init, headers });
+  if (response.status === 401) {
+    throw new AuthError(await response.text());
+  }
+  return response;
 }
 
 /**
@@ -114,7 +137,7 @@ export async function get<T extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'GET',
     headers: {
-      'Accept': 'application/beast2',
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
   });
@@ -139,8 +162,8 @@ export async function post<Req extends EastType, Res extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/beast2',
-      'Accept': 'application/beast2',
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
     body: encode(body),
@@ -166,8 +189,8 @@ export async function put<Req extends EastType, Res extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/beast2',
-      'Accept': 'application/beast2',
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
     body: encode(body),
@@ -190,7 +213,7 @@ export async function del<T extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'DELETE',
     headers: {
-      'Accept': 'application/beast2',
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
   });
@@ -212,7 +235,7 @@ export async function putEmpty<T extends EastType>(
   const response = await fetch(`${url}/api${path}`, {
     method: 'PUT',
     headers: {
-      'Accept': 'application/beast2',
+      'Accept': BEAST2_CONTENT_TYPE,
       ...(options.token ? { 'Authorization': `Bearer ${options.token}` } : {}),
     },
   });

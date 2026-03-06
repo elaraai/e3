@@ -5,6 +5,7 @@
 
 import { encodeBeast2For, decodeBeast2For, variant } from '@elaraai/east';
 import type { EastType, ValueTypeOf } from '@elaraai/east';
+import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-core';
 import type { Context } from 'hono';
 import { ResponseType, type Error } from './types.js';
 
@@ -16,8 +17,8 @@ export async function decodeBody<T extends EastType>(
   type: T
 ): Promise<ValueTypeOf<T>> {
   const contentType = c.req.header('content-type');
-  if (contentType !== 'application/beast2') {
-    throw new Error(`Expected Content-Type: application/beast2, got ${contentType}`);
+  if (contentType !== BEAST2_CONTENT_TYPE) {
+    throw new Error(`Expected Content-Type: ${BEAST2_CONTENT_TYPE}, got ${contentType}`);
   }
 
   // TODO should we use use streaming decoder here?
@@ -53,7 +54,8 @@ export function sendSuccess<T extends EastType>(
   return new Response(body, {
     status: 200,
     headers: {
-      'Content-Type': 'application/beast2',
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Content-Length': String(body.byteLength),
     },
   });
 }
@@ -74,7 +76,8 @@ export function sendError<T extends EastType>(
   return new Response(body, {
     status: 200,
     headers: {
-      'Content-Type': 'application/beast2',
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Content-Length': String(body.byteLength),
     },
   });
 }
@@ -94,7 +97,8 @@ export function sendSuccessWithStatus<T extends EastType>(
   return new Response(body, {
     status,
     headers: {
-      'Content-Type': 'application/beast2',
+      'Content-Type': BEAST2_CONTENT_TYPE,
+      'Content-Length': String(body.byteLength),
     },
   });
 }

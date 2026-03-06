@@ -15,7 +15,7 @@
  * - **Task**: A computation with input/output paths (stored separately)
  */
 
-import { StructType, StringType, DictType, ValueTypeOf } from '@elaraai/east';
+import { StructType, StringType, IntegerType, VariantType, NullType, DictType, ValueTypeOf } from '@elaraai/east';
 import { DatasetRefType } from './dataset-ref.js';
 import { StructureType } from './structure.js';
 
@@ -81,3 +81,55 @@ export const PackageObjectType = StructType({
 export type PackageObjectType = typeof PackageObjectType;
 
 export type PackageObject = ValueTypeOf<typeof PackageObjectType>;
+
+// =============================================================================
+// Package Transfer Types
+// =============================================================================
+
+export const PackageTransferInitRequestType = StructType({
+  size: IntegerType,
+});
+export type PackageTransferInitRequest = ValueTypeOf<typeof PackageTransferInitRequestType>;
+
+export const PackageTransferInitResponseType = StructType({
+  id: StringType,
+  uploadUrl: StringType,
+});
+export type PackageTransferInitResponse = ValueTypeOf<typeof PackageTransferInitResponseType>;
+
+export const PackageJobResponseType = StructType({
+  id: StringType,
+});
+export type PackageJobResponse = ValueTypeOf<typeof PackageJobResponseType>;
+
+export const PackageImportResultType = StructType({
+  name: StringType,
+  version: StringType,
+  packageHash: StringType,
+  objectCount: IntegerType,
+});
+export type PackageImportResult = ValueTypeOf<typeof PackageImportResultType>;
+
+export const PackageExportResultType = StructType({
+  downloadUrl: StringType,
+  size: IntegerType,
+});
+export type PackageExportResult = ValueTypeOf<typeof PackageExportResultType>;
+
+export const PackageImportStatusType = VariantType({
+  processing: NullType,
+  completed: PackageImportResultType,
+  failed: StructType({
+    message: StringType,
+  }),
+});
+export type PackageImportStatus = ValueTypeOf<typeof PackageImportStatusType>;
+
+export const PackageExportStatusType = VariantType({
+  processing: NullType,
+  completed: PackageExportResultType,
+  failed: StructType({
+    message: StringType,
+  }),
+});
+export type PackageExportStatus = ValueTypeOf<typeof PackageExportStatusType>;
