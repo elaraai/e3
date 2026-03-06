@@ -4,196 +4,210 @@
  */
 
 import { Hono } from 'hono';
-import { mkdir, writeFile, readFile, unlink, stat } from 'node:fs/promises';
+import { mkdir, unlink, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { NullType, variant } from '@elaraai/east';
+import { variant } from '@elaraai/east';
 import {
   packageImport,
   packageExport,
+  PackageNotFoundError,
 } from '@elaraai/e3-core';
-import type { StorageBackend } from '@elaraai/e3-core';
+import type { StorageBackend, TransferBackend } from '@elaraai/e3-core';
 import {
   PackageTransferInitRequestType,
   PackageTransferInitResponseType,
-  PackageExportRequestType,
   PackageJobResponseType,
-  PackageJobStatusType,
+  PackageImportStatusType,
+  PackageExportStatusType,
 } from '@elaraai/e3-types';
 import { decodeBody, sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
 
-interface PackageTransferRecord {
-  repoPath: string;
-  size: bigint;
-  stagingPath: string;
-}
+const STAGING_DIR = join(tmpdir(), 'e3-transfers');
 
-interface PackageJobRecord {
-  type: 'import' | 'export';
-  status: 'processing' | 'completed' | 'failed';
-  result?: any;
-  error?: string;
-}
-
+/**
+ * Create package transfer routes.
+ *
+ * Returns two Hono apps:
+ * - `repoApi`: Authenticated routes at repo level — mount at /api/repos/:repo
+ *   (POST /import, POST /import/:id, GET /import/:id, GET /export/:id)
+ * - `pkgApi`: Authenticated routes at package level — mount at /api/repos/:repo/packages
+ *   (POST /:name/:version/export)
+ *
+ * Unauthenticated data routes (upload/download bytes) are handled by the
+ * generic data endpoints in `data.ts`.
+ */
 export function createPackageTransferRoutes(
   storage: StorageBackend,
-  getRepoPath: (repo: string) => string
+  getRepoPath: (repo: string) => string,
+  transferBackend: TransferBackend,
 ) {
-  const app = new Hono();
+  const repoApi = new Hono();
+  const pkgApi = new Hono();
 
-  const transfers = new Map<string, PackageTransferRecord>();
-  const jobs = new Map<string, PackageJobRecord>();
+  const MAX_PACKAGE_SIZE = 5n * 1024n * 1024n * 1024n; // 5 GB
 
-  // POST /api/repos/:repo/packages/transfer/upload — Init upload
-  app.post('/upload', async (c) => {
+  // =========================================================================
+  // Repo-level routes (mounted at /api/repos/:repo)
+  // =========================================================================
+
+  // POST /api/repos/:repo/import — Init import
+  repoApi.post('/import', async (c) => {
     const repo = c.req.param('repo')!;
-    const repoPath = getRepoPath(repo);
     const { size } = await decodeBody(c, PackageTransferInitRequestType);
 
-    const transferId = randomUUID();
-    const stagingDir = join(tmpdir(), 'e3-transfers');
-    await mkdir(stagingDir, { recursive: true });
-    const stagingPath = join(stagingDir, `${transferId}.zip.partial`);
-    transfers.set(transferId, { repoPath, size, stagingPath });
-
-    const origin = new URL(c.req.url).origin;
-    const uploadUrl = `${origin}/api/repos/${encodeURIComponent(repo)}/packages/transfer/${transferId}/data`;
-    return sendSuccess(PackageTransferInitResponseType, { transferId, uploadUrl });
-  });
-
-  // PUT /api/repos/:repo/packages/transfer/:id/data — Upload zip to staging
-  app.put('/:id/data', async (c) => {
-    const id = c.req.param('id')!;
-    const transfer = transfers.get(id);
-    if (!transfer) {
-      return sendError(NullType, variant('internal', { message: 'transfer not found' }));
-    }
-
-    const body = new Uint8Array(await c.req.arrayBuffer());
-    if (BigInt(body.byteLength) !== transfer.size) {
-      transfers.delete(id);
-      return sendError(NullType, variant('internal', {
-        message: `size mismatch: expected ${transfer.size}, got ${body.byteLength}`,
+    if (size <= 0n || size > MAX_PACKAGE_SIZE) {
+      return sendError(PackageTransferInitResponseType, variant('internal', {
+        message: `Invalid size: must be between 1 and ${MAX_PACKAGE_SIZE} bytes`,
       }));
     }
 
-    await writeFile(transfer.stagingPath, body);
-    return sendSuccess(NullType, null);
+    const transferId = randomUUID();
+    await transferBackend.packageImport.create(transferId, {
+      repo,
+      size,
+      status: variant('created', null),
+      createdAt: new Date(),
+    });
+
+    await mkdir(STAGING_DIR, { recursive: true });
+
+    const uploadUrl = await transferBackend.packageImport.getUploadUrl(transferId, repo);
+    // Resolve relative URL against the request origin
+    const origin = new URL(c.req.url).origin;
+    const resolvedUrl = uploadUrl.startsWith('/') ? `${origin}${uploadUrl}` : uploadUrl;
+    return sendSuccess(PackageTransferInitResponseType, { id: transferId, uploadUrl: resolvedUrl });
   });
 
-  // POST /api/repos/:repo/packages/transfer/:id/import — Trigger import
-  app.post('/:id/import', async (c) => {
+  // POST /api/repos/:repo/import/:id — Trigger import
+  repoApi.post('/import/:id', async (c) => {
     const id = c.req.param('id')!;
-    const transfer = transfers.get(id);
-    if (!transfer) {
+    const record = await transferBackend.packageImport.get(id);
+    if (!record) {
       return sendError(PackageJobResponseType, variant('internal', { message: 'transfer not found' }));
     }
 
-    const jobId = randomUUID();
+    const repoPath = getRepoPath(record.repo);
+    const stagingPath = join(STAGING_DIR, `${id}.zip.partial`);
 
     try {
-      const result = await packageImport(storage, transfer.repoPath, transfer.stagingPath);
-      jobs.set(jobId, {
-        type: 'import',
-        status: 'completed',
-        result: variant('import', {
-          name: result.name,
-          version: result.version,
-          packageHash: result.packageHash,
-          objectCount: BigInt(result.objectCount),
-        }),
-      });
+      const result = await packageImport(storage, repoPath, stagingPath);
+      await transferBackend.packageImport.updateStatus(id, variant('completed', {
+        name: result.name,
+        version: result.version,
+        packageHash: result.packageHash,
+        objectCount: BigInt(result.objectCount),
+      }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      jobs.set(jobId, { type: 'import', status: 'failed', error: message });
+      await transferBackend.packageImport.updateStatus(id, variant('failed', { message }));
     } finally {
-      await unlink(transfer.stagingPath).catch(() => {});
-      transfers.delete(id);
+      await unlink(stagingPath).catch(() => {});
     }
 
-    return sendSuccess(PackageJobResponseType, { jobId });
+    return sendSuccess(PackageJobResponseType, { id });
   });
 
-  // POST /api/repos/:repo/packages/transfer/export — Trigger export
-  app.post('/export', async (c) => {
+  // GET /api/repos/:repo/import/:id — Poll import status
+  repoApi.get('/import/:id', async (c) => {
+    const id = c.req.param('id')!;
+
+    const record = await transferBackend.packageImport.get(id);
+    if (!record) {
+      return sendError(PackageImportStatusType, variant('internal', { message: 'import job not found' }));
+    }
+
+    const { type, value } = record.status;
+    if (type === 'processing' || type === 'created' || type === 'uploaded') {
+      return sendSuccess(PackageImportStatusType, variant('processing', null));
+    }
+    if (type === 'failed') {
+      return sendSuccess(PackageImportStatusType, variant('failed', { message: (value as { message: string }).message }));
+    }
+    if (type === 'completed') {
+      return sendSuccess(PackageImportStatusType, variant('completed', value as {
+        name: string;
+        version: string;
+        packageHash: string;
+        objectCount: bigint;
+      }));
+    }
+
+    return sendError(PackageImportStatusType, variant('internal', { message: 'unknown status' }));
+  });
+
+  // GET /api/repos/:repo/export/:id — Poll export status
+  repoApi.get('/export/:id', async (c) => {
+    const id = c.req.param('id')!;
+
+    const record = await transferBackend.packageExport.get(id);
+    if (!record) {
+      return sendError(PackageExportStatusType, variant('internal', { message: 'export job not found' }));
+    }
+
+    const { type, value } = record.status;
+    if (type === 'processing') {
+      return sendSuccess(PackageExportStatusType, variant('processing', null));
+    }
+    if (type === 'failed') {
+      return sendSuccess(PackageExportStatusType, variant('failed', { message: (value as { message: string }).message }));
+    }
+    if (type === 'completed') {
+      const downloadUrl = await transferBackend.packageExport.getDownloadUrl(id, record.repo);
+      // Resolve relative URL against the request origin
+      const origin = new URL(c.req.url).origin;
+      const resolvedUrl = downloadUrl.startsWith('/') ? `${origin}${downloadUrl}` : downloadUrl;
+      return sendSuccess(PackageExportStatusType, variant('completed', {
+        downloadUrl: resolvedUrl,
+        size: (value as { size: bigint }).size,
+      }));
+    }
+
+    return sendError(PackageExportStatusType, variant('internal', { message: 'unknown status' }));
+  });
+
+  // =========================================================================
+  // Package-level routes (mounted at /api/repos/:repo/packages)
+  // =========================================================================
+
+  // POST /api/repos/:repo/packages/:name/:version/export — Trigger export
+  pkgApi.post('/:name/:version/export', async (c) => {
     const repo = c.req.param('repo')!;
     const repoPath = getRepoPath(repo);
-    const { name, version } = await decodeBody(c, PackageExportRequestType);
+    const name = c.req.param('name')!;
+    const version = c.req.param('version')!;
 
-    const jobId = randomUUID();
-    const stagingDir = join(tmpdir(), 'e3-transfers');
-    await mkdir(stagingDir, { recursive: true });
-    const downloadPath = join(stagingDir, `${jobId}.zip`);
+    const id = randomUUID();
+    await transferBackend.packageExport.create(id, {
+      repo,
+      name,
+      version,
+      status: variant('processing', null),
+      createdAt: new Date(),
+    });
+
+    await mkdir(STAGING_DIR, { recursive: true });
+    const zipPath = join(STAGING_DIR, `${id}.zip`);
 
     try {
-      await packageExport(storage, repoPath, name, version, downloadPath);
-      const fileStat = await stat(downloadPath);
-
-      const origin = new URL(c.req.url).origin;
-      const downloadUrl = `${origin}/api/repos/${encodeURIComponent(repo)}/packages/transfer/download/${jobId}`;
-
-      jobs.set(jobId, {
-        type: 'export',
-        status: 'completed',
-        result: variant('export', {
-          downloadUrl,
-          size: BigInt(fileStat.size),
-        }),
-      });
+      await packageExport(storage, repoPath, name, version, zipPath);
+      const fileStat = await stat(zipPath);
+      await transferBackend.packageExport.updateStatus(id, variant('completed', {
+        size: BigInt(fileStat.size),
+      }));
     } catch (err) {
-      await unlink(downloadPath).catch(() => {});
-      if (err instanceof Error && err.message.includes('not found')) {
+      await unlink(zipPath).catch(() => {});
+      if (err instanceof PackageNotFoundError) {
         return sendError(PackageJobResponseType, errorToVariant(err));
       }
       const message = err instanceof Error ? err.message : String(err);
-      jobs.set(jobId, { type: 'export', status: 'failed', error: message });
+      await transferBackend.packageExport.updateStatus(id, variant('failed', { message }));
     }
 
-    return sendSuccess(PackageJobResponseType, { jobId });
+    return sendSuccess(PackageJobResponseType, { id });
   });
 
-  // GET /api/repos/:repo/packages/transfer/jobs/:jobId — Poll job status
-  app.get('/jobs/:jobId', (c) => {
-    const jobId = c.req.param('jobId')!;
-    const job = jobs.get(jobId);
-    if (!job) {
-      return sendError(PackageJobStatusType, variant('internal', { message: 'job not found' }));
-    }
-
-    if (job.status === 'processing') {
-      return sendSuccess(PackageJobStatusType, variant('processing', null));
-    }
-
-    if (job.status === 'failed') {
-      return sendSuccess(PackageJobStatusType, variant('failed', { message: job.error! }));
-    }
-
-    return sendSuccess(PackageJobStatusType, variant('completed', job.result));
-  });
-
-  // GET /api/repos/:repo/packages/transfer/download/:jobId — Download export zip
-  app.get('/download/:jobId', async (c) => {
-    const jobId = c.req.param('jobId')!;
-    const stagingPath = join(tmpdir(), 'e3-transfers', `${jobId}.zip`);
-
-    try {
-      const data = await readFile(stagingPath);
-      await unlink(stagingPath).catch(() => {});
-      jobs.delete(jobId);
-
-      return new Response(data, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/zip',
-          'Content-Length': String(data.byteLength),
-        },
-      });
-    } catch {
-      return new Response('Not found', { status: 404 });
-    }
-  });
-
-  return app;
+  return { repoApi, pkgApi };
 }

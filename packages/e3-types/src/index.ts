@@ -81,16 +81,16 @@ export {
   type PackageTransferInitRequest,
   PackageTransferInitResponseType,
   type PackageTransferInitResponse,
-  PackageExportRequestType,
-  type PackageExportRequest,
   PackageJobResponseType,
   type PackageJobResponse,
   PackageImportResultType,
   type PackageImportResult,
   PackageExportResultType,
   type PackageExportResult,
-  PackageJobStatusType,
-  type PackageJobStatus,
+  PackageImportStatusType,
+  type PackageImportStatus,
+  PackageExportStatusType,
+  type PackageExportStatus,
 } from './package.js';
 
 // Workspace state
@@ -114,6 +114,16 @@ export {
   LockStateType,
   type LockState,
 } from './lock.js';
+
+// Dataset transfer types
+export {
+  TransferUploadRequestType,
+  type TransferUploadRequest,
+  TransferUploadResponseType,
+  type TransferUploadResponse,
+  TransferDoneResponseType,
+  type TransferDoneResponse,
+} from './transfer.js';
 
 // Dataflow execution state
 export {

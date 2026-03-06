@@ -5,7 +5,7 @@
 
 import { Hono } from 'hono';
 import { urlPathToTreePath } from '@elaraai/e3-types';
-import type { StorageBackend } from '@elaraai/e3-core';
+import type { StorageBackend, TransferBackend } from '@elaraai/e3-core';
 import {
   listDatasets,
   listDatasetsRecursive,
@@ -18,7 +18,8 @@ import {
 
 export function createDatasetRoutes(
   storage: StorageBackend,
-  getRepoPath: (repo: string) => string
+  getRepoPath: (repo: string) => string,
+  transferBackend?: TransferBackend,
 ) {
   const app = new Hono();
 
@@ -49,9 +50,9 @@ export function createDatasetRoutes(
     const repoPath = getRepoPath(repo);
     const ws = c.req.param('ws')!;
 
-    // Extract the wildcard path
+    // Extract the wildcard path (c.req.path is percent-encoded)
     const fullPath = c.req.path;
-    const datasetsPrefix = `/api/repos/${repo}/workspaces/${ws}/datasets/`;
+    const datasetsPrefix = `/api/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(ws)}/datasets/`;
     const pathStr = fullPath.startsWith(datasetsPrefix) ? fullPath.slice(datasetsPrefix.length) : '';
     const treePath = urlPathToTreePath(pathStr);
 
@@ -69,7 +70,7 @@ export function createDatasetRoutes(
     if (list)                        return listDatasets(storage, repoPath, ws, treePath);
     if (status)                      return getDatasetStatus(storage, repoPath, ws, treePath);
 
-    return getDataset(storage, repoPath, ws, treePath, repo, c.req.url);
+    return getDataset(storage, repoPath, ws, treePath, repo, c.req.url, transferBackend);
   });
 
   // PUT /api/repos/:repo/workspaces/:ws/datasets/* - Set dataset value
@@ -78,9 +79,9 @@ export function createDatasetRoutes(
     const repoPath = getRepoPath(repo);
     const ws = c.req.param('ws')!;
 
-    // Extract the wildcard path
+    // Extract the wildcard path (c.req.path is percent-encoded)
     const fullPath = c.req.path;
-    const datasetsPrefix = `/api/repos/${repo}/workspaces/${ws}/datasets/`;
+    const datasetsPrefix = `/api/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(ws)}/datasets/`;
     const pathStr = fullPath.startsWith(datasetsPrefix) ? fullPath.slice(datasetsPrefix.length) : '';
     const treePath = urlPathToTreePath(pathStr);
 

@@ -7,8 +7,8 @@ import * as path from 'node:path';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve, type ServerType } from '@hono/node-server';
-import { LocalStorage, RepoAlreadyExistsError, RepoNotFoundError } from '@elaraai/e3-core';
-import type { StorageBackend } from '@elaraai/e3-core';
+import { LocalStorage, RepoAlreadyExistsError, RepoNotFoundError, InMemoryTransferBackend } from '@elaraai/e3-core';
+import type { StorageBackend, TransferBackend } from '@elaraai/e3-core';
 import { createAuthMiddleware, type AuthConfig } from './middleware/auth.js';
 import { createOidcProvider, type OidcProvider, type OidcConfig } from './auth/index.js';
 import { sendError, sendSuccessWithStatus, sendSuccess } from './beast2.js';
@@ -23,6 +23,7 @@ import { createRepositoryRoutes } from './routes/repository.js';
 import { createObjectRoutes } from './routes/objects.js';
 import { createTransferRoutes } from './routes/transfer.js';
 import { createPackageTransferRoutes } from './routes/package-transfer.js';
+import { createDataEndpoints } from './routes/data.js';
 
 export type { AuthConfig } from './middleware/auth.js';
 export type { OidcConfig } from './auth/index.js';
@@ -126,6 +127,18 @@ export async function createServer(config: ServerConfig): Promise<Server> {
     // Mount OIDC routes at root (/.well-known/*, /oauth2/*, /device)
     app.route('/', oidcProvider.routes);
   }
+
+  // Transfer backend for presigned URL object transfer
+  const transferBackend: TransferBackend = new InMemoryTransferBackend({ baseUrl: '' });
+
+  // Data routes (no auth — capability-URL pattern via UUID)
+  // Must be mounted BEFORE auth middleware so they bypass JWT validation.
+  // In cloud deployments these URLs are S3 presigned URLs that reject auth headers.
+  const pkgTransfer = createPackageTransferRoutes(storage, getRepoPath, transferBackend);
+  const dsTransfer = createTransferRoutes(storage, getRepoPath, transferBackend);
+  const dataEndpoints = createDataEndpoints(transferBackend, storage, getRepoPath);
+  app.route('/api/uploads', dataEndpoints.uploads);
+  app.route('/api/downloads', dataEndpoints.downloads);
 
   // Apply auth middleware to all repo-specific routes if configured
   // If OIDC is enabled but auth is not separately configured, use OIDC keys for validation
@@ -332,8 +345,9 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   // Repository status and GC: /api/repos/:repo/status, /api/repos/:repo/gc
   app.route('/api/repos/:repo', createRepositoryRoutes(storage, getRepoPath));
 
-  // Package transfer routes (must be before general package routes)
-  app.route('/api/repos/:repo/packages/transfer', createPackageTransferRoutes(storage, getRepoPath));
+  // Package transfer routes: repo-level import/export + package-level export trigger
+  app.route('/api/repos/:repo', pkgTransfer.repoApi);
+  app.route('/api/repos/:repo/packages', pkgTransfer.pkgApi);
 
   // Package routes: /api/repos/:repo/packages/*
   app.route('/api/repos/:repo/packages', createPackageRoutes(storage, getRepoPath));
@@ -341,8 +355,11 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   // Workspace routes: /api/repos/:repo/workspaces/*
   app.route('/api/repos/:repo/workspaces', createWorkspaceRoutes(storage, getRepoPath));
 
+  // Dataset transfer auth routes (init + commit) mount alongside dataset routes
+  app.route('/api/repos/:repo/workspaces/:ws/datasets', dsTransfer.api);
+
   // Dataset routes: /api/repos/:repo/workspaces/:ws/datasets/*
-  app.route('/api/repos/:repo/workspaces/:ws/datasets', createDatasetRoutes(storage, getRepoPath));
+  app.route('/api/repos/:repo/workspaces/:ws/datasets', createDatasetRoutes(storage, getRepoPath, transferBackend));
 
   // Task routes: /api/repos/:repo/workspaces/:ws/tasks/*
   app.route('/api/repos/:repo/workspaces/:ws/tasks', createTaskRoutes(storage, getRepoPath));
@@ -352,9 +369,6 @@ export async function createServer(config: ServerConfig): Promise<Server> {
 
   // Object routes: /api/repos/:repo/objects/:hash
   app.route('/api/repos/:repo/objects', createObjectRoutes(storage, getRepoPath));
-
-  // Transfer routes: /api/repos/:repo/transfer/*
-  app.route('/api/repos/:repo/transfer', createTransferRoutes(storage, getRepoPath));
 
   let httpServer: ServerType | null = null;
   let actualPort = port;

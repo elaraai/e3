@@ -57,6 +57,28 @@ export class AuthError extends Error {
 }
 
 /**
+ * Fetch with consistent auth header injection and 401 → AuthError handling.
+ *
+ * Use this for multi-step transfer flows where raw `fetch` is needed
+ * (e.g. upload/download to presigned URLs, polling endpoints).
+ */
+export async function fetchWithAuth(
+  input: string,
+  init: RequestInit,
+  options: RequestOptions
+): Promise<globalThis.Response> {
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
+  if (options.token) {
+    headers['Authorization'] = `Bearer ${options.token}`;
+  }
+  const response = await fetch(input, { ...init, headers });
+  if (response.status === 401) {
+    throw new AuthError(await response.text());
+  }
+  return response;
+}
+
+/**
  * JSON error response format from the server.
  */
 interface ServerErrorResponse {

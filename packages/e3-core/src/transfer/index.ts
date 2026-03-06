@@ -1,0 +1,31 @@
+/**
+ * Copyright (c) 2025 Elara AI Pty Ltd
+ * Licensed under BSL 1.1. See LICENSE for details.
+ */
+
+// Types
+export {
+  DatasetUploadType,
+  type DatasetUpload,
+  PackageImportType,
+  PackageImportStatusType,
+  type PackageImport,
+  PackageExportType,
+  PackageExportStatusType,
+  type PackageExport,
+} from './types.js';
+
+// Interfaces
+export {
+  type DatasetUploadStore,
+  type DatasetDownloadStore,
+  type PackageImportStore,
+  type PackageExportStore,
+  type TransferBackend,
+} from './interfaces.js';
+
+// InMemory implementation
+export {
+  InMemoryTransferBackend,
+  type InMemoryTransferBackendOptions,
+} from './InMemoryTransferBackend.js';

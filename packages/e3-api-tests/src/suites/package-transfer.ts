@@ -17,7 +17,18 @@ import {
   packageList,
   packageImport,
   packageExport,
+  ApiError,
+  ApiTypes,
+  fetchWithAuth,
+  type Response,
 } from '@elaraai/e3-api-client';
+import { encodeBeast2For, decodeBeast2For, NullType } from '@elaraai/east';
+import {
+  PackageTransferInitRequestType,
+  PackageTransferInitResponseType,
+  PackageImportStatusType,
+  type PackageImportStatus,
+} from '@elaraai/e3-types';
 
 import type { TestContext } from '../context.js';
 import type { TestSetup } from '../setup.js';
@@ -85,6 +96,108 @@ export function packageTransferTests(setup: TestSetup<TestContext>): void {
         assert.ok(err.code === 'package_exists' || err.message.includes('already exists'),
           `Unexpected error: ${err.message}`);
       }
+    });
+
+    // =========================================================================
+    // Failure-path tests
+    // =========================================================================
+
+    it('export of non-existent package fails with package_not_found', async (t) => {
+      const ctx = await setup(t);
+      const opts = await ctx.opts();
+
+      await assert.rejects(
+        () => packageExport(ctx.config.baseUrl, ctx.repoName, 'no-such-pkg', '9.9.9', opts),
+        (err: any) => {
+          assert.ok(err instanceof ApiError);
+          assert.strictEqual(err.code, 'package_not_found');
+          return true;
+        }
+      );
+    });
+
+    it('import of corrupted zip fails', async (t) => {
+      const ctx = await setup(t);
+      const opts = await ctx.opts();
+
+      // Random bytes — not a valid zip
+      const garbage = new Uint8Array(1024);
+      for (let i = 0; i < garbage.length; i++) garbage[i] = Math.floor(Math.random() * 256);
+
+      await assert.rejects(
+        () => packageImport(ctx.config.baseUrl, ctx.repoName, garbage, opts),
+        (err: any) => {
+          // Import should fail — either ApiError or Error with failure message
+          assert.ok(err instanceof Error, `Expected Error, got ${err}`);
+          return true;
+        }
+      );
+    });
+
+    it('upload with wrong size is rejected', async (t) => {
+      const ctx = await setup(t);
+      const opts = await ctx.opts();
+      const repoEncoded = encodeURIComponent(ctx.repoName);
+      const BEAST2 = 'application/beast2';
+
+      // 1. Init transfer claiming size 100
+      const encode = encodeBeast2For(PackageTransferInitRequestType);
+      const initRes = await fetchWithAuth(
+        `${ctx.config.baseUrl}/api/repos/${repoEncoded}/import`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': BEAST2, 'Accept': BEAST2 },
+          body: encode({ size: 100n }),
+        },
+        opts
+      );
+      assert.ok(initRes.ok, `Init should succeed, got ${initRes.status}`);
+
+      // Decode to get uploadUrl
+      const initBuffer = new Uint8Array(await initRes.arrayBuffer());
+      const decodeInit = decodeBeast2For(ApiTypes.ResponseType(PackageTransferInitResponseType));
+      const initResult = decodeInit(initBuffer) as Response<{ id: string; uploadUrl: string }>;
+      assert.strictEqual(initResult.type, 'success');
+      const { uploadUrl } = initResult.value;
+
+      // 2. Upload only 50 bytes (mismatched with declared size of 100)
+      //    No auth — data endpoints reject Authorization headers (matches S3 presigned URL contract)
+      const shortData = new Uint8Array(50);
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/zip' },
+        body: shortData,
+      });
+
+      // Server returns 200 with BEAST2 error response for size mismatch
+      assert.ok(uploadRes.ok, `Expected 200 response, got ${uploadRes.status}`);
+      const uploadBuffer = new Uint8Array(await uploadRes.arrayBuffer());
+      const decodeUpload = decodeBeast2For(ApiTypes.ResponseType(NullType));
+      const uploadResult = decodeUpload(uploadBuffer) as Response<null>;
+      assert.strictEqual(uploadResult.type, 'error', 'Expected error for size mismatch');
+    });
+
+    it('poll for non-existent import returns error', async (t) => {
+      const ctx = await setup(t);
+      const opts = await ctx.opts();
+      const repoEncoded = encodeURIComponent(ctx.repoName);
+      const fakeId = '00000000-0000-0000-0000-000000000000';
+
+      const res = await fetchWithAuth(
+        `${ctx.config.baseUrl}/api/repos/${repoEncoded}/import/${fakeId}`,
+        {
+          method: 'GET',
+          headers: { 'Accept': 'application/beast2' },
+        },
+        opts
+      );
+
+      // Server returns 200 with BEAST2 error response for unknown jobs
+      assert.ok(res.ok, `Expected 200 response, got ${res.status}`);
+      const buffer = new Uint8Array(await res.arrayBuffer());
+      const decode = decodeBeast2For(ApiTypes.ResponseType(PackageImportStatusType));
+      const result = decode(buffer) as Response<PackageImportStatus>;
+      assert.strictEqual(result.type, 'error', 'Expected error variant for non-existent job');
     });
   });
 }

@@ -6,7 +6,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { encodeBeast2For, StringType, variant } from '@elaraai/east';
-import { BEAST2_CONTENT_TYPE, computeHash } from '@elaraai/e3-core';
+import { BEAST2_CONTENT_TYPE, computeHash, InMemoryTransferBackend } from '@elaraai/e3-core';
 import { InMemoryStorage } from '@elaraai/e3-core/test';
 import { getDataset } from './datasets.js';
 
@@ -68,7 +68,36 @@ describe('getDataset', () => {
     assert.equal(computeHash(body), hash);
   });
 
-  it('returns 307 redirect for >1MB datasets when requestUrl provided', async () => {
+  it('returns 307 redirect for >1MB datasets when transferBackend provided', async () => {
+    const storage = new InMemoryStorage();
+    await storage.repos.create(REPO);
+    const transferBackend = new InMemoryTransferBackend({ baseUrl: '' });
+
+    // Create a >1MB payload
+    const largeString = 'x'.repeat(1_100_000);
+    const encode = encodeBeast2For(StringType);
+    const data = encode(largeString);
+    const hash = await storage.objects.write(REPO, data);
+
+    await storage.datasets.write(REPO, WS, 'inputs/big', variant('value', {
+      hash,
+      versions: new Map(),
+    }));
+
+    const treePath = [variant('field', 'inputs'), variant('field', 'big')];
+    const requestUrl = `http://localhost:3000/api/repos/${REPO}/workspaces/${WS}/datasets/inputs/big`;
+    const response = await getDataset(storage, REPO, WS, treePath, REPO, requestUrl, transferBackend);
+
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get('X-Content-SHA256'), hash);
+    assert.equal(response.headers.get('X-Content-Length'), String(data.byteLength));
+
+    const location = response.headers.get('Location');
+    assert.ok(location, 'should have Location header');
+    assert.ok(location!.includes('/api/downloads/'), `Expected /api/downloads/ URL, got ${location}`);
+  });
+
+  it('returns inline bytes for >1MB datasets without transferBackend', async () => {
     const storage = new InMemoryStorage();
     await storage.repos.create(REPO);
 
@@ -87,13 +116,10 @@ describe('getDataset', () => {
     const requestUrl = `http://localhost:3000/api/repos/${REPO}/workspaces/${WS}/datasets/inputs/big`;
     const response = await getDataset(storage, REPO, WS, treePath, REPO, requestUrl);
 
-    assert.equal(response.status, 307);
+    // Without transferBackend, large datasets are served inline
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('Content-Type'), BEAST2_CONTENT_TYPE);
     assert.equal(response.headers.get('X-Content-SHA256'), hash);
-    assert.equal(response.headers.get('X-Content-Length'), String(data.byteLength));
-
-    const location = response.headers.get('Location');
-    assert.ok(location, 'should have Location header');
-    assert.ok(location!.includes(`/api/repos/${REPO}/objects/${hash}`));
   });
 
   it('returns inline bytes for ≤1MB datasets even with requestUrl', async () => {

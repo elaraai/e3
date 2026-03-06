@@ -12,3 +12,4 @@ export { createExecutionRoutes } from './executions.js';
 export { createObjectRoutes } from './objects.js';
 export { createTransferRoutes } from './transfer.js';
 export { createPackageTransferRoutes } from './package-transfer.js';
+export { createDataEndpoints } from './data.js';

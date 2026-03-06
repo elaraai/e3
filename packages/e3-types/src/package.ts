@@ -92,19 +92,13 @@ export const PackageTransferInitRequestType = StructType({
 export type PackageTransferInitRequest = ValueTypeOf<typeof PackageTransferInitRequestType>;
 
 export const PackageTransferInitResponseType = StructType({
-  transferId: StringType,
+  id: StringType,
   uploadUrl: StringType,
 });
 export type PackageTransferInitResponse = ValueTypeOf<typeof PackageTransferInitResponseType>;
 
-export const PackageExportRequestType = StructType({
-  name: StringType,
-  version: StringType,
-});
-export type PackageExportRequest = ValueTypeOf<typeof PackageExportRequestType>;
-
 export const PackageJobResponseType = StructType({
-  jobId: StringType,
+  id: StringType,
 });
 export type PackageJobResponse = ValueTypeOf<typeof PackageJobResponseType>;
 
@@ -122,14 +116,20 @@ export const PackageExportResultType = StructType({
 });
 export type PackageExportResult = ValueTypeOf<typeof PackageExportResultType>;
 
-export const PackageJobStatusType = VariantType({
+export const PackageImportStatusType = VariantType({
   processing: NullType,
-  completed: VariantType({
-    import: PackageImportResultType,
-    export: PackageExportResultType,
-  }),
+  completed: PackageImportResultType,
   failed: StructType({
     message: StringType,
   }),
 });
-export type PackageJobStatus = ValueTypeOf<typeof PackageJobStatusType>;
+export type PackageImportStatus = ValueTypeOf<typeof PackageImportStatusType>;
+
+export const PackageExportStatusType = VariantType({
+  processing: NullType,
+  completed: PackageExportResultType,
+  failed: StructType({
+    message: StringType,
+  }),
+});
+export type PackageExportStatus = ValueTypeOf<typeof PackageExportStatusType>;

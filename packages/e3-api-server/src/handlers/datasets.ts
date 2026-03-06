@@ -13,7 +13,7 @@ import {
   workspaceGetTree,
   type TreeNode,
 } from '@elaraai/e3-core';
-import { BEAST2_CONTENT_TYPE, type StorageBackend } from '@elaraai/e3-core';
+import { BEAST2_CONTENT_TYPE, type StorageBackend, type TransferBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
 import { DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from '../types.js';
@@ -49,7 +49,8 @@ export async function getDataset(
   workspace: string,
   treePath: TreePath,
   repo?: string,
-  requestUrl?: string
+  requestUrl?: string,
+  transferBackend?: TransferBackend,
 ): Promise<Response> {
   try {
     if (treePath.length === 0) {
@@ -66,16 +67,20 @@ export async function getDataset(
       return sendError(NullType, errorToVariant(new Error('Dataset is null')));
     }
 
-    // When serving via API, check size to decide whether to redirect
-    if (repo && requestUrl) {
+    // When serving via API with a transfer backend, check size to decide whether to redirect
+    if (transferBackend && repo && requestUrl) {
       const { size } = await storage.objects.stat(repoPath, hash);
       if (size > SIZE_THRESHOLD) {
-        const origin = new URL(requestUrl).origin;
-        const objectUrl = `${origin}/api/repos/${encodeURIComponent(repo)}/objects/${hash}`;
+        let downloadUrl = await transferBackend.datasetDownload.getDownloadUrl(repo, hash);
+        // Resolve relative URL against the request origin
+        if (downloadUrl.startsWith('/')) {
+          const origin = new URL(requestUrl).origin;
+          downloadUrl = `${origin}${downloadUrl}`;
+        }
         return new Response(null, {
           status: 307,
           headers: {
-            'Location': objectUrl,
+            'Location': downloadUrl,
             'X-Content-Length': String(size),
             'X-Content-SHA256': hash,
           },

@@ -8,17 +8,18 @@ import { PackageObjectType, type PackageObject } from '@elaraai/e3-types';
 import {
   PackageTransferInitRequestType,
   PackageTransferInitResponseType,
-  PackageExportRequestType,
   PackageJobResponseType,
-  PackageJobStatusType,
+  PackageImportStatusType,
+  PackageExportStatusType,
   type PackageImportResult,
-  type PackageJobStatus,
+  type PackageImportStatus,
+  type PackageExportStatus,
 } from '@elaraai/e3-types';
 import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-core';
 import type { PackageListItem } from './types.js';
 import { PackageListItemType } from './types.js';
 import { ResponseType } from './types.js';
-import { get, del, ApiError, AuthError, type RequestOptions, type Response } from './http.js';
+import { get, del, fetchWithAuth, ApiError, type RequestOptions, type Response } from './http.js';
 
 /**
  * List all packages in the repository.
@@ -57,76 +58,57 @@ export async function packageImport(
   options: RequestOptions
 ): Promise<PackageImportResult> {
   const repoEncoded = encodeURIComponent(repo);
-  const authHeaders: Record<string, string> = {};
-  if (options.token) {
-    authHeaders['Authorization'] = `Bearer ${options.token}`;
-  }
 
   // 1. Init transfer
   const encodeInit = encodeBeast2For(PackageTransferInitRequestType);
-  const initRes = await fetch(`${url}/api/repos/${repoEncoded}/packages/transfer/upload`, {
+  const initRes = await fetchWithAuth(`${url}/api/repos/${repoEncoded}/import`, {
     method: 'POST',
     headers: {
       'Content-Type': BEAST2_CONTENT_TYPE,
       'Accept': BEAST2_CONTENT_TYPE,
-      ...authHeaders,
     },
     body: encodeInit({ size: BigInt(archive.byteLength) }),
-  });
+  }, options);
 
-  if (initRes.status === 401) throw new AuthError(await initRes.text());
   if (!initRes.ok) throw new Error(`Transfer init failed: ${initRes.status} ${initRes.statusText}`);
 
   const initBuffer = new Uint8Array(await initRes.arrayBuffer());
   const decodeInit = decodeBeast2For(ResponseType(PackageTransferInitResponseType));
-  const initResult = decodeInit(initBuffer) as Response<{ transferId: string; uploadUrl: string }>;
+  const initResult = decodeInit(initBuffer) as Response<{ id: string; uploadUrl: string }>;
   if (initResult.type === 'error') throw new ApiError(initResult.value.type, initResult.value.value);
 
-  const { transferId, uploadUrl } = initResult.value;
+  const { id, uploadUrl } = initResult.value;
 
-  // 2. Upload zip bytes
+  // 2. Upload zip bytes (no auth — URL may be a presigned S3 URL)
   const uploadRes = await fetch(uploadUrl, {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/zip',
-      ...authHeaders,
-    },
+    headers: { 'Content-Type': 'application/zip' },
     body: archive,
   });
 
   if (!uploadRes.ok) throw new Error(`Transfer upload failed: ${uploadRes.status} ${uploadRes.statusText}`);
-  // Consume body to check for errors
-  const uploadBuffer = new Uint8Array(await uploadRes.arrayBuffer());
-  const decodeUpload = decodeBeast2For(ResponseType(NullType));
-  const uploadResult = decodeUpload(uploadBuffer) as Response<null>;
-  if (uploadResult.type === 'error') throw new ApiError(uploadResult.value.type, uploadResult.value.value);
 
   // 3. Trigger import
-  const importRes = await fetch(`${url}/api/repos/${repoEncoded}/packages/transfer/${transferId}/import`, {
+  const importRes = await fetchWithAuth(`${url}/api/repos/${repoEncoded}/import/${id}`, {
     method: 'POST',
-    headers: {
-      'Accept': BEAST2_CONTENT_TYPE,
-      ...authHeaders,
-    },
-  });
+    headers: { 'Accept': BEAST2_CONTENT_TYPE },
+  }, options);
 
   if (!importRes.ok) throw new Error(`Transfer import failed: ${importRes.status} ${importRes.statusText}`);
 
   const importBuffer = new Uint8Array(await importRes.arrayBuffer());
   const decodeImport = decodeBeast2For(ResponseType(PackageJobResponseType));
-  const importResult = decodeImport(importBuffer) as Response<{ jobId: string }>;
+  const importResult = decodeImport(importBuffer) as Response<{ id: string }>;
   if (importResult.type === 'error') throw new ApiError(importResult.value.type, importResult.value.value);
 
-  const { jobId } = importResult.value;
-
   // 4. Poll for result
-  const status = await pollJob(url, repoEncoded, jobId, authHeaders);
+  const status = await pollImport(url, repoEncoded, importResult.value.id, options);
 
   if (status.type === 'failed') {
     throw new Error(`Package import failed: ${status.value.message}`);
   }
-  if (status.type === 'completed' && status.value.type === 'import') {
-    return status.value.value;
+  if (status.type === 'completed') {
+    return status.value;
   }
   throw new Error('Unexpected job status');
 }
@@ -144,50 +126,35 @@ export async function packageExport(
   options: RequestOptions
 ): Promise<Uint8Array> {
   const repoEncoded = encodeURIComponent(repo);
-  const authHeaders: Record<string, string> = {};
-  if (options.token) {
-    authHeaders['Authorization'] = `Bearer ${options.token}`;
-  }
 
-  // 1. Trigger export
-  const encodeExport = encodeBeast2For(PackageExportRequestType);
-  const exportRes = await fetch(`${url}/api/repos/${repoEncoded}/packages/transfer/export`, {
+  // 1. Trigger export (name/version in URL, no body)
+  const exportRes = await fetchWithAuth(
+    `${url}/api/repos/${repoEncoded}/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}/export`, {
     method: 'POST',
-    headers: {
-      'Content-Type': BEAST2_CONTENT_TYPE,
-      'Accept': BEAST2_CONTENT_TYPE,
-      ...authHeaders,
-    },
-    body: encodeExport({ name, version }),
-  });
+    headers: { 'Accept': BEAST2_CONTENT_TYPE },
+  }, options);
 
-  if (exportRes.status === 401) throw new AuthError(await exportRes.text());
   if (!exportRes.ok) throw new Error(`Transfer export failed: ${exportRes.status} ${exportRes.statusText}`);
 
   const exportBuffer = new Uint8Array(await exportRes.arrayBuffer());
   const decodeExport = decodeBeast2For(ResponseType(PackageJobResponseType));
-  const exportResult = decodeExport(exportBuffer) as Response<{ jobId: string }>;
+  const exportResult = decodeExport(exportBuffer) as Response<{ id: string }>;
   if (exportResult.type === 'error') throw new ApiError(exportResult.value.type, exportResult.value.value);
 
-  const { jobId } = exportResult.value;
-
   // 2. Poll for result
-  const status = await pollJob(url, repoEncoded, jobId, authHeaders);
+  const status = await pollExport(url, repoEncoded, exportResult.value.id, options);
 
   if (status.type === 'failed') {
     throw new Error(`Package export failed: ${status.value.message}`);
   }
-  if (status.type !== 'completed' || status.value.type !== 'export') {
+  if (status.type !== 'completed') {
     throw new Error('Unexpected job status');
   }
 
-  const { downloadUrl } = status.value.value;
+  const { downloadUrl } = status.value;
 
-  // 3. Download zip
-  const downloadRes = await fetch(downloadUrl, {
-    method: 'GET',
-    headers: authHeaders,
-  });
+  // 3. Download zip (no auth — URL may be a presigned S3 URL)
+  const downloadRes = await fetch(downloadUrl, { method: 'GET' });
 
   if (!downloadRes.ok) throw new Error(`Download failed: ${downloadRes.status} ${downloadRes.statusText}`);
 
@@ -213,30 +180,27 @@ export async function packageRemove(
 }
 
 /**
- * Poll a package job until it completes or fails.
+ * Poll a package import job until it completes or fails.
  */
-async function pollJob(
+async function pollImport(
   url: string,
   repoEncoded: string,
-  jobId: string,
-  authHeaders: Record<string, string>,
+  id: string,
+  options: RequestOptions,
   maxAttempts = 120,
   intervalMs = 500
-): Promise<PackageJobStatus> {
+): Promise<PackageImportStatus> {
   for (let i = 0; i < maxAttempts; i++) {
-    const res = await fetch(`${url}/api/repos/${repoEncoded}/packages/transfer/jobs/${jobId}`, {
+    const res = await fetchWithAuth(`${url}/api/repos/${repoEncoded}/import/${id}`, {
       method: 'GET',
-      headers: {
-        'Accept': BEAST2_CONTENT_TYPE,
-        ...authHeaders,
-      },
-    });
+      headers: { 'Accept': BEAST2_CONTENT_TYPE },
+    }, options);
 
-    if (!res.ok) throw new Error(`Job poll failed: ${res.status} ${res.statusText}`);
+    if (!res.ok) throw new Error(`Import poll failed: ${res.status} ${res.statusText}`);
 
     const buffer = new Uint8Array(await res.arrayBuffer());
-    const decode = decodeBeast2For(ResponseType(PackageJobStatusType));
-    const result = decode(buffer) as Response<PackageJobStatus>;
+    const decode = decodeBeast2For(ResponseType(PackageImportStatusType));
+    const result = decode(buffer) as Response<PackageImportStatus>;
     if (result.type === 'error') throw new ApiError(result.value.type, result.value.value);
 
     if (result.value.type !== 'processing') {
@@ -246,5 +210,39 @@ async function pollJob(
     await new Promise(resolve => setTimeout(resolve, intervalMs));
   }
 
-  throw new Error('Package job timed out');
+  throw new Error('Package import timed out');
+}
+
+/**
+ * Poll a package export job until it completes or fails.
+ */
+async function pollExport(
+  url: string,
+  repoEncoded: string,
+  id: string,
+  options: RequestOptions,
+  maxAttempts = 120,
+  intervalMs = 500
+): Promise<PackageExportStatus> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const res = await fetchWithAuth(`${url}/api/repos/${repoEncoded}/export/${id}`, {
+      method: 'GET',
+      headers: { 'Accept': BEAST2_CONTENT_TYPE },
+    }, options);
+
+    if (!res.ok) throw new Error(`Export poll failed: ${res.status} ${res.statusText}`);
+
+    const buffer = new Uint8Array(await res.arrayBuffer());
+    const decode = decodeBeast2For(ResponseType(PackageExportStatusType));
+    const result = decode(buffer) as Response<PackageExportStatus>;
+    if (result.type === 'error') throw new ApiError(result.value.type, result.value.value);
+
+    if (result.value.type !== 'processing') {
+      return result.value;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error('Package export timed out');
 }

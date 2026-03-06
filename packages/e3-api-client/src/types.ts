@@ -737,50 +737,23 @@ export const DatasetStatusDetailType = StructType({
 });
 
 // =============================================================================
-// Transfer Types
+// Transfer Types (re-exported from e3-types)
 // =============================================================================
 
-/**
- * Transfer upload init request.
- *
- * @property workspace - Target workspace name
- * @property path - Dataset path (slash-separated)
- * @property hash - SHA-256 hex hash of the data (computed by client)
- * @property size - Size of the data in bytes
- */
-export const TransferUploadRequestType = StructType({
-  workspace: StringType,
-  path: StringType,
-  hash: StringType,
-  size: IntegerType,
-});
-
-/**
- * Transfer upload init response.
- *
- * - `completed`: Object already exists (dedup), dataset ref updated
- * - `upload`: Staging slot created, client should upload then call done
- */
-export const TransferUploadResponseType = VariantType({
-  completed: NullType,
-  upload: StructType({
-    transferId: StringType,
-    uploadUrl: StringType,
-  }),
-});
-
-/**
- * Transfer done response.
- *
- * - `completed`: Hash verified, object stored, dataset ref updated
- * - `error`: Hash mismatch or other failure
- */
-export const TransferDoneResponseType = VariantType({
-  completed: NullType,
-  error: StructType({
-    message: StringType,
-  }),
-});
+import {
+  TransferUploadRequestType,
+  TransferUploadResponseType,
+  TransferDoneResponseType,
+  PackageImportStatusType,
+  PackageExportStatusType,
+} from '@elaraai/e3-types';
+export {
+  TransferUploadRequestType,
+  TransferUploadResponseType,
+  TransferDoneResponseType,
+  PackageImportStatusType,
+  PackageExportStatusType,
+};
 
 // =============================================================================
 // Value type aliases
@@ -823,9 +796,7 @@ export type ExecutionListItem = ValueTypeOf<typeof ExecutionListItemType>;
 export type TreeKind = ValueTypeOf<typeof TreeKindType>;
 export type ListEntry = ValueTypeOf<typeof ListEntryType>;
 export type DatasetStatusDetail = ValueTypeOf<typeof DatasetStatusDetailType>;
-export type TransferUploadRequest = ValueTypeOf<typeof TransferUploadRequestType>;
-export type TransferUploadResponse = ValueTypeOf<typeof TransferUploadResponseType>;
-export type TransferDoneResponse = ValueTypeOf<typeof TransferDoneResponseType>;
+export type { TransferUploadRequest, TransferUploadResponse, TransferDoneResponse, PackageImportStatus, PackageExportStatus } from '@elaraai/e3-types';
 
 // =============================================================================
 // Namespace export for convenience
@@ -922,4 +893,6 @@ export const ApiTypes = {
   TransferUploadRequestType,
   TransferUploadResponseType,
   TransferDoneResponseType,
+  PackageImportStatusType,
+  PackageExportStatusType,
 } as const;
