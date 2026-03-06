@@ -11,7 +11,7 @@ import {
   DataflowGraphType,
   DataflowExecutionStateType,
 } from './types.js';
-import { get, post, type RequestOptions } from './http.js';
+import { get, post, ApiError, type RequestOptions } from './http.js';
 
 /**
  * Options for starting dataflow execution.
@@ -56,18 +56,33 @@ export async function dataflowExecuteLaunch(
   dataflowOptions: DataflowOptions = {},
   options: RequestOptions
 ): Promise<void> {
-  await post(
-    url,
-    `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow`,
-    {
-      concurrency: dataflowOptions.concurrency != null ? some(BigInt(dataflowOptions.concurrency)) : none,
-      force: dataflowOptions.force ?? false,
-      filter: dataflowOptions.filter != null ? some(dataflowOptions.filter) : none,
-    },
-    DataflowRequestType,
-    NullType,
-    options
-  );
+  const maxRetries = 5;
+  const baseDelay = 200;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await post(
+        url,
+        `/repos/${encodeURIComponent(repo)}/workspaces/${encodeURIComponent(workspace)}/dataflow`,
+        {
+          concurrency: dataflowOptions.concurrency != null ? some(BigInt(dataflowOptions.concurrency)) : none,
+          force: dataflowOptions.force ?? false,
+          filter: dataflowOptions.filter != null ? some(dataflowOptions.filter) : none,
+        },
+        DataflowRequestType,
+        NullType,
+        options
+      );
+      return;
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'workspace_locked' && attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 /**

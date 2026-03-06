@@ -153,15 +153,16 @@ export function packageTransferTests(setup: TestSetup<TestContext>): void {
       );
       assert.ok(initRes.ok, `Init should succeed, got ${initRes.status}`);
 
-      // Decode to get uploadUrl
+      // Decode to get uploadUrl and id
       const initBuffer = new Uint8Array(await initRes.arrayBuffer());
       const decodeInit = decodeBeast2For(ApiTypes.ResponseType(PackageTransferInitResponseType));
       const initResult = decodeInit(initBuffer) as Response<{ id: string; uploadUrl: string }>;
       assert.strictEqual(initResult.type, 'success');
-      const { uploadUrl } = initResult.value;
+      const { id, uploadUrl } = initResult.value;
 
       // 2. Upload only 50 bytes (mismatched with declared size of 100)
-      //    No auth — data endpoints reject Authorization headers (matches S3 presigned URL contract)
+      //    Local server validates size at upload time (BEAST2 error response).
+      //    Cloud server accepts the upload (S3 presigned URL) and validates at execute time.
       const shortData = new Uint8Array(50);
       const uploadRes = await fetch(uploadUrl, {
         method: 'PUT',
@@ -169,12 +170,53 @@ export function packageTransferTests(setup: TestSetup<TestContext>): void {
         body: shortData,
       });
 
-      // Server returns 200 with BEAST2 error response for size mismatch
-      assert.ok(uploadRes.ok, `Expected 200 response, got ${uploadRes.status}`);
-      const uploadBuffer = new Uint8Array(await uploadRes.arrayBuffer());
-      const decodeUpload = decodeBeast2For(ApiTypes.ResponseType(NullType));
-      const uploadResult = decodeUpload(uploadBuffer) as Response<null>;
-      assert.strictEqual(uploadResult.type, 'error', 'Expected error for size mismatch');
+      // Check if the upload itself rejected the size mismatch (local server behavior)
+      if (uploadRes.ok && uploadRes.headers.get('content-type')?.includes('beast2')) {
+        const uploadBuffer = new Uint8Array(await uploadRes.arrayBuffer());
+        if (uploadBuffer.length > 0) {
+          const decodeUpload = decodeBeast2For(ApiTypes.ResponseType(NullType));
+          const uploadResult = decodeUpload(uploadBuffer) as Response<null>;
+          if (uploadResult.type === 'error') {
+            // Size mismatch caught at upload time — test passes
+            return;
+          }
+        }
+      }
+
+      // 3. Upload was accepted (cloud/presigned URL) — trigger import to validate
+      const triggerRes = await fetchWithAuth(
+        `${ctx.config.baseUrl}/api/repos/${repoEncoded}/import/${id}`,
+        {
+          method: 'POST',
+          headers: { 'Accept': BEAST2 },
+        },
+        opts
+      );
+      assert.ok(triggerRes.ok, `Trigger should return 200, got ${triggerRes.status}`);
+
+      // 4. Poll until terminal status — expect failure due to size mismatch or corrupt zip
+      const decodePoll = decodeBeast2For(ApiTypes.ResponseType(PackageImportStatusType));
+      let status: PackageImportStatus | undefined;
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        const pollRes = await fetchWithAuth(
+          `${ctx.config.baseUrl}/api/repos/${repoEncoded}/import/${id}`,
+          {
+            method: 'GET',
+            headers: { 'Accept': BEAST2 },
+          },
+          opts
+        );
+        assert.ok(pollRes.ok);
+        const pollBuffer = new Uint8Array(await pollRes.arrayBuffer());
+        const pollResult = decodePoll(pollBuffer) as Response<PackageImportStatus>;
+        assert.strictEqual(pollResult.type, 'success');
+        status = pollResult.value;
+        if (status.type === 'failed' || status.type === 'completed') break;
+      }
+
+      assert.ok(status, 'Should have received a terminal status');
+      assert.strictEqual(status.type, 'failed', 'Expected failed status due to size mismatch');
     });
 
     it('poll for non-existent import returns error', async (t) => {
