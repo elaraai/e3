@@ -82,6 +82,11 @@ export function createPackageTransferRoutes(
   });
 
   // POST /api/repos/:repo/import/:id — Trigger import
+  //
+  // For the local server, the upload handler (data.ts) processes the import
+  // inline, so this endpoint is a no-op — it just returns the job ID for
+  // polling. For cloud backends, the trigger invokes async processing
+  // (e.g. Lambda) so the status may still be 'created'/'uploaded' here.
   repoApi.post('/import/:id', async (c) => {
     const id = c.req.param('id')!;
     const record = await transferBackend.packageImport.get(id);
@@ -89,11 +94,17 @@ export function createPackageTransferRoutes(
       return sendError(PackageJobResponseType, variant('internal', { message: 'transfer not found' }));
     }
 
+    // If already processed (by the upload handler), skip re-processing
+    if (record.status.type === 'completed' || record.status.type === 'failed') {
+      return sendSuccess(PackageJobResponseType, { id });
+    }
+
+    // Fallback: process from staging file (cloud backends delegate to
+    // their own trigger logic and don't reach this code path)
     const repoPath = getRepoPath(record.repo);
     const stagingPath = join(STAGING_DIR, `${id}.zip.partial`);
 
     try {
-      // Verify staging file exists before attempting import
       await stat(stagingPath);
     } catch {
       await transferBackend.packageImport.delete(id);

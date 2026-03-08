@@ -7,9 +7,11 @@ import { Hono } from 'hono';
 import { mkdir, writeFile, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { variant } from '@elaraai/east';
 import {
   BEAST2_CONTENT_TYPE,
   ObjectNotFoundError,
+  packageImport,
   type StorageBackend,
   type TransferBackend,
 } from '@elaraai/e3-core';
@@ -66,7 +68,7 @@ export function createDataEndpoints(
       return new Response(null, { status: 200 });
     }
 
-    // Try package import
+    // Try package import — process inline to avoid staging file races
     const pkgRecord = await transferBackend.packageImport.get(id);
     if (pkgRecord) {
       const body = new Uint8Array(await c.req.arrayBuffer());
@@ -78,9 +80,29 @@ export function createDataEndpoints(
         );
       }
 
+      // Write to temp file, import immediately, and clean up.
+      // This avoids depending on the staging file surviving until the
+      // trigger endpoint fires (which caused intermittent ENOENT in CI).
       const stagingPath = join(STAGING_DIR, `${id}.zip.partial`);
       await mkdir(STAGING_DIR, { recursive: true });
       await writeFile(stagingPath, body);
+
+      const repoPath = getRepoPath(pkgRecord.repo);
+      try {
+        const result = await packageImport(storage, repoPath, stagingPath);
+        await transferBackend.packageImport.updateStatus(id, variant('completed', {
+          name: result.name,
+          version: result.version,
+          packageHash: result.packageHash,
+          objectCount: BigInt(result.objectCount),
+        }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await transferBackend.packageImport.updateStatus(id, variant('failed', { message }));
+      } finally {
+        await unlink(stagingPath).catch(() => {});
+      }
+
       return new Response(null, { status: 200 });
     }
 
