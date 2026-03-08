@@ -45,9 +45,17 @@ export const packageCommand = {
           location.baseUrl, location.repo, new Uint8Array(zipBytes),
           { token: location.token },
           {
+            onUploadProgress: (uploaded, total) => {
+              const pct = Math.round((uploaded / total) * 100);
+              const mb = (uploaded / 1024 / 1024).toFixed(1);
+              const totalMb = (total / 1024 / 1024).toFixed(1);
+              process.stdout.write(`\rUploading... ${mb}/${totalMb} MB (${pct}%)`);
+            },
             onProgress: (progress) => {
-              if (progress.type === 'downloading') {
-                process.stdout.write(`\rDownloading...`);
+              if (progress.type === 'pending') {
+                process.stdout.write(`\rPending...                              `);
+              } else if (progress.type === 'downloading') {
+                process.stdout.write(`\rPreparing...                            `);
               } else if (progress.type === 'importing') {
                 process.stdout.write(`\rImporting... ${progress.value.objectsProcessed} objects processed`);
               }

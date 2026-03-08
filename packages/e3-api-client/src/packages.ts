@@ -52,6 +52,7 @@ export async function packageGet(
  */
 export interface PackageImportOptions {
   onProgress?: (progress: PackageImportProgress) => void;
+  onUploadProgress?: (uploaded: number, total: number) => void;
   signal?: AbortSignal;
 }
 
@@ -92,11 +93,19 @@ export async function packageImport(
   const { id, uploadUrl } = initResult.value;
 
   // 2. Upload zip bytes (no auth — URL may be a presigned S3 URL)
+  const onUploadProgress = importOptions?.onUploadProgress;
+  const uploadBody = onUploadProgress
+    ? createProgressStream(archive, onUploadProgress)
+    : archive;
   const uploadRes = await fetch(uploadUrl, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/zip' },
-    body: archive,
+    headers: {
+      'Content-Type': 'application/zip',
+      'Content-Length': String(archive.byteLength),
+    },
+    body: uploadBody,
     signal,
+    duplex: onUploadProgress ? 'half' as const : undefined,
   });
 
   if (!uploadRes.ok) throw new Error(`Transfer upload failed: ${uploadRes.status} ${uploadRes.statusText}`);
@@ -191,6 +200,30 @@ export async function packageRemove(
     NullType,
     options
   );
+}
+
+/**
+ * Wrap a Uint8Array in a ReadableStream that reports upload progress.
+ */
+function createProgressStream(
+  data: Uint8Array,
+  onProgress: (uploaded: number, total: number) => void,
+  chunkSize = 64 * 1024,
+): ReadableStream<Uint8Array> {
+  const total = data.byteLength;
+  let offset = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (offset >= total) {
+        controller.close();
+        return;
+      }
+      const end = Math.min(offset + chunkSize, total);
+      controller.enqueue(data.subarray(offset, end));
+      offset = end;
+      onProgress(offset, total);
+    },
+  });
 }
 
 /**
