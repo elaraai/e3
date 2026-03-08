@@ -7,14 +7,12 @@ import { Hono } from 'hono';
 import { mkdir, writeFile, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { NullType, variant } from '@elaraai/east';
 import {
   BEAST2_CONTENT_TYPE,
   ObjectNotFoundError,
   type StorageBackend,
   type TransferBackend,
 } from '@elaraai/e3-core';
-import { sendError } from '../beast2.js';
 
 const STAGING_DIR = join(tmpdir(), 'e3-transfers');
 
@@ -74,9 +72,10 @@ export function createDataEndpoints(
       const body = new Uint8Array(await c.req.arrayBuffer());
       if (BigInt(body.byteLength) !== pkgRecord.size) {
         await transferBackend.packageImport.delete(id);
-        return sendError(NullType, variant('internal', {
-          message: `size mismatch: expected ${pkgRecord.size}, got ${body.byteLength}`,
-        }));
+        return new Response(
+          `size mismatch: expected ${pkgRecord.size}, got ${body.byteLength}`,
+          { status: 400 }
+        );
       }
 
       const stagingPath = join(STAGING_DIR, `${id}.zip.partial`);

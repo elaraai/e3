@@ -171,7 +171,12 @@ export function packageTransferTests(setup: TestSetup<TestContext>): void {
       });
 
       // Check if the upload itself rejected the size mismatch (local server behavior)
-      if (uploadRes.ok && uploadRes.headers.get('content-type')?.includes('beast2')) {
+      // Local server returns HTTP 400 for size mismatch
+      if (!uploadRes.ok) {
+        // Size mismatch caught at upload time — test passes
+        return;
+      }
+      if (uploadRes.headers.get('content-type')?.includes('beast2')) {
         const uploadBuffer = new Uint8Array(await uploadRes.arrayBuffer());
         if (uploadBuffer.length > 0) {
           const decodeUpload = decodeBeast2For(ApiTypes.ResponseType(NullType));

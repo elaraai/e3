@@ -93,6 +93,16 @@ export function createPackageTransferRoutes(
     const stagingPath = join(STAGING_DIR, `${id}.zip.partial`);
 
     try {
+      // Verify staging file exists before attempting import
+      await stat(stagingPath);
+    } catch {
+      await transferBackend.packageImport.delete(id);
+      return sendError(PackageJobResponseType, variant('internal', {
+        message: 'Upload file not found — upload may have failed or been rejected',
+      }));
+    }
+
+    try {
       const result = await packageImport(storage, repoPath, stagingPath);
       await transferBackend.packageImport.updateStatus(id, variant('completed', {
         name: result.name,
