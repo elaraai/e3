@@ -11,7 +11,7 @@
  * - `.tasks.${name}.output` - The output dataset (public)
  */
 
-import type { BlockBuilder, CallableFunctionExpr, EastType, ExprType, FunctionExpr, FunctionIR } from '@elaraai/east';
+import type { AsyncFunctionExpr, BlockBuilder, CallableAsyncFunctionExpr, CallableFunctionExpr, EastType, ExprType, FunctionExpr, FunctionIR, AsyncFunctionIR } from '@elaraai/east';
 import { Expr, variant, ArrayType, StringType, East, IRType } from '@elaraai/east';
 import type { DatasetDef, DataTreeDef, TaskDef } from './types.js';
 
@@ -58,7 +58,7 @@ function createTaskTree(name: string): DataTreeDef {
  * @param ir - The compiled function IR
  * @returns A DatasetDef for the function IR (private, not typed)
  */
-function createFunctionIRDataset(name: string, taskTree: DataTreeDef, ir: FunctionIR): DatasetDef {
+function createFunctionIRDataset(name: string, taskTree: DataTreeDef, ir: FunctionIR | AsyncFunctionIR): DatasetDef {
   return {
     kind: 'dataset',
     name: 'function_ir',
@@ -169,12 +169,22 @@ export function task<Name extends string, Inputs extends readonly DatasetDef[], 
   name: Name,
   inputs: [...Inputs],
   fn: FunctionExpr<ExtractDatasetTypes<Inputs>, Output> | CallableFunctionExpr<ExtractDatasetTypes<Inputs>, Output>,
-  config?: {
-    runner?: string[],
-  }
-): TaskDef<Output, [variant<'field', 'tasks'>, variant<'field', Name>, variant<'field', 'output'>]> {
+  config?: { runner?: string[] },
+): TaskDef<Output, [variant<'field', 'tasks'>, variant<'field', Name>, variant<'field', 'output'>]>;
+export function task<Name extends string, Inputs extends readonly DatasetDef[], Output extends EastType>(
+  name: Name,
+  inputs: [...Inputs],
+  fn: AsyncFunctionExpr<ExtractDatasetTypes<Inputs>, Output> | CallableAsyncFunctionExpr<ExtractDatasetTypes<Inputs>, Output>,
+  config?: { runner?: string[] },
+): TaskDef<Output, [variant<'field', 'tasks'>, variant<'field', Name>, variant<'field', 'output'>]>;
+export function task(
+  name: string,
+  inputs: DatasetDef[],
+  fn: FunctionExpr<any, any> | AsyncFunctionExpr<any, any>,
+  config?: { runner?: string[] },
+): TaskDef {
   const ir = fn.toIR().ir;
-  const outputType = Expr.type(fn).output;
+  const outputType = Expr.type(fn as Expr<any>).output as EastType;
 
   // Create the task's subtree at .tasks.${name}
   const taskTree = createTaskTree(name);
@@ -217,7 +227,7 @@ export function task<Name extends string, Inputs extends readonly DatasetDef[], 
     }
   );
 
-  const taskDef: TaskDef<Output, [variant<'field', 'tasks'>, variant<'field', Name>, variant<'field', 'output'>]> = {
+  const taskDef: TaskDef = {
     kind: 'task',
     name,
     command: commandFn.toIR().ir,

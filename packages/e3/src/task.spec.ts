@@ -168,6 +168,45 @@ describe('task', () => {
     });
   });
 
+  describe('async functions', () => {
+    it('accepts an async function', () => {
+      const name_input = input('name', StringType, 'World');
+
+      const greet = task(
+        'greet',
+        [name_input],
+        East.asyncFunction(
+          [StringType],
+          StringType,
+          ($, name) => $.return(East.str`Hello, ${name}!`)
+        )
+      );
+
+      assert.strictEqual(greet.kind, 'task');
+      assert.strictEqual(greet.name, 'greet');
+      assert.strictEqual(greet.output.kind, 'dataset');
+      assert.strictEqual(greet.output.type, StringType);
+    });
+
+    it('accepts async function with multiple inputs', () => {
+      const name_input = input('name', StringType, 'World');
+      const count_input = input('count', IntegerType, 1n);
+
+      const repeat_greet = task(
+        'repeat_greet',
+        [name_input, count_input],
+        East.asyncFunction(
+          [StringType, IntegerType],
+          StringType,
+          ($, name, _count) => $.return(East.str`Hello, ${name}!`)
+        )
+      );
+
+      assert.strictEqual(repeat_greet.kind, 'task');
+      assert.strictEqual(repeat_greet.inputs.length, 3); // function_ir + 2 inputs
+    });
+  });
+
   describe('task structure', () => {
     it('creates correct output path', () => {
       const name_input = input('name', StringType, 'World');
