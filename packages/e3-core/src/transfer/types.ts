@@ -16,11 +16,12 @@ import {
   IntegerType,
   VariantType,
   NullType,
+  OptionType,
   DateTimeType,
   type ValueTypeOf,
 } from '@elaraai/east';
-import { PackageImportProgressType } from '@elaraai/e3-types';
-export { PackageImportProgressType };
+import { PackageImportProgressType, PackageExportProgressType } from '@elaraai/e3-types';
+export { PackageImportProgressType, PackageExportProgressType };
 
 // =============================================================================
 // Dataset Upload
@@ -67,7 +68,7 @@ export type PackageImport = ValueTypeOf<typeof PackageImportType>;
 // =============================================================================
 
 export const PackageExportStatusType = VariantType({
-  processing: NullType,
+  processing: PackageExportProgressType,
   completed: StructType({ size: IntegerType }),
   failed: StructType({ message: StringType }),
 });
@@ -76,6 +77,7 @@ export const PackageExportType = StructType({
   repo: StringType,
   name: StringType,
   version: StringType,
+  workspace: OptionType(StringType),
   status: PackageExportStatusType,
   createdAt: DateTimeType,
 });

@@ -91,6 +91,8 @@ export {
   type PackageImportProgress,
   PackageImportStatusType,
   type PackageImportStatus,
+  PackageExportProgressType,
+  type PackageExportProgress,
   PackageExportStatusType,
   type PackageExportStatus,
 } from './package.js';

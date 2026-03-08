@@ -12,6 +12,7 @@ export {
   PackageImportStatusType,
   type PackageImport,
   PackageExportType,
+  PackageExportProgressType,
   PackageExportStatusType,
   type PackageExport,
 } from './types.js';

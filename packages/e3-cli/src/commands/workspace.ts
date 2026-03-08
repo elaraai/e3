@@ -99,12 +99,25 @@ export const workspaceCommand = {
         console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
         console.log(`  Objects: ${result.objectCount}`);
       } else {
-        // Remote export - fetch zip bytes and write to local file
-        // Note: Remote export doesn't support custom name/version options
-        if (options.name || options.version) {
-          console.warn('Warning: --name and --version options are not supported for remote export');
-        }
-        const zipBytes = await workspaceExportRemote(location.baseUrl, location.repo, ws, { token: location.token });
+        // Remote export - async transfer protocol with progress
+        const zipBytes = await workspaceExportRemote(
+          location.baseUrl, location.repo, ws,
+          { token: location.token },
+          {
+            name: options.name,
+            version: options.version,
+            onProgress: (progress) => {
+              if (progress.type === 'pending') {
+                process.stdout.write(`\rPending...                              `);
+              } else if (progress.type === 'exporting') {
+                process.stdout.write(`\rExporting... ${progress.value.objectsProcessed} objects`);
+              } else if (progress.type === 'uploading') {
+                process.stdout.write(`\rUploading...                            `);
+              }
+            },
+          },
+        );
+        process.stdout.write('\r\x1b[K');
         writeFileSync(zipPath, zipBytes);
 
         console.log(`Exported workspace ${ws}`);

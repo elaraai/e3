@@ -273,6 +273,17 @@ export const WorkspaceDeployRequestType = StructType({
   packageRef: StringType,
 });
 
+/**
+ * Workspace export request body.
+ *
+ * @property name - Optional custom package name
+ * @property version - Optional custom version
+ */
+export const WorkspaceExportRequestType = StructType({
+  name: OptionType(StringType),
+  version: OptionType(StringType),
+});
+
 // =============================================================================
 // Workspace Status Types
 // =============================================================================
@@ -845,6 +856,7 @@ export const ApiTypes = {
   WorkspaceCreateRequestType,
   WorkspaceInfoType,
   WorkspaceDeployRequestType,
+  WorkspaceExportRequestType,
 
   // Workspace Status
   DatasetStatusType,

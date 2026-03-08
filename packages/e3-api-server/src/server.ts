@@ -353,7 +353,7 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   app.route('/api/repos/:repo/packages', createPackageRoutes(storage, getRepoPath));
 
   // Workspace routes: /api/repos/:repo/workspaces/*
-  app.route('/api/repos/:repo/workspaces', createWorkspaceRoutes(storage, getRepoPath));
+  app.route('/api/repos/:repo/workspaces', createWorkspaceRoutes(storage, getRepoPath, transferBackend));
 
   // Dataset transfer auth routes (init + commit) mount alongside dataset routes
   app.route('/api/repos/:repo/workspaces/:ws/datasets', dsTransfer.api);

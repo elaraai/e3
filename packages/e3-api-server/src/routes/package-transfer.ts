@@ -8,7 +8,7 @@ import { mkdir, unlink, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { variant } from '@elaraai/east';
+import { variant, none } from '@elaraai/east';
 import {
   packageImport,
   packageExport,
@@ -168,7 +168,7 @@ export function createPackageTransferRoutes(
 
     const status = record.status;
     if (status.type === 'processing') {
-      return sendSuccess(PackageExportStatusType, variant('processing', null));
+      return sendSuccess(PackageExportStatusType, variant('processing', status.value));
     }
     if (status.type === 'failed') {
       return sendSuccess(PackageExportStatusType, variant('failed', { message: status.value.message }));
@@ -203,7 +203,8 @@ export function createPackageTransferRoutes(
       repo,
       name,
       version,
-      status: variant('processing', null),
+      workspace: none,
+      status: variant('processing', variant('pending', null)),
       createdAt: new Date(),
     });
 

@@ -62,7 +62,7 @@ export const packageCommand = {
             },
           },
         );
-        process.stdout.write('\n');
+        process.stdout.write('\r\x1b[K');
 
         console.log(`Imported ${result.name}@${result.version}`);
         console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
@@ -90,7 +90,22 @@ export const packageCommand = {
         console.log(`  Objects: ${result.objectCount}`);
       } else {
         // Remote export - fetch zip bytes and write locally
-        const zipBytes = await packageExportRemote(location.baseUrl, location.repo, name, version, { token: location.token });
+        const zipBytes = await packageExportRemote(
+          location.baseUrl, location.repo, name, version,
+          { token: location.token },
+          {
+            onProgress: (progress) => {
+              if (progress.type === 'pending') {
+                process.stdout.write(`\rPending...                              `);
+              } else if (progress.type === 'exporting') {
+                process.stdout.write(`\rExporting... ${progress.value.objectsProcessed} objects`);
+              } else if (progress.type === 'uploading') {
+                process.stdout.write(`\rUploading...                            `);
+              }
+            },
+          },
+        );
+        process.stdout.write('\r\x1b[K');
         writeFileSync(zipPath, zipBytes);
 
         console.log(`Exported ${name}@${version} to ${zipPath}`);

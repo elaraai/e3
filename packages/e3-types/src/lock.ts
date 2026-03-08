@@ -43,6 +43,8 @@ export const LockOperationType = VariantType({
   removal: NullType,
   /** Writing to a dataset */
   dataset_write: NullType,
+  /** Exporting a workspace */
+  export: NullType,
 });
 
 export type LockOperation = ValueTypeOf<typeof LockOperationType>;

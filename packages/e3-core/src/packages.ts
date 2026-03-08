@@ -323,6 +323,14 @@ export interface PackageExportResult {
 }
 
 /**
+ * Options for package export
+ */
+export interface PackageExportOptions {
+  /** Called after each object is added. Can be used for progress reporting. */
+  onProgress?: (progress: { objectsProcessed: number }) => Promise<void>;
+}
+
+/**
  * Fixed mtime for deterministic zip output (Unix epoch)
  */
 const DETERMINISTIC_MTIME = new Date(0);
@@ -344,7 +352,8 @@ export async function packageExport(
   repo: string,
   name: string,
   version: string,
-  zipPath: string
+  zipPath: string,
+  options?: PackageExportOptions,
 ): Promise<PackageExportResult> {
   const partialPath = `${zipPath}.partial`;
 
@@ -365,6 +374,7 @@ export async function packageExport(
     const data = await storage.objects.read(repo, hash);
     const objPath = `objects/${hash.slice(0, 2)}/${hash.slice(2)}.beast2`;
     zipfile.addBuffer(Buffer.from(data), objPath, { mtime: DETERMINISTIC_MTIME });
+    if (options?.onProgress) await options.onProgress({ objectsProcessed: addedObjects.size });
   };
 
   // Helper to collect children from a tree object
