@@ -329,17 +329,16 @@ export async function watchCommand(
   let debounceTimer: NodeJS.Timeout | null = null;
 
   function setupWatchers(files: string[]) {
-    // Close watchers for files no longer in the list
-    for (const [filePath, watcher] of watchers) {
-      if (!files.includes(filePath)) {
-        watcher.close();
-        watchers.delete(filePath);
-      }
+    // Close all existing watchers — fs.watch on Linux breaks after
+    // atomic saves (write-to-temp + rename) because the inode changes.
+    for (const [, watcher] of watchers) {
+      watcher.close();
     }
+    watchers.clear();
 
-    // Add watchers for new files
+    // Create fresh watchers for all files
     for (const filePath of files) {
-      if (!watchers.has(filePath) && fs.existsSync(filePath)) {
+      if (fs.existsSync(filePath)) {
         const watcher = fs.watch(filePath, () => {
           if (debounceTimer) {
             clearTimeout(debounceTimer);

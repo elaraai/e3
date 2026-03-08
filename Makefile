@@ -1,10 +1,14 @@
 # e3 - East Execution Engine
 # Top-level Makefile for building all components
 
-.PHONY: all build test clean install dev help lint link unlink fuzz fuzz-quick fuzz-stress fuzz-build
+.PHONY: all update build test clean install dev help lint link unlink fuzz fuzz-quick fuzz-stress fuzz-build
 
 # Default target
 all: build
+
+# Update @elaraai dependencies (including transitive)
+update:
+	$(NVM) npm update @elaraai/east @elaraai/east-node-std
 
 help:
 	@echo "e3 - East Execution Engine"
