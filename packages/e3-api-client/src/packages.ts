@@ -11,6 +11,7 @@ import {
   PackageJobResponseType,
   PackageImportStatusType,
   PackageExportStatusType,
+  type PackageImportProgress,
   type PackageImportResult,
   type PackageImportStatus,
   type PackageExportStatus,
@@ -47,6 +48,14 @@ export async function packageGet(
 }
 
 /**
+ * Options for package import progress reporting.
+ */
+export interface PackageImportOptions {
+  onProgress?: (progress: PackageImportProgress) => void;
+  signal?: AbortSignal;
+}
+
+/**
  * Import a package from a zip archive using the transfer protocol.
  *
  * Flow: init upload → upload zip → trigger import → poll for result
@@ -55,9 +64,11 @@ export async function packageImport(
   url: string,
   repo: string,
   archive: Uint8Array,
-  options: RequestOptions
+  options: RequestOptions,
+  importOptions?: PackageImportOptions,
 ): Promise<PackageImportResult> {
   const repoEncoded = encodeURIComponent(repo);
+  const signal = importOptions?.signal;
 
   // 1. Init transfer
   const encodeInit = encodeBeast2For(PackageTransferInitRequestType);
@@ -68,6 +79,7 @@ export async function packageImport(
       'Accept': BEAST2_CONTENT_TYPE,
     },
     body: encodeInit({ size: BigInt(archive.byteLength) }),
+    signal,
   }, options);
 
   if (!initRes.ok) throw new Error(`Transfer init failed: ${initRes.status} ${initRes.statusText}`);
@@ -84,6 +96,7 @@ export async function packageImport(
     method: 'PUT',
     headers: { 'Content-Type': 'application/zip' },
     body: archive,
+    signal,
   });
 
   if (!uploadRes.ok) throw new Error(`Transfer upload failed: ${uploadRes.status} ${uploadRes.statusText}`);
@@ -92,6 +105,7 @@ export async function packageImport(
   const importRes = await fetchWithAuth(`${url}/api/repos/${repoEncoded}/import/${id}`, {
     method: 'POST',
     headers: { 'Accept': BEAST2_CONTENT_TYPE },
+    signal,
   }, options);
 
   if (!importRes.ok) throw new Error(`Transfer import failed: ${importRes.status} ${importRes.statusText}`);
@@ -102,7 +116,7 @@ export async function packageImport(
   if (importResult.type === 'error') throw new ApiError(importResult.value.type, importResult.value.value);
 
   // 4. Poll for result
-  const status = await pollImport(url, repoEncoded, importResult.value.id, options);
+  const status = await pollImport(url, repoEncoded, importResult.value.id, options, importOptions?.onProgress, signal);
 
   if (status.type === 'failed') {
     throw new Error(`Package import failed: ${status.value.message}`);
@@ -187,13 +201,16 @@ async function pollImport(
   repoEncoded: string,
   id: string,
   options: RequestOptions,
-  maxAttempts = 120,
-  intervalMs = 500
+  onProgress?: (progress: PackageImportProgress) => void,
+  signal?: AbortSignal,
+  intervalMs = 1000,
 ): Promise<PackageImportStatus> {
-  for (let i = 0; i < maxAttempts; i++) {
+  while (true) {
+    signal?.throwIfAborted();
     const res = await fetchWithAuth(`${url}/api/repos/${repoEncoded}/import/${id}`, {
       method: 'GET',
       headers: { 'Accept': BEAST2_CONTENT_TYPE },
+      signal,
     }, options);
 
     if (!res.ok) throw new Error(`Import poll failed: ${res.status} ${res.statusText}`);
@@ -203,14 +220,14 @@ async function pollImport(
     const result = decode(buffer) as Response<PackageImportStatus>;
     if (result.type === 'error') throw new ApiError(result.value.type, result.value.value);
 
-    if (result.value.type !== 'processing') {
-      return result.value;
+    if (result.value.type === 'processing') {
+      onProgress?.(result.value.value);
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+      continue;
     }
 
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    return result.value;
   }
-
-  throw new Error('Package import timed out');
 }
 
 /**
@@ -221,13 +238,15 @@ async function pollExport(
   repoEncoded: string,
   id: string,
   options: RequestOptions,
-  maxAttempts = 120,
-  intervalMs = 500
+  signal?: AbortSignal,
+  intervalMs = 1000,
 ): Promise<PackageExportStatus> {
-  for (let i = 0; i < maxAttempts; i++) {
+  while (true) {
+    signal?.throwIfAborted();
     const res = await fetchWithAuth(`${url}/api/repos/${repoEncoded}/export/${id}`, {
       method: 'GET',
       headers: { 'Accept': BEAST2_CONTENT_TYPE },
+      signal,
     }, options);
 
     if (!res.ok) throw new Error(`Export poll failed: ${res.status} ${res.statusText}`);
@@ -243,6 +262,4 @@ async function pollExport(
 
     await new Promise(resolve => setTimeout(resolve, intervalMs));
   }
-
-  throw new Error('Package export timed out');
 }

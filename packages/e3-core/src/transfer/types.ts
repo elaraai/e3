@@ -19,6 +19,8 @@ import {
   DateTimeType,
   type ValueTypeOf,
 } from '@elaraai/east';
+import { PackageImportProgressType } from '@elaraai/e3-types';
+export { PackageImportProgressType };
 
 // =============================================================================
 // Dataset Upload
@@ -41,7 +43,7 @@ export type DatasetUpload = ValueTypeOf<typeof DatasetUploadType>;
 export const PackageImportStatusType = VariantType({
   created: NullType,
   uploaded: NullType,
-  processing: NullType,
+  processing: PackageImportProgressType,
   completed: StructType({
     name: StringType,
     version: StringType,

@@ -87,6 +87,8 @@ export {
   type PackageImportResult,
   PackageExportResultType,
   type PackageExportResult,
+  PackageImportProgressType,
+  type PackageImportProgress,
   PackageImportStatusType,
   type PackageImportStatus,
   PackageExportStatusType,

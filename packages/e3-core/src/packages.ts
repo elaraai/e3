@@ -34,6 +34,14 @@ export interface PackageImportResult {
 }
 
 /**
+ * Options for package import
+ */
+export interface PackageImportOptions {
+  /** Called after each object is written. Can be used for progress reporting. */
+  onProgress?: (progress: { objectsProcessed: number }) => Promise<void>;
+}
+
+/**
  * Import a package from a .zip file into the repository.
  *
  * Extracts objects to `objects/`, creates ref at `packages/<name>/<version>`.
@@ -41,12 +49,14 @@ export interface PackageImportResult {
  * @param storage - Storage backend
  * @param repo - Repository identifier
  * @param zipPath - Path to the .zip package file
+ * @param options - Optional import options (e.g. progress callback)
  * @returns Import result with package name, version, and stats
  */
 export async function packageImport(
   storage: StorageBackend,
   repo: string,
-  zipPath: string
+  zipPath: string,
+  options?: PackageImportOptions,
 ): Promise<PackageImportResult> {
   // Open the zip file
   const zipfile = await openZip(zipPath);
@@ -127,6 +137,9 @@ export async function packageImport(
         // Store the object (storage.objects.write will verify the hash matches)
         await storage.objects.write(repo, data);
         objectCount++;
+        if (options?.onProgress) {
+          await options.onProgress({ objectsProcessed: objectCount });
+        }
         continue;
       }
 

@@ -70,6 +70,7 @@ export {
   packageResolve,
   packageRead,
   type PackageImportResult,
+  type PackageImportOptions,
   type PackageExportResult,
 } from './packages.js';
 

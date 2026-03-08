@@ -140,20 +140,18 @@ export function createPackageTransferRoutes(
       return sendError(PackageImportStatusType, variant('internal', { message: 'import job not found' }));
     }
 
-    const { type, value } = record.status;
-    if (type === 'processing' || type === 'created' || type === 'uploaded') {
-      return sendSuccess(PackageImportStatusType, variant('processing', null));
+    const status = record.status;
+    if (status.type === 'processing') {
+      return sendSuccess(PackageImportStatusType, variant('processing', status.value));
     }
-    if (type === 'failed') {
-      return sendSuccess(PackageImportStatusType, variant('failed', { message: (value as { message: string }).message }));
+    if (status.type === 'created' || status.type === 'uploaded') {
+      return sendSuccess(PackageImportStatusType, variant('processing', variant('pending', null)));
     }
-    if (type === 'completed') {
-      return sendSuccess(PackageImportStatusType, variant('completed', value as {
-        name: string;
-        version: string;
-        packageHash: string;
-        objectCount: bigint;
-      }));
+    if (status.type === 'failed') {
+      return sendSuccess(PackageImportStatusType, variant('failed', { message: status.value.message }));
+    }
+    if (status.type === 'completed') {
+      return sendSuccess(PackageImportStatusType, variant('completed', status.value));
     }
 
     return sendError(PackageImportStatusType, variant('internal', { message: 'unknown status' }));
@@ -168,21 +166,21 @@ export function createPackageTransferRoutes(
       return sendError(PackageExportStatusType, variant('internal', { message: 'export job not found' }));
     }
 
-    const { type, value } = record.status;
-    if (type === 'processing') {
+    const status = record.status;
+    if (status.type === 'processing') {
       return sendSuccess(PackageExportStatusType, variant('processing', null));
     }
-    if (type === 'failed') {
-      return sendSuccess(PackageExportStatusType, variant('failed', { message: (value as { message: string }).message }));
+    if (status.type === 'failed') {
+      return sendSuccess(PackageExportStatusType, variant('failed', { message: status.value.message }));
     }
-    if (type === 'completed') {
+    if (status.type === 'completed') {
       const downloadUrl = await transferBackend.packageExport.getDownloadUrl(id, record.repo);
       // Resolve relative URL against the request origin
       const origin = new URL(c.req.url).origin;
       const resolvedUrl = downloadUrl.startsWith('/') ? `${origin}${downloadUrl}` : downloadUrl;
       return sendSuccess(PackageExportStatusType, variant('completed', {
         downloadUrl: resolvedUrl,
-        size: (value as { size: bigint }).size,
+        size: status.value.size,
       }));
     }
 

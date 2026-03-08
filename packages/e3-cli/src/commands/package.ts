@@ -41,7 +41,20 @@ export const packageCommand = {
       } else {
         // Remote import - read local zip and send to server
         const zipBytes = readFileSync(zipPath);
-        const result = await packageImportRemote(location.baseUrl, location.repo, new Uint8Array(zipBytes), { token: location.token });
+        const result = await packageImportRemote(
+          location.baseUrl, location.repo, new Uint8Array(zipBytes),
+          { token: location.token },
+          {
+            onProgress: (progress) => {
+              if (progress.type === 'downloading') {
+                process.stdout.write(`\rDownloading...`);
+              } else if (progress.type === 'importing') {
+                process.stdout.write(`\rImporting... ${progress.value.objectsProcessed} objects processed`);
+              }
+            },
+          },
+        );
+        process.stdout.write('\n');
 
         console.log(`Imported ${result.name}@${result.version}`);
         console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
