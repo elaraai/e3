@@ -56,9 +56,42 @@ export async function packageImport(
   let packageHash: string | undefined;
   let objectCount = 0;
 
-  // Buffer execution files for atomic import
-  // Map: executionDir -> Map<filename, data>
-  const executionFiles = new Map<string, Map<string, Buffer>>();
+  // Track current execution being assembled (flush on directory change)
+  let currentExecDir: string | null = null;
+  let currentExecFiles = new Map<string, Buffer>();
+
+  const flushExecution = async () => {
+    if (currentExecDir === null) return;
+    const [taskHash, inputsHash, executionId] = currentExecDir.split('/') as [string, string, string];
+
+    // Check if execution already exists — skip if so
+    const existingStatus = await storage.refs.executionGet(repo, taskHash, inputsHash, executionId);
+    if (existingStatus !== null) {
+      currentExecDir = null;
+      currentExecFiles = new Map();
+      return;
+    }
+
+    // Write status first
+    const statusData = currentExecFiles.get('status.beast2');
+    if (statusData) {
+      const statusDecoder = decodeBeast2For(ExecutionStatusType);
+      const status = statusDecoder(statusData);
+      await storage.refs.executionWrite(repo, taskHash, inputsHash, executionId, status);
+    }
+
+    // Write logs
+    for (const stream of ['stdout.txt', 'stderr.txt'] as const) {
+      const logData = currentExecFiles.get(stream);
+      if (logData && logData.length > 0) {
+        const streamName = stream === 'stdout.txt' ? 'stdout' : 'stderr';
+        await storage.logs.append(repo, taskHash, inputsHash, executionId, streamName, logData.toString('utf-8'));
+      }
+    }
+
+    currentExecDir = null;
+    currentExecFiles = new Map();
+  };
 
   try {
     // Iterate through all entries
@@ -121,12 +154,14 @@ export async function packageImport(
           const executionId = parts[3]!;
           const file = parts.slice(4).join('/');
 
-          // Buffer execution files for atomic import later
           const execDir = `${taskHash}/${inputsHash}/${executionId}`;
-          if (!executionFiles.has(execDir)) {
-            executionFiles.set(execDir, new Map());
+
+          // Flush previous execution if we've moved to a new one
+          if (currentExecDir !== null && currentExecDir !== execDir) {
+            await flushExecution();
           }
-          executionFiles.get(execDir)!.set(file, await getData());
+          currentExecDir = execDir;
+          currentExecFiles.set(file, await getData());
         }
         continue;
       }
@@ -145,39 +180,11 @@ export async function packageImport(
     zipfile.close();
   }
 
+  // Flush the last execution
+  await flushExecution();
+
   if (!packageName || !packageVersion || !packageHash) {
     throw new PackageInvalidError('missing package ref');
-  }
-
-  // Import executions atomically
-  // For each execution, check if it already exists (by executionId), skip if so
-  for (const [execDir, files] of executionFiles) {
-    const [taskHash, inputsHash, executionId] = execDir.split('/') as [string, string, string];
-
-    // Check if execution already exists
-    const existingStatus = await storage.refs.executionGet(repo, taskHash, inputsHash, executionId);
-    if (existingStatus !== null) {
-      // Execution already exists, skip (don't overwrite)
-      continue;
-    }
-
-    // Import the execution files
-    // First, write the status
-    const statusData = files.get('status.beast2');
-    if (statusData) {
-      const statusDecoder = decodeBeast2For(ExecutionStatusType);
-      const status = statusDecoder(statusData);
-      await storage.refs.executionWrite(repo, taskHash, inputsHash, executionId, status);
-    }
-
-    // Write logs if present
-    for (const stream of ['stdout.txt', 'stderr.txt'] as const) {
-      const logData = files.get(stream);
-      if (logData && logData.length > 0) {
-        const streamName = stream === 'stdout.txt' ? 'stdout' : 'stderr';
-        await storage.logs.append(repo, taskHash, inputsHash, executionId, streamName, logData.toString('utf-8'));
-      }
-    }
   }
 
   return {
