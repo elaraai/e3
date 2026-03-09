@@ -40,6 +40,7 @@ import {
   createParallelMixedPackageZip,
   createFailingDiamondPackageZip,
   createWideParallelPackageZip,
+  createSlowDiamondPackageZip,
 } from '../fixtures.js';
 
 /** Helper: import package, create workspace, deploy */
@@ -93,6 +94,16 @@ export function dataflowTests(setup: TestSetup<TestContext>): void {
     await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
     await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'slow-ws', opts);
     await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'slow-ws', 'slow-pkg@1.0.0', opts);
+    return ctx;
+  };
+  const withSlowDiamond: TestSetup<TestContext> = async (t) => {
+    const ctx = await setup(t);
+    const opts = await ctx.opts();
+    const zipPath = await createSlowDiamondPackageZip(ctx.tempDir, 'sdiamond-pkg', '1.0.0', 3);
+    const packageZip = readFileSync(zipPath);
+    await packageImport(ctx.config.baseUrl, ctx.repoName, packageZip, opts);
+    await workspaceCreate(ctx.config.baseUrl, ctx.repoName, 'sdiamond-ws', opts);
+    await workspaceDeploy(ctx.config.baseUrl, ctx.repoName, 'sdiamond-ws', 'sdiamond-pkg@1.0.0', opts);
     return ctx;
   };
   const withNoExec = withDeployed(setup, createPackageZip, 'noexec-pkg', 'noexec-ws');
@@ -594,6 +605,49 @@ export function dataflowTests(setup: TestSetup<TestContext>): void {
         const outputPath = [variant('field', 'tasks'), variant('field', 'compute'), variant('field', 'output')];
         const { data: output } = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'conc-ws', outputPath, opts);
         assert.strictEqual(decode(output), 14n);
+      });
+
+      it('diamond DAG maintains version vector consistency when input changes during execution', async (t) => {
+        // Diamond: x → left(x*2), right(x*3), merge(left+right) = x*5
+        // Left and right sleep 3s so we can change x while they run.
+        // If VVs are consistent, merge output is always divisible by 5.
+        // The VV bug causes mixed versions: e.g. left uses old x, right uses new x.
+        const ctx = await withSlowDiamond(t);
+        const opts = await ctx.opts();
+
+        const encode = encodeBeast2For(IntegerType);
+        const decode = decodeBeast2For(IntegerType);
+        const inputPath = [variant('field', 'inputs'), variant('field', 'x')];
+        const mergePath = [variant('field', 'tasks'), variant('field', 'merge'), variant('field', 'output')];
+
+        // Start execution (non-blocking) — x defaults to 1
+        await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'sdiamond-ws', { force: true }, opts);
+
+        // Wait for tasks to start running, then change input
+        await new Promise(r => setTimeout(r, 1000));
+        await datasetSet(ctx.config.baseUrl, ctx.repoName, 'sdiamond-ws', inputPath, encode(19n), opts);
+
+        // Poll until execution completes (reactive re-execution should reach fixpoint)
+        const maxWait = 60000;
+        const startTime = Date.now();
+        while (Date.now() - startTime < maxWait) {
+          const state = await dataflowExecution(ctx.config.baseUrl, ctx.repoName, 'sdiamond-ws', {}, opts);
+          if (state.status.type === 'completed' || state.status.type === 'failed' || state.status.type === 'aborted') {
+            break;
+          }
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        // Read merge output — must be x*5 for some consistent x
+        const { data: mergeData } = await datasetGet(ctx.config.baseUrl, ctx.repoName, 'sdiamond-ws', mergePath, opts);
+        const mergeValue = decode(mergeData);
+
+        assert.strictEqual(
+          mergeValue % 5n,
+          0n,
+          `Diamond consistency violated: merge=${mergeValue} is not divisible by 5 ` +
+          `(expected x*5 for consistent x, got mixed versions)`
+        );
       });
     });
 

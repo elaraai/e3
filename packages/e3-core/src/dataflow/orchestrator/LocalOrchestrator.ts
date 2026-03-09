@@ -16,7 +16,7 @@
  */
 
 import { decodeBeast2For, encodeBeast2For, variant } from '@elaraai/east';
-import type { VersionVector, DataflowRun, TaskExecutionRecord, Structure } from '@elaraai/e3-types';
+import type { DataflowRun, TaskExecutionRecord, Structure } from '@elaraai/e3-types';
 import { WorkspaceStateType } from '@elaraai/e3-types';
 import type { StorageBackend, LockHandle } from '../../storage/interfaces.js';
 import type { TaskExecuteOptions } from '../../execution/interfaces.js';
@@ -509,43 +509,76 @@ export class LocalOrchestrator implements DataflowOrchestrator {
             execution.mutex.runExclusive(async () => {
               // Handle task completion
               if (result.state === 'success') {
-                // Re-check VV consistency (inputs may have changed during execution)
-                const postVVCheck = stepCheckVersionConsistency(state, taskName);
-                const mergedVV: VersionVector = postVVCheck.consistent
-                  ? postVVCheck.mergedVV
-                  : new Map();
+                // Check if task's inputs changed during execution by comparing
+                // the launch-time merged VV (captured in closure) against current.
+                // handleInputChanges may have updated root input VVs while this
+                // task was in_progress, making its result stale.
+                const launchMergedVV = vvCheck.mergedVV;
+                const currentVVCheck = stepCheckVersionConsistency(state, taskName);
+                const inputsStale = !currentVVCheck.consistent || (() => {
+                  const current = currentVVCheck.mergedVV;
+                  if (launchMergedVV.size !== current.size) return true;
+                  for (const [key, value] of launchMergedVV) {
+                    if (current.get(key) !== value) return true;
+                  }
+                  return false;
+                })();
 
-                if (result.outputHash) {
-                  // Write output ref with merged VV
-                  await stepApplyTreeUpdate(
-                    storage, repo, state.workspace,
-                    prepared.outputPath, result.outputHash, mergedVV
+                if (inputsStale) {
+                  // Task computed with stale inputs — discard result, reset to pending.
+                  // The reactive loop will re-execute it with the updated inputs.
+                  const ts = state.tasks.get(taskName) as Mutable<TaskState> | undefined;
+                  if (ts) ts.status = 'pending';
+
+                  const mutableState = state as Mutable<DataflowExecutionState>;
+                  mutableState.eventSeq = state.eventSeq + 1n;
+                  const invalidEvent: ExecutionEvent = variant('task_invalidated', {
+                    seq: mutableState.eventSeq,
+                    timestamp: new Date(),
+                    task: taskName,
+                    reason: 'inputs changed during execution',
+                  });
+                  (mutableState.events as ExecutionEvent[]).push(invalidEvent);
+                  mutableState.reexecuted = state.reexecuted + 1n;
+
+                  options.onTaskInvalidated?.(taskName, 'inputs changed during execution');
+                } else {
+                  // Use launch-time VV for the output — it reflects what the task
+                  // actually consumed, not what state.versionVectors says now.
+                  const mergedVV = launchMergedVV;
+
+                  if (result.outputHash) {
+                    // Write output ref with merged VV
+                    await stepApplyTreeUpdate(
+                      storage, repo, state.workspace,
+                      prepared.outputPath, result.outputHash, mergedVV
+                    );
+                  }
+
+                  stepTaskCompleted(
+                    state,
+                    taskName,
+                    result.outputHash ?? '',
+                    result.cached,
+                    result.duration
                   );
+
+                  // Track task execution for DataflowRun
+                  const existing = execution.taskExecutions.get(taskName);
+                  execution.taskExecutions.set(taskName, {
+                    executionId: result.executionId ?? state.id,
+                    cached: result.cached,
+                    outputVersions: new Map(mergedVV),
+                    executionCount: (existing?.executionCount ?? 0n) + 1n,
+                  });
+
+                  options.onTaskComplete?.({
+                    name: taskName,
+                    cached: result.cached,
+                    state: 'success',
+                    duration: result.duration,
+                  });
                 }
-
-                stepTaskCompleted(
-                  state,
-                  taskName,
-                  result.outputHash ?? '',
-                  result.cached,
-                  result.duration
-                );
-
-                // Track task execution for DataflowRun
-                const existing = execution.taskExecutions.get(taskName);
-                execution.taskExecutions.set(taskName, {
-                  executionId: result.executionId ?? state.id,
-                  cached: result.cached,
-                  outputVersions: new Map(mergedVV),
-                  executionCount: (existing?.executionCount ?? 0n) + 1n,
-                });
-
-                options.onTaskComplete?.({
-                  name: taskName,
-                  cached: result.cached,
-                  state: 'success',
-                  duration: result.duration,
-                });
 
                 // Detect input changes after task completion
                 await this.handleInputChanges(storage, state, options, structure);
