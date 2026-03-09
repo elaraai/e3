@@ -5,7 +5,7 @@
 
 import { encodeBeast2For, decodeBeast2For } from '@elaraai/east';
 import type { EastType, ValueTypeOf } from '@elaraai/east';
-import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-core';
+import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-types';
 import { ResponseType, ErrorType } from './types.js';
 
 /**

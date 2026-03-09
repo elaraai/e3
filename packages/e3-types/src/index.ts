@@ -127,6 +127,9 @@ export {
   type TransferDoneResponse,
 } from './transfer.js';
 
+// Wire format constants
+export { BEAST2_CONTENT_TYPE } from './constants.js';
+
 // Dataflow execution state
 export {
   type DataflowExecutionStatus,

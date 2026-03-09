@@ -16,7 +16,7 @@ import {
   type PackageImportStatus,
   type PackageExportStatus,
 } from '@elaraai/e3-types';
-import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-core';
+import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-types';
 import type { PackageListItem } from './types.js';
 import { PackageListItemType } from './types.js';
 import { ResponseType } from './types.js';
