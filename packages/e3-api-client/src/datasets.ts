@@ -5,7 +5,8 @@
 
 import { ArrayType, NullType, StringType, decodeBeast2For, encodeBeast2For } from '@elaraai/east';
 import type { TreePath } from '@elaraai/e3-types';
-import { BEAST2_CONTENT_TYPE, computeHash } from '@elaraai/e3-core';
+import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-types';
+import { computeHash } from './util.js';
 import { ApiError, fetchWithAuth, get, type RequestOptions, type Response } from './http.js';
 import {
   ResponseType,
@@ -205,7 +206,7 @@ async function datasetSetTransfer(
   data: Uint8Array,
   options: RequestOptions
 ): Promise<void> {
-  const hash = computeHash(data);
+  const hash = await computeHash(data);
   const pathStr = path.map(p => encodeURIComponent(p.value)).join('/');
   const repoEncoded = encodeURIComponent(repo);
   const wsEncoded = encodeURIComponent(workspace);

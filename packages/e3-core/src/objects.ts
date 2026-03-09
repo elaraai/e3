@@ -12,10 +12,8 @@
 
 import * as crypto from 'crypto';
 
-/**
- * MIME type for BEAST2 binary encoding.
- */
-export const BEAST2_CONTENT_TYPE = 'application/beast2';
+// Re-export from e3-types for backwards compatibility
+export { BEAST2_CONTENT_TYPE } from '@elaraai/e3-types';
 
 /**
  * Calculate SHA256 hash of data.
