@@ -129,7 +129,11 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   }
 
   // Transfer backend for presigned URL object transfer
-  const transferBackend: TransferBackend = new InMemoryTransferBackend({ baseUrl: '' });
+  const transferBackend: TransferBackend = new InMemoryTransferBackend({
+    baseUrl: '',
+    storage,
+    getRepoPath,
+  });
 
   // Data routes (no auth — capability-URL pattern via UUID)
   // Must be mounted BEFORE auth middleware so they bypass JWT validation.

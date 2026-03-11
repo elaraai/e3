@@ -5,15 +5,9 @@
 
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
-import { mkdir, stat as fsStat, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { variant, some } from '@elaraai/east';
 import type { StorageBackend, TransferBackend } from '@elaraai/e3-core';
-import {
-  workspaceExport,
-  workspaceGetState,
-} from '@elaraai/e3-core';
+import { workspaceGetState } from '@elaraai/e3-core';
 import { PackageJobResponseType } from '@elaraai/e3-types';
 import {
   listWorkspaces,
@@ -118,27 +112,7 @@ export function createWorkspaceRoutes(
         createdAt: new Date(),
       });
 
-      const STAGING_DIR = join(tmpdir(), 'e3-transfers');
-      await mkdir(STAGING_DIR, { recursive: true });
-      const zipPath = join(STAGING_DIR, `${id}.zip`);
-
-      try {
-        await workspaceExport(storage, repoPath, ws, zipPath, exportName, exportVersion, {
-          onProgress: async ({ objectsProcessed }) => {
-            await transferBackend.packageExport.updateStatus(id,
-              variant('processing', variant('exporting', { objectsProcessed: BigInt(objectsProcessed) })));
-          },
-        });
-        const fileStat = await fsStat(zipPath);
-        await transferBackend.packageExport.updateStatus(id, variant('completed', {
-          size: BigInt(fileStat.size),
-        }));
-      } catch (err) {
-        await unlink(zipPath).catch(() => {});
-        const message = err instanceof Error ? err.message : String(err);
-        await transferBackend.packageExport.updateStatus(id, variant('failed', { message }));
-      }
-
+      await transferBackend.packageExport.execute(id, repo);
       return sendSuccess(PackageJobResponseType, { id });
     });
   }
