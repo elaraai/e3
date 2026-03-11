@@ -104,33 +104,30 @@ export async function datasetGet(
     {
       method: 'GET',
       headers: { 'Accept': BEAST2_CONTENT_TYPE },
-      redirect: 'manual',
     },
     options
   );
 
-  // Handle 307 redirect — follow WITHOUT auth headers (target is a no-auth data endpoint)
-  if (response.status === 307) {
-    const location = response.headers.get('Location');
-    if (!location) throw new Error('307 redirect missing Location header');
-    // Resolve relative URLs against the request origin
-    const redirectUrl = location.startsWith('/') ? `${url}${location}` : location;
-    const redirectResponse = await fetch(redirectUrl, {
+  if (!response.ok) {
+    throw new Error(`Failed to get dataset: ${response.status} ${response.statusText}`);
+  }
+
+  // Handle redirect response — server returns JSON with download URL for large datasets
+  const contentType = response.headers.get('Content-Type') ?? '';
+  if (contentType.includes('application/json')) {
+    const body = await response.json() as { url: string };
+    const redirectResponse = await fetch(body.url, {
       method: 'GET',
       headers: { 'Accept': BEAST2_CONTENT_TYPE },
     });
     if (!redirectResponse.ok) {
-      throw new Error(`Failed to get dataset (redirect): ${redirectResponse.status} ${redirectResponse.statusText}`);
+      throw new Error(`Failed to get dataset (download): ${redirectResponse.status} ${redirectResponse.statusText}`);
     }
     const buffer = await redirectResponse.arrayBuffer();
     const data = new Uint8Array(buffer);
     const hash = redirectResponse.headers.get('X-Content-SHA256') ?? response.headers.get('X-Content-SHA256') ?? '';
     const size = parseInt(redirectResponse.headers.get('Content-Length') ?? response.headers.get('X-Content-Length') ?? '0', 10);
     return { data, hash, size };
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to get dataset: ${response.status} ${response.statusText}`);
   }
 
   const buffer = await response.arrayBuffer();

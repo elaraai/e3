@@ -68,7 +68,7 @@ describe('getDataset', () => {
     assert.equal(computeHash(body), hash);
   });
 
-  it('returns 307 redirect for >1MB datasets when transferBackend provided', async () => {
+  it('returns JSON with download URL for >1MB datasets when transferBackend provided', async () => {
     const storage = new InMemoryStorage();
     await storage.repos.create(REPO);
     const transferBackend = new InMemoryTransferBackend({ baseUrl: '' });
@@ -88,13 +88,14 @@ describe('getDataset', () => {
     const requestUrl = `http://localhost:3000/api/repos/${REPO}/workspaces/${WS}/datasets/inputs/big`;
     const response = await getDataset(storage, REPO, WS, treePath, REPO, requestUrl, transferBackend);
 
-    assert.equal(response.status, 307);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('Content-Type'), 'application/json');
     assert.equal(response.headers.get('X-Content-SHA256'), hash);
     assert.equal(response.headers.get('X-Content-Length'), String(data.byteLength));
 
-    const location = response.headers.get('Location');
-    assert.ok(location, 'should have Location header');
-    assert.ok(location!.includes('/api/downloads/'), `Expected /api/downloads/ URL, got ${location}`);
+    const body = await response.json() as { url: string };
+    assert.ok(body.url, 'should have url in body');
+    assert.ok(body.url.includes('/api/downloads/'), `Expected /api/downloads/ URL, got ${body.url}`);
   });
 
   it('returns inline bytes for >1MB datasets without transferBackend', async () => {
