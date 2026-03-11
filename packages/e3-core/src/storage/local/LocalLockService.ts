@@ -300,7 +300,11 @@ async function tryAcquireFlock(
   } else {
     args.push('--nonblock');
   }
-  args.push(lockPath, 'cat');
+  // Use 'sh -c "echo ready && cat"' as the inner command so that "ready"
+  // on stdout is a deterministic signal that flock acquired the lock and
+  // started the inner command.  `cat` then blocks on stdin to keep the
+  // subprocess (and therefore the lock) alive until we kill it.
+  args.push(lockPath, 'sh', '-c', 'echo ready && cat');
 
   const child = spawn('flock', args, {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -326,20 +330,20 @@ async function tryAcquireFlock(
       }
     });
 
-    // Give flock a moment to either acquire or fail
-    // If it's still running after 100ms, we have the lock
-    setTimeout(() => {
-      if (!resolved && !child.killed && child.exitCode === null) {
+    // When flock acquires the lock, the inner command prints "ready" to
+    // stdout.  This is a deterministic signal — no timing assumptions.
+    child.stdout!.on('data', (data: Buffer) => {
+      if (!resolved && data.toString().includes('ready')) {
         resolved = true;
 
-        // Write lock state to lock file now that we have the lock
+        // Write lock state now that we have the lock
         void writeLockState(lockPath, lockState).catch((err) => {
           console.warn(`Failed to write lock state: ${err instanceof Error ? err.message : String(err)}`);
         });
 
         resolve(child);
       }
-    }, 100);
+    });
   });
 }
 

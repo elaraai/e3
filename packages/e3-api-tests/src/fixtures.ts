@@ -388,3 +388,61 @@ export async function createWideParallelPackageZip(
 
   return zipPath;
 }
+
+/**
+ * Create a slow diamond package for testing version vector consistency.
+ *
+ * Diamond DAG: x → left(x*2), right(x*3), merge(left+right) = x*5
+ *
+ * Left and right tasks include a sleep to ensure the concurrent `set`
+ * lands while they are executing.
+ *
+ * @param tempDir - Directory to write the zip file
+ * @param name - Package name
+ * @param version - Package version
+ * @param sleepSeconds - How long left and right tasks sleep (default: 3)
+ * @returns Path to the created zip file
+ */
+export async function createSlowDiamondPackageZip(
+  tempDir: string,
+  name: string,
+  version: string,
+  sleepSeconds: number = 3
+): Promise<string> {
+  mkdirSync(tempDir, { recursive: true });
+
+  const input = e3.input('x', IntegerType, 1n);
+
+  // Runner that sleeps before executing east-py, so the concurrent `set` can land
+  const slowRunner = ['bash', '-c', `sleep ${sleepSeconds} && east-py run "$@"`, '--'];
+
+  // Left: sleep then x*2
+  const leftTask = e3.task(
+    'left',
+    [input],
+    East.function([IntegerType], IntegerType, ($, x) => x.multiply(2n)),
+    { runner: slowRunner }
+  );
+
+  // Right: sleep then x*3
+  const rightTask = e3.task(
+    'right',
+    [input],
+    East.function([IntegerType], IntegerType, ($, x) => x.multiply(3n)),
+    { runner: slowRunner }
+  );
+
+  // Merge: left + right (no sleep needed)
+  const mergeTask = e3.task(
+    'merge',
+    [leftTask.output, rightTask.output],
+    East.function([IntegerType, IntegerType], IntegerType, ($, l, r) => l.add(r))
+  );
+
+  const pkg = e3.package(name, version, mergeTask);
+
+  const zipPath = join(tempDir, `${name}-${version}.zip`);
+  await e3.export(pkg, zipPath);
+
+  return zipPath;
+}
