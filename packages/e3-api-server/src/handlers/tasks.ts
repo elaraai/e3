@@ -15,7 +15,7 @@ import {
 import type { StorageBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
-import { TaskInfoType, TaskDetailsType, ExecutionListItemType, type ExecutionListItem } from '../types.js';
+import { TaskListItemType, TaskDetailsType, ExecutionListItemType, type ExecutionListItem } from '../types.js';
 
 /**
  * List all tasks in a workspace.
@@ -36,9 +36,9 @@ export async function listTasks(
       })
     );
 
-    return sendSuccess(ArrayType(TaskInfoType), result);
+    return sendSuccess(ArrayType(TaskListItemType), result);
   } catch (err) {
-    return sendError(ArrayType(TaskInfoType), errorToVariant(err));
+    return sendError(ArrayType(TaskListItemType), errorToVariant(err));
   }
 }
 

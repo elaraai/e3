@@ -336,12 +336,16 @@ async function tryAcquireFlock(
       if (!resolved && data.toString().includes('ready')) {
         resolved = true;
 
-        // Write lock state now that we have the lock
-        void writeLockState(lockPath, lockState).catch((err) => {
-          console.warn(`Failed to write lock state: ${err instanceof Error ? err.message : String(err)}`);
-        });
-
-        resolve(child);
+        // Write lock state before resolving so release() can safely unlink
+        writeLockState(lockPath, lockState)
+          .then(() => {
+            resolve(child);
+          })
+          .catch(() => {
+            // Can't write state — release the kernel lock and report failure
+            child.kill('SIGTERM');
+            resolve(null);
+          });
       }
     });
   });

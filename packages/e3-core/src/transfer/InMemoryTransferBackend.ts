@@ -154,8 +154,8 @@ class InMemoryPackageImportStore implements PackageImportStore {
     void handleProcessImport(
       { storage: this.storage, importStore: this },
       { id, repo: this.getRepoPath(repo), zipPath },
-    ).catch((err) => {
-      console.error(`[e3] background import ${id} failed:`, err);
+    ).catch(() => {
+      // Error already recorded in job status by handleProcessImport
     }).finally(() => {
       this.executing.delete(id);
     });
@@ -221,8 +221,8 @@ class InMemoryPackageExportStore implements PackageExportStore {
     void handleProcessExport(
       { storage: this.storage, exportStore: this },
       { id, repo: this.getRepoPath(repo), zipPath },
-    ).catch((err) => {
-      console.error(`[e3] background export ${id} failed:`, err);
+    ).catch(() => {
+      // Error already recorded in job status by handleProcessExport
     }).finally(() => {
       this.executing.delete(id);
     });

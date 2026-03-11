@@ -19,7 +19,7 @@ import {
   exportWorkspace,
 } from '../handlers/workspaces.js';
 import { decodeBody, sendSuccess, sendError } from '../beast2.js';
-import { CreateWorkspaceType, DeployRequestType, WorkspaceExportRequestType } from '../types.js';
+import { WorkspaceCreateRequestType, WorkspaceDeployRequestType, WorkspaceExportRequestType } from '../types.js';
 
 export function createWorkspaceRoutes(
   storage: StorageBackend,
@@ -39,7 +39,7 @@ export function createWorkspaceRoutes(
   app.post('/', async (c) => {
     const repo = c.req.param('repo')!;
     const repoPath = getRepoPath(repo);
-    const body = await decodeBody(c, CreateWorkspaceType);
+    const body = await decodeBody(c, WorkspaceCreateRequestType);
     return createWorkspace(storage, repoPath, body.name);
   });
 
@@ -72,7 +72,7 @@ export function createWorkspaceRoutes(
     const repo = c.req.param('repo')!;
     const repoPath = getRepoPath(repo);
     const ws = c.req.param('ws')!;
-    const body = await decodeBody(c, DeployRequestType);
+    const body = await decodeBody(c, WorkspaceDeployRequestType);
     return deployWorkspace(storage, repoPath, ws, body.packageRef);
   });
 

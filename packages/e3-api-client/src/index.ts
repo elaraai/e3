@@ -31,7 +31,7 @@ export type {
   TaskListItem,
   TaskDetails,
   DataflowGraph,
-  GraphTask,
+  DataflowGraphTask,
   LogChunk,
   TaskExecutionResult,
   DataflowResult,
