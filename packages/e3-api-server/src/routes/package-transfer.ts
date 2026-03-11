@@ -82,6 +82,12 @@ export function createPackageTransferRoutes(
       return sendSuccess(PackageJobResponseType, { id });
     }
 
+    if (record.status.type === 'created') {
+      return sendError(PackageJobResponseType, variant('internal', {
+        message: 'Upload not yet received',
+      }));
+    }
+
     await transferBackend.packageImport.execute(id, record.repo);
     return sendSuccess(PackageJobResponseType, { id });
   });

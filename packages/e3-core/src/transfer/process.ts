@@ -34,15 +34,29 @@ import type { PackageExportStore, PackageImportStore } from './interfaces.js';
 function throttledProgress(
   fn: (progress: { objectsProcessed: number }) => Promise<void>,
   intervalMs = 1000,
-): (progress: { objectsProcessed: number }) => Promise<void> {
+) {
   let lastCall = 0;
-  return async (progress) => {
+  let pending: { objectsProcessed: number } | null = null;
+
+  const throttled = async (progress: { objectsProcessed: number }) => {
     const now = Date.now();
     if (now - lastCall >= intervalMs) {
       lastCall = now;
+      pending = null;
       await fn(progress);
+    } else {
+      pending = progress;
     }
   };
+
+  throttled.flush = async () => {
+    if (pending) {
+      await fn(pending);
+      pending = null;
+    }
+  };
+
+  return throttled;
 }
 
 // =============================================================================
@@ -99,6 +113,7 @@ export async function handleProcessExport(
         onProgress,
       });
     }
+    await onProgress.flush();
     const fileStat = await stat(zipPath);
     await exportStore.updateStatus(id, variant('completed', {
       size: BigInt(fileStat.size),
@@ -169,6 +184,7 @@ export async function handleProcessImport(
       onProgress,
     });
 
+    await onProgress.flush();
     await importStore.updateStatus(id, variant('completed', {
       name: result.name,
       version: result.version,

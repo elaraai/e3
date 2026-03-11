@@ -20,7 +20,7 @@ import {
   ResponseType,
 } from './types.js';
 import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-types';
-import { get, post, del, fetchWithAuth, ApiError, type RequestOptions } from './http.js';
+import { get, post, del, fetchWithAuth, fetchWithProgress, ApiError, type RequestOptions } from './http.js';
 import { pollExport } from './packages.js';
 
 /**
@@ -220,9 +220,6 @@ export async function workspaceExport(
   const { downloadUrl } = status.value;
 
   // 3. Download zip (no auth — URL may be a presigned S3 URL)
-  const downloadRes = await fetch(downloadUrl, { method: 'GET', signal });
-  if (!downloadRes.ok) throw new Error(`Download failed: ${downloadRes.status} ${downloadRes.statusText}`);
-
-  return new Uint8Array(await downloadRes.arrayBuffer());
+  return fetchWithProgress(downloadUrl, exportOptions?.onDownloadProgress, signal);
 }
 

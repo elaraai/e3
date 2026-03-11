@@ -27,8 +27,7 @@ import type {
   PackageExportStore,
 } from './interfaces.js';
 import type { DatasetUpload, PackageImport, PackageExport } from './types.js';
-import { handleProcessExport } from './process.js';
-import { handleProcessImport } from './process.js';
+import { handleProcessExport, handleProcessImport } from './process.js';
 
 const STAGING_DIR = join(tmpdir(), 'e3-transfers');
 
@@ -101,6 +100,7 @@ class InMemoryDatasetDownloadStore implements DatasetDownloadStore {
 
 class InMemoryPackageImportStore implements PackageImportStore {
   private readonly records = new Map<string, PackageImport>();
+  private readonly executing = new Set<string>();
 
   constructor(
     private readonly baseUrl: string,
@@ -134,6 +134,9 @@ class InMemoryPackageImportStore implements PackageImportStore {
     const record = this.records.get(id);
     if (!record) throw new Error(`Package import ${id} not found`);
 
+    if (this.executing.has(id)) return;
+    this.executing.add(id);
+
     if (!this.storage || !this.getRepoPath) {
       // Mock fallback for tests that don't provide storage
       await this.updateStatus(id, variant('completed', {
@@ -142,6 +145,7 @@ class InMemoryPackageImportStore implements PackageImportStore {
         packageHash: 'mock',
         objectCount: 0n,
       }));
+      this.executing.delete(id);
       return;
     }
 
@@ -150,7 +154,11 @@ class InMemoryPackageImportStore implements PackageImportStore {
     void handleProcessImport(
       { storage: this.storage, importStore: this },
       { id, repo: this.getRepoPath(repo), zipPath },
-    ).catch(() => {}); // errors captured in status by handler
+    ).catch((err) => {
+      console.error(`[e3] background import ${id} failed:`, err);
+    }).finally(() => {
+      this.executing.delete(id);
+    });
   }
 
   clear(): void {
@@ -164,6 +172,7 @@ class InMemoryPackageImportStore implements PackageImportStore {
 
 class InMemoryPackageExportStore implements PackageExportStore {
   private readonly records = new Map<string, PackageExport>();
+  private readonly executing = new Set<string>();
 
   constructor(
     private readonly baseUrl: string,
@@ -197,9 +206,13 @@ class InMemoryPackageExportStore implements PackageExportStore {
     const record = this.records.get(id);
     if (!record) throw new Error(`Package export ${id} not found`);
 
+    if (this.executing.has(id)) return;
+    this.executing.add(id);
+
     if (!this.storage || !this.getRepoPath) {
       // Mock fallback for tests that don't provide storage
       await this.updateStatus(id, variant('completed', { size: 0n }));
+      this.executing.delete(id);
       return;
     }
 
@@ -208,7 +221,11 @@ class InMemoryPackageExportStore implements PackageExportStore {
     void handleProcessExport(
       { storage: this.storage, exportStore: this },
       { id, repo: this.getRepoPath(repo), zipPath },
-    ).catch(() => {}); // errors captured in status by handler
+    ).catch((err) => {
+      console.error(`[e3] background export ${id} failed:`, err);
+    }).finally(() => {
+      this.executing.delete(id);
+    });
   }
 
   clear(): void {

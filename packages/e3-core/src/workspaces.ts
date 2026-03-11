@@ -331,6 +331,8 @@ export interface WorkspaceExportResult {
 export interface WorkspaceExportOptions {
   /** Called after each object is added. Can be used for progress reporting. */
   onProgress?: (progress: { objectsProcessed: number }) => Promise<void>;
+  /** External workspace lock. If not provided, an exclusive lock will be acquired internally. */
+  lock?: LockHandle;
 }
 
 /**
@@ -367,6 +369,21 @@ export async function workspaceExport(
   options?: WorkspaceExportOptions,
 ): Promise<WorkspaceExportResult> {
   const partialPath = `${zipPath}.partial`;
+
+  // Acquire workspace lock for snapshot consistency
+  const externalLock = options?.lock;
+  let lock: LockHandle | null = externalLock ?? null;
+  if (!lock) {
+    lock = await storage.locks.acquire(repo, name, variant('export', null));
+    if (!lock) {
+      const state = await storage.locks.getState(repo, name);
+      throw new WorkspaceLockError(name, state ? {
+        acquiredAt: state.acquiredAt.toISOString(),
+        operation: state.operation.type,
+      } : undefined);
+    }
+  }
+  try {
 
   // Get workspace state
   const state = await readStateOrThrow(storage, repo, name);
@@ -561,4 +578,10 @@ export async function workspaceExport(
     name: finalName,
     version: finalVersion,
   };
+
+  } finally {
+    if (!externalLock) {
+      await lock.release();
+    }
+  }
 }
