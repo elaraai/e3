@@ -70,6 +70,7 @@ export {
   packageImport,
   packageExport,
   packageRemove,
+  pollExport,
 } from './packages.js';
 
 // Workspaces

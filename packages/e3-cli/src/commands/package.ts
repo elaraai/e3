@@ -22,6 +22,7 @@ import {
   packageRemove as packageRemoveRemote,
 } from '@elaraai/e3-api-client';
 import { parseRepoLocation, parsePackageSpec, formatError, exitError } from '../utils.js';
+import { writeExportProgress, clearProgress } from '../format.js';
 
 export const packageCommand = {
   /**
@@ -53,16 +54,16 @@ export const packageCommand = {
             },
             onProgress: (progress) => {
               if (progress.type === 'pending') {
-                process.stdout.write(`\rPending...                              `);
+                process.stdout.write(`\rPending...\x1b[K`);
               } else if (progress.type === 'downloading') {
-                process.stdout.write(`\rPreparing...                            `);
+                process.stdout.write(`\rPreparing...\x1b[K`);
               } else if (progress.type === 'importing') {
-                process.stdout.write(`\rImporting... ${progress.value.objectsProcessed} objects processed`);
+                process.stdout.write(`\rImporting... ${progress.value.objectsProcessed} objects processed\x1b[K`);
               }
             },
           },
         );
-        process.stdout.write('\r\x1b[K');
+        clearProgress();
 
         console.log(`Imported ${result.name}@${result.version}`);
         console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
@@ -94,18 +95,10 @@ export const packageCommand = {
           location.baseUrl, location.repo, name, version,
           { token: location.token },
           {
-            onProgress: (progress) => {
-              if (progress.type === 'pending') {
-                process.stdout.write(`\rPending...                              `);
-              } else if (progress.type === 'exporting') {
-                process.stdout.write(`\rExporting... ${progress.value.objectsProcessed} objects`);
-              } else if (progress.type === 'uploading') {
-                process.stdout.write(`\rUploading...                            `);
-              }
-            },
+            onProgress: writeExportProgress,
           },
         );
-        process.stdout.write('\r\x1b[K');
+        clearProgress();
         writeFileSync(zipPath, zipBytes);
 
         console.log(`Exported ${name}@${version} to ${zipPath}`);

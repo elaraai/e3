@@ -279,7 +279,7 @@ async function pollImport(
 /**
  * Poll a package export job until it completes or fails.
  */
-async function pollExport(
+export async function pollExport(
   url: string,
   repoEncoded: string,
   id: string,

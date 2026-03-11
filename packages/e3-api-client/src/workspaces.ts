@@ -8,9 +8,7 @@ import {
   WorkspaceStateType,
   type WorkspaceState,
   PackageJobResponseType,
-  PackageExportStatusType,
   type PackageExportProgress,
-  type PackageExportStatus,
 } from '@elaraai/e3-types';
 import type { WorkspaceInfo, WorkspaceStatusResult } from './types.js';
 import {
@@ -21,8 +19,9 @@ import {
   WorkspaceExportRequestType,
   ResponseType,
 } from './types.js';
-import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-core';
+import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-types';
 import { get, post, del, fetchWithAuth, ApiError, type RequestOptions } from './http.js';
+import { pollExport } from './packages.js';
 
 /**
  * List all workspaces in the repository.
@@ -209,7 +208,7 @@ export async function workspaceExport(
   if (triggerResult.type === 'error') throw new ApiError(triggerResult.value.type, triggerResult.value.value);
 
   // 2. Poll for result
-  const status = await pollExportStatus(url, repoEncoded, triggerResult.value.id, options, exportOptions?.onProgress, signal);
+  const status = await pollExport(url, repoEncoded, triggerResult.value.id, options, exportOptions?.onProgress, signal);
 
   if (status.type === 'failed') {
     throw new Error(`Workspace export failed: ${status.value.message}`);
@@ -227,39 +226,3 @@ export async function workspaceExport(
   return new Uint8Array(await downloadRes.arrayBuffer());
 }
 
-/**
- * Poll a workspace/package export job until it completes or fails.
- */
-async function pollExportStatus(
-  url: string,
-  repoEncoded: string,
-  id: string,
-  options: RequestOptions,
-  onProgress?: (progress: PackageExportProgress) => void,
-  signal?: AbortSignal,
-  intervalMs = 1000,
-): Promise<PackageExportStatus> {
-  while (true) {
-    signal?.throwIfAborted();
-    const res = await fetchWithAuth(`${url}/api/repos/${repoEncoded}/export/${id}`, {
-      method: 'GET',
-      headers: { 'Accept': BEAST2_CONTENT_TYPE },
-      signal,
-    }, options);
-
-    if (!res.ok) throw new Error(`Export poll failed: ${res.status} ${res.statusText}`);
-
-    const buffer = new Uint8Array(await res.arrayBuffer());
-    const decode = decodeBeast2For(ResponseType(PackageExportStatusType));
-    const result = decode(buffer) as { type: 'success'; value: PackageExportStatus } | { type: 'error'; value: { type: string; value: string } };
-    if (result.type === 'error') throw new ApiError(result.value.type, result.value.value);
-
-    if (result.value.type === 'processing') {
-      onProgress?.(result.value.value);
-      await new Promise(resolve => setTimeout(resolve, intervalMs));
-      continue;
-    }
-
-    return result.value;
-  }
-}

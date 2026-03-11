@@ -32,6 +32,7 @@ import {
 } from '@elaraai/e3-api-client';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseRepoLocation, parsePackageSpec, formatError, exitError } from '../utils.js';
+import { writeExportProgress, clearProgress } from '../format.js';
 
 export const workspaceCommand = {
   /**
@@ -106,18 +107,10 @@ export const workspaceCommand = {
           {
             name: options.name,
             version: options.version,
-            onProgress: (progress) => {
-              if (progress.type === 'pending') {
-                process.stdout.write(`\rPending...                              `);
-              } else if (progress.type === 'exporting') {
-                process.stdout.write(`\rExporting... ${progress.value.objectsProcessed} objects`);
-              } else if (progress.type === 'uploading') {
-                process.stdout.write(`\rUploading...                            `);
-              }
-            },
+            onProgress: writeExportProgress,
           },
         );
-        process.stdout.write('\r\x1b[K');
+        clearProgress();
         writeFileSync(zipPath, zipBytes);
 
         console.log(`Exported workspace ${ws}`);

@@ -123,7 +123,12 @@ export function createWorkspaceRoutes(
       const zipPath = join(STAGING_DIR, `${id}.zip`);
 
       try {
-        await workspaceExport(storage, repoPath, ws, zipPath, exportName, exportVersion);
+        await workspaceExport(storage, repoPath, ws, zipPath, exportName, exportVersion, {
+          onProgress: async ({ objectsProcessed }) => {
+            await transferBackend.packageExport.updateStatus(id,
+              variant('processing', variant('exporting', { objectsProcessed: BigInt(objectsProcessed) })));
+          },
+        });
         const fileStat = await fsStat(zipPath);
         await transferBackend.packageExport.updateStatus(id, variant('completed', {
           size: BigInt(fileStat.size),

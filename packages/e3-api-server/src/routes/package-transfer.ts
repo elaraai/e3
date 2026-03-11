@@ -212,7 +212,12 @@ export function createPackageTransferRoutes(
     const zipPath = join(STAGING_DIR, `${id}.zip`);
 
     try {
-      await packageExport(storage, repoPath, name, version, zipPath);
+      await packageExport(storage, repoPath, name, version, zipPath, {
+        onProgress: async ({ objectsProcessed }) => {
+          await transferBackend.packageExport.updateStatus(id,
+            variant('processing', variant('exporting', { objectsProcessed: BigInt(objectsProcessed) })));
+        },
+      });
       const fileStat = await stat(zipPath);
       await transferBackend.packageExport.updateStatus(id, variant('completed', {
         size: BigInt(fileStat.size),
