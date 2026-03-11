@@ -15,6 +15,7 @@ import { join } from 'node:path';
 
 import e3 from '@elaraai/e3';
 import { IntegerType, StringType, East } from '@elaraai/east';
+import { Time } from '@elaraai/east-node-std';
 
 /**
  * Create a simple compute package for testing.
@@ -224,11 +225,13 @@ export async function createSlowPackageZip(
   mkdirSync(tempDir, { recursive: true });
 
   const input = e3.input('value', StringType, 'test');
-  const task = e3.customTask(
+  const task = e3.task(
     'slow',
     [input],
-    StringType,
-    ($, inputs, output) => East.str`sleep ${sleepSeconds.toString()} && cp ${inputs.get(0n)} ${output}`
+    East.asyncFunction([StringType], StringType, ($, val) => {
+      $(Time.sleep(BigInt(sleepSeconds * 1000)));
+      return $.return(val);
+    })
   );
   const pkg = e3.package(name, version, task);
 
@@ -413,23 +416,24 @@ export async function createSlowDiamondPackageZip(
 
   const input = e3.input('x', IntegerType, 1n);
 
-  // Runner that sleeps before executing east-py, so the concurrent `set` can land
-  const slowRunner = ['bash', '-c', `sleep ${sleepSeconds} && east-py run "$@"`, '--'];
-
   // Left: sleep then x*2
   const leftTask = e3.task(
     'left',
     [input],
-    East.function([IntegerType], IntegerType, ($, x) => x.multiply(2n)),
-    { runner: slowRunner }
+    East.asyncFunction([IntegerType], IntegerType, ($, x) => {
+      $(Time.sleep(BigInt(sleepSeconds * 1000)));
+      return $.return(x.multiply(2n));
+    })
   );
 
   // Right: sleep then x*3
   const rightTask = e3.task(
     'right',
     [input],
-    East.function([IntegerType], IntegerType, ($, x) => x.multiply(3n)),
-    { runner: slowRunner }
+    East.asyncFunction([IntegerType], IntegerType, ($, x) => {
+      $(Time.sleep(BigInt(sleepSeconds * 1000)));
+      return $.return(x.multiply(3n));
+    })
   );
 
   // Merge: left + right (no sleep needed)

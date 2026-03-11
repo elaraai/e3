@@ -40,7 +40,8 @@
     "@elaraai/e3-core": "*",
     "@elaraai/e3-types": "*",
     "@elaraai/e3-cli": "*",
-    "@elaraai/east": "beta"
+    "@elaraai/east": "beta",
+    "@elaraai/east-node-std": "beta"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
