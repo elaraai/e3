@@ -4,7 +4,11 @@
  */
 
 import { Hono } from 'hono';
-import type { StorageBackend } from '@elaraai/e3-core';
+import { randomUUID } from 'node:crypto';
+import { variant, some } from '@elaraai/east';
+import type { StorageBackend, TransferBackend } from '@elaraai/e3-core';
+import { workspaceGetState } from '@elaraai/e3-core';
+import { PackageJobResponseType } from '@elaraai/e3-types';
 import {
   listWorkspaces,
   createWorkspace,
@@ -14,12 +18,13 @@ import {
   deployWorkspace,
   exportWorkspace,
 } from '../handlers/workspaces.js';
-import { decodeBody } from '../beast2.js';
-import { CreateWorkspaceType, DeployRequestType } from '../types.js';
+import { decodeBody, sendSuccess, sendError } from '../beast2.js';
+import { WorkspaceCreateRequestType, WorkspaceDeployRequestType, WorkspaceExportRequestType } from '../types.js';
 
 export function createWorkspaceRoutes(
   storage: StorageBackend,
-  getRepoPath: (repo: string) => string
+  getRepoPath: (repo: string) => string,
+  transferBackend?: TransferBackend,
 ) {
   const app = new Hono();
 
@@ -34,7 +39,7 @@ export function createWorkspaceRoutes(
   app.post('/', async (c) => {
     const repo = c.req.param('repo')!;
     const repoPath = getRepoPath(repo);
-    const body = await decodeBody(c, CreateWorkspaceType);
+    const body = await decodeBody(c, WorkspaceCreateRequestType);
     return createWorkspace(storage, repoPath, body.name);
   });
 
@@ -67,9 +72,50 @@ export function createWorkspaceRoutes(
     const repo = c.req.param('repo')!;
     const repoPath = getRepoPath(repo);
     const ws = c.req.param('ws')!;
-    const body = await decodeBody(c, DeployRequestType);
+    const body = await decodeBody(c, WorkspaceDeployRequestType);
     return deployWorkspace(storage, repoPath, ws, body.packageRef);
   });
+
+  // POST /api/repos/:repo/workspaces/:ws/export - Trigger async workspace export
+  if (transferBackend) {
+    app.post('/:ws/export', async (c) => {
+      const repo = c.req.param('repo')!;
+      const repoPath = getRepoPath(repo);
+      const ws = c.req.param('ws')!;
+
+      // Determine name and version from request body or deployed package
+      let requestName: string | undefined;
+      let requestVersion: string | undefined;
+      try {
+        const body = await decodeBody(c, WorkspaceExportRequestType);
+        if (body.name?.type === 'some') requestName = body.name.value;
+        if (body.version?.type === 'some') requestVersion = body.version.value;
+      } catch {
+        // No body or invalid — use defaults
+      }
+
+      const state = await workspaceGetState(storage, repoPath, ws);
+      if (!state) {
+        return sendError(PackageJobResponseType, variant('internal', { message: 'workspace not found or not deployed' }));
+      }
+
+      const exportName = requestName ?? state.packageName;
+      const exportVersion = requestVersion ?? `${state.packageVersion}-${Date.now().toString(36)}`;
+
+      const id = randomUUID();
+      await transferBackend.packageExport.create(id, {
+        repo,
+        name: exportName,
+        version: exportVersion,
+        workspace: some(ws),
+        status: variant('processing', variant('pending', null)),
+        createdAt: new Date(),
+      });
+
+      await transferBackend.packageExport.execute(id, repo);
+      return sendSuccess(PackageJobResponseType, { id });
+    });
+  }
 
   // GET /api/repos/:repo/workspaces/:ws/export - Export workspace as a package zip
   app.get('/:ws/export', async (c) => {

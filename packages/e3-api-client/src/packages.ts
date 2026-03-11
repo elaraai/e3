@@ -12,6 +12,7 @@ import {
   PackageImportStatusType,
   PackageExportStatusType,
   type PackageImportProgress,
+  type PackageExportProgress,
   type PackageImportResult,
   type PackageImportStatus,
   type PackageExportStatus,
@@ -20,7 +21,7 @@ import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-types';
 import type { PackageListItem } from './types.js';
 import { PackageListItemType } from './types.js';
 import { ResponseType } from './types.js';
-import { get, del, fetchWithAuth, ApiError, type RequestOptions, type Response } from './http.js';
+import { get, del, fetchWithAuth, fetchWithProgress, ApiError, type RequestOptions, type Response } from './http.js';
 
 /**
  * List all packages in the repository.
@@ -137,6 +138,15 @@ export async function packageImport(
 }
 
 /**
+ * Options for package export progress reporting.
+ */
+export interface PackageExportOptions {
+  onProgress?: (progress: PackageExportProgress) => void;
+  onDownloadProgress?: (downloaded: number, total: number) => void;
+  signal?: AbortSignal;
+}
+
+/**
  * Export a package as a zip archive using the transfer protocol.
  *
  * Flow: trigger export → poll for result → download zip
@@ -146,15 +156,18 @@ export async function packageExport(
   repo: string,
   name: string,
   version: string,
-  options: RequestOptions
+  options: RequestOptions,
+  exportOptions?: PackageExportOptions,
 ): Promise<Uint8Array> {
   const repoEncoded = encodeURIComponent(repo);
+  const signal = exportOptions?.signal;
 
   // 1. Trigger export (name/version in URL, no body)
   const exportRes = await fetchWithAuth(
     `${url}/api/repos/${repoEncoded}/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}/export`, {
     method: 'POST',
     headers: { 'Accept': BEAST2_CONTENT_TYPE },
+    signal,
   }, options);
 
   if (!exportRes.ok) throw new Error(`Transfer export failed: ${exportRes.status} ${exportRes.statusText}`);
@@ -165,7 +178,7 @@ export async function packageExport(
   if (exportResult.type === 'error') throw new ApiError(exportResult.value.type, exportResult.value.value);
 
   // 2. Poll for result
-  const status = await pollExport(url, repoEncoded, exportResult.value.id, options);
+  const status = await pollExport(url, repoEncoded, exportResult.value.id, options, exportOptions?.onProgress, signal);
 
   if (status.type === 'failed') {
     throw new Error(`Package export failed: ${status.value.message}`);
@@ -177,11 +190,7 @@ export async function packageExport(
   const { downloadUrl } = status.value;
 
   // 3. Download zip (no auth — URL may be a presigned S3 URL)
-  const downloadRes = await fetch(downloadUrl, { method: 'GET' });
-
-  if (!downloadRes.ok) throw new Error(`Download failed: ${downloadRes.status} ${downloadRes.statusText}`);
-
-  return new Uint8Array(await downloadRes.arrayBuffer());
+  return fetchWithProgress(downloadUrl, exportOptions?.onDownloadProgress, signal);
 }
 
 /**
@@ -266,11 +275,12 @@ async function pollImport(
 /**
  * Poll a package export job until it completes or fails.
  */
-async function pollExport(
+export async function pollExport(
   url: string,
   repoEncoded: string,
   id: string,
   options: RequestOptions,
+  onProgress?: (progress: PackageExportProgress) => void,
   signal?: AbortSignal,
   intervalMs = 1000,
 ): Promise<PackageExportStatus> {
@@ -289,10 +299,12 @@ async function pollExport(
     const result = decode(buffer) as Response<PackageExportStatus>;
     if (result.type === 'error') throw new ApiError(result.value.type, result.value.value);
 
-    if (result.value.type !== 'processing') {
-      return result.value;
+    if (result.value.type === 'processing') {
+      onProgress?.(result.value.value);
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+      continue;
     }
 
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    return result.value;
   }
 }

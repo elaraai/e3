@@ -6,15 +6,19 @@
 /**
  * In-memory TransferBackend implementation.
  *
- * Pure in-memory — no filesystem access. Package import/export execute as
- * simplified mocks (trust hash, return placeholder results). Real transfer
- * flows are tested via integration tests against the actual server.
+ * Stores transfer records in memory Maps. When `storage` and `getRepoPath`
+ * are provided, `execute()` performs real background processing via the
+ * shared handlers. Without them, falls back to mock behavior for tests.
  */
 
 /* eslint-disable @typescript-eslint/require-await */
 import { randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { variant } from '@elaraai/east';
 
+import type { StorageBackend } from '../storage/index.js';
 import type {
   TransferBackend,
   DatasetUploadStore,
@@ -23,6 +27,9 @@ import type {
   PackageExportStore,
 } from './interfaces.js';
 import type { DatasetUpload, PackageImport, PackageExport } from './types.js';
+import { handleProcessExport, handleProcessImport } from './process.js';
+
+const STAGING_DIR = join(tmpdir(), 'e3-transfers');
 
 // =============================================================================
 // Dataset Upload
@@ -93,8 +100,13 @@ class InMemoryDatasetDownloadStore implements DatasetDownloadStore {
 
 class InMemoryPackageImportStore implements PackageImportStore {
   private readonly records = new Map<string, PackageImport>();
+  private readonly executing = new Set<string>();
 
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly storage?: StorageBackend,
+    private readonly getRepoPath?: (repo: string) => string,
+  ) {}
 
   async create(id: string, record: PackageImport): Promise<void> {
     this.records.set(id, record);
@@ -118,16 +130,35 @@ class InMemoryPackageImportStore implements PackageImportStore {
     return `${this.baseUrl}/api/uploads/${id}`;
   }
 
-  async execute(id: string, _repo: string): Promise<void> {
+  async execute(id: string, repo: string): Promise<void> {
     const record = this.records.get(id);
     if (!record) throw new Error(`Package import ${id} not found`);
 
-    await this.updateStatus(id, variant('completed', {
-      name: 'mock',
-      version: '0.0.0',
-      packageHash: 'mock',
-      objectCount: 0n,
-    }));
+    if (this.executing.has(id)) return;
+    this.executing.add(id);
+
+    if (!this.storage || !this.getRepoPath) {
+      // Mock fallback for tests that don't provide storage
+      await this.updateStatus(id, variant('completed', {
+        name: 'mock',
+        version: '0.0.0',
+        packageHash: 'mock',
+        objectCount: 0n,
+      }));
+      this.executing.delete(id);
+      return;
+    }
+
+    const zipPath = join(STAGING_DIR, `${id}.zip.partial`);
+    await mkdir(STAGING_DIR, { recursive: true });
+    void handleProcessImport(
+      { storage: this.storage, importStore: this },
+      { id, repo: this.getRepoPath(repo), zipPath },
+    ).catch(() => {
+      // Error already recorded in job status by handleProcessImport
+    }).finally(() => {
+      this.executing.delete(id);
+    });
   }
 
   clear(): void {
@@ -141,8 +172,13 @@ class InMemoryPackageImportStore implements PackageImportStore {
 
 class InMemoryPackageExportStore implements PackageExportStore {
   private readonly records = new Map<string, PackageExport>();
+  private readonly executing = new Set<string>();
 
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly storage?: StorageBackend,
+    private readonly getRepoPath?: (repo: string) => string,
+  ) {}
 
   async create(id: string, record: PackageExport): Promise<void> {
     this.records.set(id, record);
@@ -166,11 +202,30 @@ class InMemoryPackageExportStore implements PackageExportStore {
     return `${this.baseUrl}/api/downloads/${id}`;
   }
 
-  async execute(id: string, _repo: string): Promise<void> {
+  async execute(id: string, repo: string): Promise<void> {
     const record = this.records.get(id);
     if (!record) throw new Error(`Package export ${id} not found`);
 
-    await this.updateStatus(id, variant('completed', { size: 0n }));
+    if (this.executing.has(id)) return;
+    this.executing.add(id);
+
+    if (!this.storage || !this.getRepoPath) {
+      // Mock fallback for tests that don't provide storage
+      await this.updateStatus(id, variant('completed', { size: 0n }));
+      this.executing.delete(id);
+      return;
+    }
+
+    const zipPath = join(STAGING_DIR, `${id}.zip`);
+    await mkdir(STAGING_DIR, { recursive: true });
+    void handleProcessExport(
+      { storage: this.storage, exportStore: this },
+      { id, repo: this.getRepoPath(repo), zipPath },
+    ).catch(() => {
+      // Error already recorded in job status by handleProcessExport
+    }).finally(() => {
+      this.executing.delete(id);
+    });
   }
 
   clear(): void {
@@ -184,6 +239,8 @@ class InMemoryPackageExportStore implements PackageExportStore {
 
 export interface InMemoryTransferBackendOptions {
   baseUrl?: string;
+  storage?: StorageBackend;
+  getRepoPath?: (repo: string) => string;
 }
 
 export class InMemoryTransferBackend implements TransferBackend {
@@ -196,8 +253,8 @@ export class InMemoryTransferBackend implements TransferBackend {
     const baseUrl = options.baseUrl ?? '';
     this.datasetUpload = new InMemoryDatasetUploadStore(baseUrl);
     this.datasetDownload = new InMemoryDatasetDownloadStore(baseUrl);
-    this.packageImport = new InMemoryPackageImportStore(baseUrl);
-    this.packageExport = new InMemoryPackageExportStore(baseUrl);
+    this.packageImport = new InMemoryPackageImportStore(baseUrl, options.storage, options.getRepoPath);
+    this.packageExport = new InMemoryPackageExportStore(baseUrl, options.storage, options.getRepoPath);
   }
 
   clear(): void {

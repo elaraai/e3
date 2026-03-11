@@ -326,6 +326,16 @@ export interface WorkspaceExportResult {
 }
 
 /**
+ * Options for workspace export
+ */
+export interface WorkspaceExportOptions {
+  /** Called after each object is added. Can be used for progress reporting. */
+  onProgress?: (progress: { objectsProcessed: number }) => Promise<void>;
+  /** External workspace lock. If not provided, an exclusive lock will be acquired internally. */
+  lock?: LockHandle;
+}
+
+/**
  * Fixed mtime for deterministic zip output (Unix epoch)
  */
 const DETERMINISTIC_MTIME = new Date(0);
@@ -355,9 +365,25 @@ export async function workspaceExport(
   name: string,
   zipPath: string,
   outputName?: string,
-  version?: string
+  version?: string,
+  options?: WorkspaceExportOptions,
 ): Promise<WorkspaceExportResult> {
   const partialPath = `${zipPath}.partial`;
+
+  // Acquire workspace lock for snapshot consistency
+  const externalLock = options?.lock;
+  let lock: LockHandle | null = externalLock ?? null;
+  if (!lock) {
+    lock = await storage.locks.acquire(repo, name, variant('export', null));
+    if (!lock) {
+      const state = await storage.locks.getState(repo, name);
+      throw new WorkspaceLockError(name, state ? {
+        acquiredAt: state.acquiredAt.toISOString(),
+        operation: state.operation.type,
+      } : undefined);
+    }
+  }
+  try {
 
   // Get workspace state
   const state = await readStateOrThrow(storage, repo, name);
@@ -410,6 +436,7 @@ export async function workspaceExport(
     const data = await storage.objects.read(repo, hash);
     const objPath = `objects/${hash.slice(0, 2)}/${hash.slice(2)}.beast2`;
     zipfile.addBuffer(Buffer.from(data), objPath, { mtime: DETERMINISTIC_MTIME });
+    if (options?.onProgress) await options.onProgress({ objectsProcessed: addedObjects.size });
   };
 
   // Helper to collect children from a beast2 object via hash scanning
@@ -551,4 +578,10 @@ export async function workspaceExport(
     name: finalName,
     version: finalVersion,
   };
+
+  } finally {
+    if (!externalLock) {
+      await lock.release();
+    }
+  }
 }

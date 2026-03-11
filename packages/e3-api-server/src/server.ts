@@ -129,7 +129,11 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   }
 
   // Transfer backend for presigned URL object transfer
-  const transferBackend: TransferBackend = new InMemoryTransferBackend({ baseUrl: '' });
+  const transferBackend: TransferBackend = new InMemoryTransferBackend({
+    baseUrl: '',
+    storage,
+    getRepoPath,
+  });
 
   // Data routes (no auth — capability-URL pattern via UUID)
   // Must be mounted BEFORE auth middleware so they bypass JWT validation.
@@ -353,7 +357,7 @@ export async function createServer(config: ServerConfig): Promise<Server> {
   app.route('/api/repos/:repo/packages', createPackageRoutes(storage, getRepoPath));
 
   // Workspace routes: /api/repos/:repo/workspaces/*
-  app.route('/api/repos/:repo/workspaces', createWorkspaceRoutes(storage, getRepoPath));
+  app.route('/api/repos/:repo/workspaces', createWorkspaceRoutes(storage, getRepoPath, transferBackend));
 
   // Dataset transfer auth routes (init + commit) mount alongside dataset routes
   app.route('/api/repos/:repo/workspaces/:ws/datasets', dsTransfer.api);

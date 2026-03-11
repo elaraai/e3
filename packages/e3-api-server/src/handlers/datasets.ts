@@ -40,8 +40,9 @@ const SIZE_THRESHOLD = 1 * 1024 * 1024; // 1 MB
 /**
  * Get dataset value as raw BEAST2 bytes.
  *
- * For objects > 1MB, returns a 307 redirect to the object endpoint.
- * The requestUrl is used to construct the redirect Location header.
+ * For objects > 1MB, returns a JSON response with a download URL
+ * that the client can fetch directly. This avoids browser issues
+ * with opaque redirect responses from `redirect: 'manual'`.
  */
 export async function getDataset(
   storage: StorageBackend,
@@ -77,10 +78,10 @@ export async function getDataset(
           const origin = new URL(requestUrl).origin;
           downloadUrl = `${origin}${downloadUrl}`;
         }
-        return new Response(null, {
-          status: 307,
+        return new Response(JSON.stringify({ url: downloadUrl }), {
+          status: 200,
           headers: {
-            'Location': downloadUrl,
+            'Content-Type': 'application/json',
             'X-Content-Length': String(size),
             'X-Content-SHA256': hash,
           },

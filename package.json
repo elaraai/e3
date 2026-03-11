@@ -1,6 +1,6 @@
 {
   "name": "e3-monorepo",
-  "version": "0.0.1-beta.0",
+  "version": "0.0.2-beta.46",
   "private": true,
   "description": "East Execution Engine - Monorepo for e3 packages",
   "type": "module",

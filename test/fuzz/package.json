@@ -1,6 +1,6 @@
 {
   "name": "e3-fuzz",
-  "version": "0.0.1-beta.1",
+  "version": "0.0.2-beta.46",
   "private": true,
   "type": "module",
   "description": "Virtual Idiot - Fuzz testing for e3",

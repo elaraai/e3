@@ -4,16 +4,9 @@
  */
 
 import { Hono } from 'hono';
-import { mkdir, unlink, stat } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { variant } from '@elaraai/east';
-import {
-  packageImport,
-  packageExport,
-  PackageNotFoundError,
-} from '@elaraai/e3-core';
+import { variant, none } from '@elaraai/east';
+import { packageResolve, PackageNotFoundError } from '@elaraai/e3-core';
 import type { StorageBackend, TransferBackend } from '@elaraai/e3-core';
 import {
   PackageTransferInitRequestType,
@@ -24,8 +17,6 @@ import {
 } from '@elaraai/e3-types';
 import { decodeBody, sendSuccess, sendError } from '../beast2.js';
 import { errorToVariant } from '../errors.js';
-
-const STAGING_DIR = join(tmpdir(), 'e3-transfers');
 
 /**
  * Create package transfer routes.
@@ -72,8 +63,6 @@ export function createPackageTransferRoutes(
       createdAt: new Date(),
     });
 
-    await mkdir(STAGING_DIR, { recursive: true });
-
     const uploadUrl = await transferBackend.packageImport.getUploadUrl(transferId, repo);
     // Resolve relative URL against the request origin
     const origin = new URL(c.req.url).origin;
@@ -81,12 +70,7 @@ export function createPackageTransferRoutes(
     return sendSuccess(PackageTransferInitResponseType, { id: transferId, uploadUrl: resolvedUrl });
   });
 
-  // POST /api/repos/:repo/import/:id — Trigger import
-  //
-  // For the local server, the upload handler (data.ts) processes the import
-  // inline, so this endpoint is a no-op — it just returns the job ID for
-  // polling. For cloud backends, the trigger invokes async processing
-  // (e.g. Lambda) so the status may still be 'created'/'uploaded' here.
+  // POST /api/repos/:repo/import/:id — Trigger import processing
   repoApi.post('/import/:id', async (c) => {
     const id = c.req.param('id')!;
     const record = await transferBackend.packageImport.get(id);
@@ -94,40 +78,17 @@ export function createPackageTransferRoutes(
       return sendError(PackageJobResponseType, variant('internal', { message: 'transfer not found' }));
     }
 
-    // If already processed (by the upload handler), skip re-processing
     if (record.status.type === 'completed' || record.status.type === 'failed') {
       return sendSuccess(PackageJobResponseType, { id });
     }
 
-    // Fallback: process from staging file (cloud backends delegate to
-    // their own trigger logic and don't reach this code path)
-    const repoPath = getRepoPath(record.repo);
-    const stagingPath = join(STAGING_DIR, `${id}.zip.partial`);
-
-    try {
-      await stat(stagingPath);
-    } catch {
-      await transferBackend.packageImport.delete(id);
+    if (record.status.type === 'created') {
       return sendError(PackageJobResponseType, variant('internal', {
-        message: 'Upload file not found — upload may have failed or been rejected',
+        message: 'Upload not yet received',
       }));
     }
 
-    try {
-      const result = await packageImport(storage, repoPath, stagingPath);
-      await transferBackend.packageImport.updateStatus(id, variant('completed', {
-        name: result.name,
-        version: result.version,
-        packageHash: result.packageHash,
-        objectCount: BigInt(result.objectCount),
-      }));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await transferBackend.packageImport.updateStatus(id, variant('failed', { message }));
-    } finally {
-      await unlink(stagingPath).catch(() => {});
-    }
-
+    await transferBackend.packageImport.execute(id, record.repo);
     return sendSuccess(PackageJobResponseType, { id });
   });
 
@@ -168,7 +129,7 @@ export function createPackageTransferRoutes(
 
     const status = record.status;
     if (status.type === 'processing') {
-      return sendSuccess(PackageExportStatusType, variant('processing', null));
+      return sendSuccess(PackageExportStatusType, variant('processing', status.value));
     }
     if (status.type === 'failed') {
       return sendSuccess(PackageExportStatusType, variant('failed', { message: status.value.message }));
@@ -198,33 +159,27 @@ export function createPackageTransferRoutes(
     const name = c.req.param('name')!;
     const version = c.req.param('version')!;
 
+    // Pre-flight: verify package exists before creating job
+    try {
+      await packageResolve(storage, repoPath, name, version);
+    } catch (err) {
+      if (err instanceof PackageNotFoundError) {
+        return sendError(PackageJobResponseType, errorToVariant(err));
+      }
+      throw err;
+    }
+
     const id = randomUUID();
     await transferBackend.packageExport.create(id, {
       repo,
       name,
       version,
-      status: variant('processing', null),
+      workspace: none,
+      status: variant('processing', variant('pending', null)),
       createdAt: new Date(),
     });
 
-    await mkdir(STAGING_DIR, { recursive: true });
-    const zipPath = join(STAGING_DIR, `${id}.zip`);
-
-    try {
-      await packageExport(storage, repoPath, name, version, zipPath);
-      const fileStat = await stat(zipPath);
-      await transferBackend.packageExport.updateStatus(id, variant('completed', {
-        size: BigInt(fileStat.size),
-      }));
-    } catch (err) {
-      await unlink(zipPath).catch(() => {});
-      if (err instanceof PackageNotFoundError) {
-        return sendError(PackageJobResponseType, errorToVariant(err));
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      await transferBackend.packageExport.updateStatus(id, variant('failed', { message }));
-    }
-
+    await transferBackend.packageExport.execute(id, repo);
     return sendSuccess(PackageJobResponseType, { id });
   });
 

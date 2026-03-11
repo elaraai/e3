@@ -32,6 +32,7 @@ import {
 } from '@elaraai/e3-api-client';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseRepoLocation, parsePackageSpec, formatError, exitError } from '../utils.js';
+import { writeExportProgress, clearProgress } from '../format.js';
 
 export const workspaceCommand = {
   /**
@@ -99,12 +100,17 @@ export const workspaceCommand = {
         console.log(`  Package hash: ${result.packageHash.slice(0, 12)}...`);
         console.log(`  Objects: ${result.objectCount}`);
       } else {
-        // Remote export - fetch zip bytes and write to local file
-        // Note: Remote export doesn't support custom name/version options
-        if (options.name || options.version) {
-          console.warn('Warning: --name and --version options are not supported for remote export');
-        }
-        const zipBytes = await workspaceExportRemote(location.baseUrl, location.repo, ws, { token: location.token });
+        // Remote export - async transfer protocol with progress
+        const zipBytes = await workspaceExportRemote(
+          location.baseUrl, location.repo, ws,
+          { token: location.token },
+          {
+            name: options.name,
+            version: options.version,
+            onProgress: writeExportProgress,
+          },
+        );
+        clearProgress();
         writeFileSync(zipPath, zipBytes);
 
         console.log(`Exported workspace ${ws}`);

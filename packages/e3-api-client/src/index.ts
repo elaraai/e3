@@ -31,7 +31,7 @@ export type {
   TaskListItem,
   TaskDetails,
   DataflowGraph,
-  GraphTask,
+  DataflowGraphTask,
   LogChunk,
   TaskExecutionResult,
   DataflowResult,
@@ -70,6 +70,7 @@ export {
   packageImport,
   packageExport,
   packageRemove,
+  pollExport,
 } from './packages.js';
 
 // Workspaces

@@ -276,6 +276,46 @@ async function decodeResponse<T extends EastType>(
 }
 
 /**
+ * Fetch a URL with streaming download progress reporting.
+ *
+ * Falls back to a single `arrayBuffer()` call if no `onProgress` callback
+ * is provided or if the response has no readable body stream.
+ */
+export async function fetchWithProgress(
+  url: string,
+  onProgress?: (downloaded: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  const res = await fetch(url, { method: 'GET', signal });
+  if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+
+  if (!onProgress || !res.body) {
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  const total = parseInt(res.headers.get('Content-Length') ?? '0', 10);
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let downloaded = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    downloaded += value.byteLength;
+    onProgress(downloaded, total);
+  }
+
+  const result = new Uint8Array(downloaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+/**
  * Unwrap a response, throwing on error.
  * @deprecated Functions now throw ApiError on error; this function is no longer needed.
  */

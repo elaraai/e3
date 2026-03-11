@@ -132,8 +132,15 @@ export const PackageImportStatusType = VariantType({
 });
 export type PackageImportStatus = ValueTypeOf<typeof PackageImportStatusType>;
 
+export const PackageExportProgressType = VariantType({
+  pending: NullType,
+  exporting: StructType({ objectsProcessed: IntegerType }),
+  uploading: NullType,
+});
+export type PackageExportProgress = ValueTypeOf<typeof PackageExportProgressType>;
+
 export const PackageExportStatusType = VariantType({
-  processing: NullType,
+  processing: PackageExportProgressType,
   completed: PackageExportResultType,
   failed: StructType({
     message: StringType,

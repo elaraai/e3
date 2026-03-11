@@ -12,6 +12,7 @@ export {
   PackageImportStatusType,
   type PackageImport,
   PackageExportType,
+  PackageExportProgressType,
   PackageExportStatusType,
   type PackageExport,
 } from './types.js';
@@ -30,3 +31,13 @@ export {
   InMemoryTransferBackend,
   type InMemoryTransferBackendOptions,
 } from './InMemoryTransferBackend.js';
+
+// Shared processing handlers
+export {
+  handleProcessExport,
+  handleProcessImport,
+  type ProcessExportDeps,
+  type ProcessExportInput,
+  type ProcessImportDeps,
+  type ProcessImportInput,
+} from './process.js';
