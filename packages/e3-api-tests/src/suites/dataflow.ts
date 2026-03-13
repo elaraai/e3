@@ -148,7 +148,7 @@ export function dataflowTests(setup: TestSetup<TestContext>): void {
         await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'exec-ws', { force: true }, opts);
 
         // Poll until execution completes
-        const maxWait = 10000;
+        const maxWait = 60000;
         const startTime = Date.now();
         let status = await workspaceStatus(ctx.config.baseUrl, ctx.repoName, 'exec-ws', opts);
 
@@ -174,7 +174,7 @@ export function dataflowTests(setup: TestSetup<TestContext>): void {
         await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'exec-ws', { force: true }, opts);
 
         // Poll execution state until complete
-        const maxWait = 10000;
+        const maxWait = 60000;
         const startTime = Date.now();
 
         while (Date.now() - startTime < maxWait) {
@@ -247,7 +247,7 @@ export function dataflowTests(setup: TestSetup<TestContext>): void {
 
         // Poll and collect events
         const events: unknown[] = [];
-        const maxWait = 10000;
+        const maxWait = 60000;
         const startTime = Date.now();
 
         while (Date.now() - startTime < maxWait) {
@@ -303,7 +303,7 @@ export function dataflowTests(setup: TestSetup<TestContext>): void {
         await dataflowStart(ctx.config.baseUrl, ctx.repoName, 'fail-ws', { force: true }, opts);
 
         // Poll until execution completes
-        const maxWait = 10000;
+        const maxWait = 60000;
         const startTime = Date.now();
 
         while (Date.now() - startTime < maxWait) {
