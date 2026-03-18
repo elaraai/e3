@@ -7,7 +7,7 @@ import { ArrayType, NullType, StringType, decodeBeast2For, encodeBeast2For } fro
 import type { TreePath } from '@elaraai/e3-types';
 import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-types';
 import { computeHash } from './util.js';
-import { ApiError, fetchWithAuth, get, type RequestOptions, type Response } from './http.js';
+import { ApiError, AuthError, fetchWithAuth, get, type RequestOptions, type Response } from './http.js';
 import {
   ResponseType,
   DatasetStatusDetailType,
@@ -109,7 +109,20 @@ export async function datasetGet(
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get dataset: ${response.status} ${response.statusText}`);
+    if (response.status === 401) {
+      throw new AuthError(await response.text());
+    }
+    // Server returns JSON error bodies for dataset get failures
+    const text = await response.text();
+    try {
+      const json = JSON.parse(text) as { error?: { type?: string; message?: string }; message?: string };
+      const type = json.error?.type ?? `http_${response.status}`;
+      const message = json.error?.message ?? json.message ?? text;
+      throw new ApiError(type, message);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(`http_${response.status}`, text || response.statusText);
+    }
   }
 
   // Handle redirect response — server returns JSON with download URL for large datasets
