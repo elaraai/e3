@@ -4,9 +4,8 @@
  */
 
 import { Hono } from 'hono';
-import { NullType, variant } from '@elaraai/east';
 import { BEAST2_CONTENT_TYPE, ObjectNotFoundError, type StorageBackend } from '@elaraai/e3-core';
-import { sendError } from '../beast2.js';
+import { sendJsonError } from '../errors.js';
 
 export function createObjectRoutes(
   storage: StorageBackend,
@@ -21,7 +20,10 @@ export function createObjectRoutes(
     const hash = c.req.param('hash')!;
 
     if (!/^[a-f0-9]{64}$/.test(hash)) {
-      return sendError(NullType, variant('internal', { message: `invalid hash format: ${hash}` }));
+      return new Response(JSON.stringify({ error: { type: 'bad_request', message: `invalid hash format: ${hash}` } }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     try {
@@ -34,10 +36,7 @@ export function createObjectRoutes(
         },
       });
     } catch (err) {
-      if (err instanceof ObjectNotFoundError) {
-        return sendError(NullType, variant('object_not_found', { hash }));
-      }
-      throw err;
+      return sendJsonError(err);
     }
   });
 
