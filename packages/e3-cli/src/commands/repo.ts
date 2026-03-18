@@ -14,6 +14,7 @@ import {
   repoGc,
   packageList,
   workspaceList,
+  workspaceRemove,
   workspaceGetState,
   LocalStorage,
 } from '@elaraai/e3-core';
@@ -24,6 +25,8 @@ import {
   repoCreate as repoCreateRemote,
   repoRemove as repoRemoveRemote,
   repoList as repoListRemote,
+  workspaceList as workspaceListRemote,
+  workspaceRemove as workspaceRemoveRemote,
 } from '@elaraai/e3-api-client';
 import { some, none } from '@elaraai/east';
 import { parseRepoLocation, formatError, exitError } from '../utils.js';
@@ -87,17 +90,60 @@ export const repoCommand = {
 
   /**
    * Remove a repository.
+   *
+   * With `--recursive`, lists and removes all workspaces before removing the repository.
+   * Without `--recursive`, fails if the repository contains workspaces.
+   *
+   * @param locationArg - Repository path or URL
+   * @param options - Command options
+   * @param options.recursive - Remove all workspaces first
    */
-  async remove(locationArg: string): Promise<void> {
+  async remove(locationArg: string, options: { recursive?: boolean }): Promise<void> {
     try {
       const location = await parseRepoLocation(locationArg);
 
       if (location.type === 'local') {
+        const storage = new LocalStorage();
+
+        // Check for workspaces
+        const workspaces = await workspaceList(storage, location.path);
+
+        if (workspaces.length > 0 && !options.recursive) {
+          console.log('Repository contains workspaces:');
+          for (const ws of workspaces) {
+            console.log(`  ${ws}`);
+          }
+          exitError('Use --recursive (-r) to remove all workspaces and the repository');
+        }
+
+        // Remove workspaces first
+        for (const ws of workspaces) {
+          await workspaceRemove(storage, location.path, ws);
+          console.log(`Removed workspace: ${ws}`);
+        }
+
         // Remove the repository directory
         rmSync(location.path, { recursive: true, force: true });
         console.log(`Removed repository at ${location.path}`);
       } else {
-        // Remove repository via API (synchronous operation)
+        // Check for workspaces
+        const workspaces = await workspaceListRemote(location.baseUrl, location.repo, { token: location.token });
+
+        if (workspaces.length > 0 && !options.recursive) {
+          console.log('Repository contains workspaces:');
+          for (const info of workspaces) {
+            console.log(`  ${info.name}`);
+          }
+          exitError('Use --recursive (-r) to remove all workspaces and the repository');
+        }
+
+        // Remove workspaces first
+        for (const info of workspaces) {
+          await workspaceRemoveRemote(location.baseUrl, location.repo, info.name, { token: location.token });
+          console.log(`Removed workspace: ${info.name}`);
+        }
+
+        // Remove repository via API
         await repoRemoveRemote(location.baseUrl, location.repo, { token: location.token });
         console.log(`Removed repository: ${location.repo}`);
       }

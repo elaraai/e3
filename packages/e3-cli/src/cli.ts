@@ -51,6 +51,7 @@ program
     new Command('remove')
       .description('Remove a repository')
       .argument('<repo>', 'Repository path or URL')
+      .option('-r, --recursive', 'Remove all workspaces first')
       .action(repoCommand.remove)
   )
   .addCommand(

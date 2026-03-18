@@ -125,7 +125,7 @@ await e3.export(pkg, '/tmp/myapp.zip');
 ```bash
 e3 repo create <repo>             # Create a new repository
 e3 repo status <repo>             # Show repository status
-e3 repo remove <repo>             # Remove a repository
+e3 repo remove <repo> [-r]        # Remove a repository (-r to remove workspaces first; remote servers require empty repos)
 e3 repo gc <repo> [--dry-run]     # Garbage collect unreferenced objects
 ```
 

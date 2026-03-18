@@ -18,6 +18,8 @@ import {
   packageImport,
   workspaceCreate,
   workspaceDeploy,
+  workspaceList,
+  workspaceRemove,
 } from '@elaraai/e3-api-client';
 
 import { createPackageZip } from './fixtures.js';
@@ -163,15 +165,26 @@ export async function createTestContext(config: TestConfig): Promise<TestContext
       const token = await config.getToken();
       const opts = { token };
 
-      // Clean up in reverse order: workspaces, packages, repo
-      // Note: We don't clean up workspaces/packages individually since
-      // removing the repo will clean everything up
-
       if (createdRepo) {
+        // Delete all workspaces first (required before repo deletion)
+        try {
+          const workspaces = await workspaceList(config.baseUrl, repoName, opts);
+          for (const ws of workspaces) {
+            try {
+              await workspaceRemove(config.baseUrl, repoName, ws.name, opts);
+            } catch (err) {
+              console.error(`Cleanup: failed to delete workspace '${ws.name}' in repo '${repoName}':`, err);
+            }
+          }
+        } catch {
+          // Repo may not exist — ignore list errors
+        }
+
+        // Delete the repository
         try {
           await repoRemove(config.baseUrl, repoName, opts);
-        } catch {
-          // Ignore cleanup errors
+        } catch (err) {
+          console.error(`Cleanup: failed to delete test repo '${repoName}':`, err);
         }
       }
 

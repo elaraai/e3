@@ -225,10 +225,12 @@ await e3.export(pkg, '/tmp/myapp.zip');
 
 ```bash
 e3 repo create <repo>             # Create repository (local path or remote URL)
-e3 repo remove <repo>             # Remove repository
+e3 repo remove <repo> [-r]        # Remove repository (-r to remove workspaces first)
 e3 repo status <repo>             # Show repository status (packages, workspaces)
 e3 repo gc <repo> [--dry-run]     # Remove unreferenced objects
 ```
+
+The `repo remove` command will refuse to remove a repository that contains workspaces unless the `-r` (`--recursive`) flag is provided. With `-r`, all workspaces are removed before the repository is deleted.
 
 ### Package Commands
 
