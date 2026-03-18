@@ -4,7 +4,7 @@
  */
 
 import { Hono } from 'hono';
-import { BEAST2_CONTENT_TYPE, ObjectNotFoundError, type StorageBackend } from '@elaraai/e3-core';
+import { BEAST2_CONTENT_TYPE, type StorageBackend } from '@elaraai/e3-core';
 import { sendJsonError } from '../errors.js';
 
 export function createObjectRoutes(
