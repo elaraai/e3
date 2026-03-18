@@ -20,6 +20,7 @@ import {
   workspaceDeploy,
   workspaceList,
   workspaceRemove,
+  dataflowCancel,
 } from '@elaraai/e3-api-client';
 
 import { createPackageZip } from './fixtures.js';
@@ -166,10 +167,14 @@ export async function createTestContext(config: TestConfig): Promise<TestContext
       const opts = { token };
 
       if (createdRepo) {
-        // Delete all workspaces first (required before repo deletion)
+        // Cancel running dataflows and delete all workspaces (required before repo deletion)
         try {
           const workspaces = await workspaceList(config.baseUrl, repoName, opts);
           for (const ws of workspaces) {
+            // Cancel any running dataflow to release workspace lock
+            try { await dataflowCancel(config.baseUrl, repoName, ws.name, opts); }
+            catch { /* no execution running — ignore */ }
+
             try {
               await workspaceRemove(config.baseUrl, repoName, ws.name, opts);
             } catch (err) {
