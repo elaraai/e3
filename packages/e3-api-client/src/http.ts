@@ -91,7 +91,7 @@ interface ServerErrorResponse {
  * Parse error details from response text.
  * Returns an ApiError with the error code from the body if available, otherwise uses fallback.
  */
-function parseErrorBody(text: string, fallbackCode: string): ApiError {
+export function parseErrorBody(text: string, fallbackCode: string): ApiError {
   try {
     const json = JSON.parse(text) as ServerErrorResponse;
     if (json.error?.type) {

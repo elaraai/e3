@@ -15,7 +15,7 @@ import {
 } from '@elaraai/e3-core';
 import { BEAST2_CONTENT_TYPE, type StorageBackend, type TransferBackend } from '@elaraai/e3-core';
 import { sendSuccess, sendError } from '../beast2.js';
-import { errorToVariant } from '../errors.js';
+import { errorToVariant, sendJsonError } from '../errors.js';
 import { DatasetStatusDetailType, ListEntryType, type ListEntry, type DatasetStatusDetail } from '../types.js';
 
 /**
@@ -55,17 +55,26 @@ export async function getDataset(
 ): Promise<Response> {
   try {
     if (treePath.length === 0) {
-      return sendError(NullType, errorToVariant(new Error('Path required for get')));
+      return new Response(JSON.stringify({ error: { type: 'bad_request', message: 'Path required for get' } }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     const { refType, hash } = await workspaceGetDatasetHash(storage, repoPath, workspace, treePath);
 
     if (refType === 'unassigned') {
-      return sendError(NullType, errorToVariant(new Error('Dataset is unassigned (pending task output)')));
+      return new Response(JSON.stringify({ error: { type: 'dataset_unassigned', message: 'Dataset is unassigned (pending task output)' } }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     if (refType === 'null' || !hash) {
-      return sendError(NullType, errorToVariant(new Error('Dataset is null')));
+      return new Response(JSON.stringify({ error: { type: 'dataset_null', message: 'Dataset is null' } }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     // When serving via API with a transfer backend, check size to decide whether to redirect
@@ -100,7 +109,7 @@ export async function getDataset(
       },
     });
   } catch (err) {
-    return sendError(NullType, errorToVariant(err));
+    return sendJsonError(err);
   }
 }
 

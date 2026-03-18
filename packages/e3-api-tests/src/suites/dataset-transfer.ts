@@ -132,7 +132,7 @@ export function datasetTransferTests(setup: TestSetup<TestContext>): void {
       assert.strictEqual(computeHash(body), hash);
     });
 
-    it('GET object endpoint returns BEAST2 error for missing hash', async (t) => {
+    it('GET object endpoint returns JSON error for missing hash', async (t) => {
       const ctx = await setup(t);
       const opts = await ctx.opts();
 
@@ -143,9 +143,11 @@ export function datasetTransferTests(setup: TestSetup<TestContext>): void {
           headers: { 'Authorization': `Bearer ${opts.token}` },
         }
       );
-      // Error returned as BEAST2 200 with error variant (consistent with rest of API)
-      assert.strictEqual(response.status, 200);
-      assert.strictEqual(response.headers.get('Content-Type'), BEAST2_CONTENT_TYPE);
+      // Error returned as JSON with appropriate HTTP status code
+      assert.strictEqual(response.status, 404);
+      assert.strictEqual(response.headers.get('Content-Type'), 'application/json');
+      const body = await response.json() as { error: { type: string; message: string } };
+      assert.strictEqual(body.error.type, 'object_not_found');
     });
 
     it('small dataset SET still uses inline PUT', async (t) => {

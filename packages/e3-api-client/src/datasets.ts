@@ -7,7 +7,7 @@ import { ArrayType, NullType, StringType, decodeBeast2For, encodeBeast2For } fro
 import type { TreePath } from '@elaraai/e3-types';
 import { BEAST2_CONTENT_TYPE } from '@elaraai/e3-types';
 import { computeHash } from './util.js';
-import { ApiError, fetchWithAuth, get, type RequestOptions, type Response } from './http.js';
+import { ApiError, AuthError, fetchWithAuth, parseErrorBody, get, type RequestOptions, type Response } from './http.js';
 import {
   ResponseType,
   DatasetStatusDetailType,
@@ -109,7 +109,12 @@ export async function datasetGet(
   );
 
   if (!response.ok) {
-    throw new Error(`Failed to get dataset: ${response.status} ${response.statusText}`);
+    const text = await response.text();
+    const error = parseErrorBody(text, `http_${response.status}`);
+    if (response.status === 401) {
+      throw new AuthError(error.details as string ?? 'Authentication required');
+    }
+    throw error;
   }
 
   // Handle redirect response — server returns JSON with download URL for large datasets

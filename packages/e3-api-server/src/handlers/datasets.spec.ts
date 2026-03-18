@@ -145,7 +145,7 @@ describe('getDataset', () => {
     assert.equal(response.headers.get('X-Content-SHA256'), hash);
   });
 
-  it('returns error for null dataset', async () => {
+  it('returns 404 JSON error for null dataset', async () => {
     const storage = new InMemoryStorage();
     await storage.repos.create(REPO);
 
@@ -156,12 +156,13 @@ describe('getDataset', () => {
     const treePath = [variant('field', 'inputs'), variant('field', 'empty')];
     const response = await getDataset(storage, REPO, WS, treePath);
 
-    // Error responses are wrapped in BEAST2 Response variant
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get('Content-Type'), BEAST2_CONTENT_TYPE);
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get('Content-Type'), 'application/json');
+    const body = await response.json() as { error: { type: string; message: string } };
+    assert.equal(body.error.type, 'dataset_null');
   });
 
-  it('returns error for unassigned dataset', async () => {
+  it('returns 404 JSON error for unassigned dataset', async () => {
     const storage = new InMemoryStorage();
     await storage.repos.create(REPO);
 
@@ -170,17 +171,21 @@ describe('getDataset', () => {
     const treePath = [variant('field', 'tasks'), variant('field', 'output')];
     const response = await getDataset(storage, REPO, WS, treePath);
 
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get('Content-Type'), BEAST2_CONTENT_TYPE);
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get('Content-Type'), 'application/json');
+    const body = await response.json() as { error: { type: string; message: string } };
+    assert.equal(body.error.type, 'dataset_unassigned');
   });
 
-  it('returns error for empty path', async () => {
+  it('returns 400 JSON error for empty path', async () => {
     const storage = new InMemoryStorage();
     await storage.repos.create(REPO);
 
     const response = await getDataset(storage, REPO, WS, []);
 
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get('Content-Type'), BEAST2_CONTENT_TYPE);
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get('Content-Type'), 'application/json');
+    const body = await response.json() as { error: { type: string; message: string } };
+    assert.equal(body.error.type, 'bad_request');
   });
 });
