@@ -57,19 +57,58 @@ Build a standalone chat application using the Anthropic SDK with Claude's native
                                     └───────────────────┘
 ```
 
-### Option C: Agent SDK
+### Option C: Claude Agent SDK
 
-Use the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) to build an autonomous agent with e3 tools. Best for complex multi-step workflows where the agent needs to plan, execute, observe results, and iterate.
+Use the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`, npm v0.2.71+) to build an autonomous agent with e3 tools. This is the same runtime that powers Claude Code — provides the agent loop, context management (compaction for long sessions), subagents for parallel work, MCP integration, and production reliability patterns. Best for complex multi-step workflows where the agent needs to plan, execute, observe results, and iterate.
+
+### Option D: Custom Chat App with Programmatic Tool Calling
+
+Claude's **Programmatic Tool Calling** (2025/2026) is particularly relevant for e3. Instead of one-at-a-time tool round-trips, Claude writes Python code that orchestrates multiple tool calls, processes results, and controls what enters its context window:
+
+```
+User: "Show me the top 5 categories by total sales"
+
+Claude generates code (runs in sandboxed container):
+┌──────────────────────────────────────────┐
+│  txns = tool.dataset_get('transactions') │  ← calls e3 tool
+│  cats = {}                               │
+│  for t in txns:                          │
+│      cats[t['category']] += t['amount']  │
+│  top5 = sorted(cats, key=...)[:5]        │  ← filters locally
+│  return top5                             │  ← only this enters context
+└──────────────────────────────────────────┘
+```
+
+Key properties:
+- Intermediate tool results do NOT enter Claude's context — only the final processed output
+- Dramatically reduces tokens and latency for multi-tool workflows
+- Tools marked `allowed_callers: ["code_execution_20260120"]` restrict to code-only invocation
+- Runs in Anthropic-managed Firecracker containers (30-day lifetime, 4.5min idle timeout)
+
+This is ideal for e3 because datasets can be large and multi-step analysis is common.
+
+### Option E: Vercel AI SDK Web Interface
+
+Use the **Vercel AI SDK 6** (`ai` package) for building a web-based chat UI:
+
+- **`ToolLoopAgent`**: Production-ready agent class that handles the complete tool execution loop — calls LLM, executes tools, feeds results back, repeats until done
+- **`useChat` hook**: Manages conversation state, streaming, tool approval flows
+- **Generative UI**: Render React components inline from tool results (dataset tables, dataflow DAGs, execution progress bars)
+- **Human-in-the-loop**: `needsApproval: true` on destructive tools (dataset writes, deploys)
+- **Provider-agnostic**: Works with Claude, GPT, Gemini
 
 ### Recommendation
 
 **Start with Option A (MCP Server)** for maximum leverage:
-- Instantly works with Claude Code, Claude Desktop, and other MCP clients
+- Instantly works with Claude Code, Claude Desktop, Cursor, and other MCP clients
 - No custom UI needed initially
-- Can evolve to Options B/C later by reusing the same tool definitions
+- MCP is now an industry standard (Linux Foundation, adopted by OpenAI, Google DeepMind, Microsoft)
+- Can evolve to Options B–E later by reusing the same tool definitions
 - MCP resources provide context (workspace structure, dataset schemas) without tool calls
 
-Then **layer Option B** for a dedicated chat experience if needed, reusing tool definitions from the MCP server.
+**Phase 2**: Layer **Option D (Programmatic Tool Calling)** for data-heavy workflows where filtering large datasets before they hit Claude's context window is critical.
+
+**Phase 3**: Add **Option E (Vercel AI SDK)** if a dedicated web chat experience is needed, with Generative UI for rich dataset/dataflow rendering.
 
 ## 3. MCP Server Design (`packages/e3-mcp`)
 
@@ -478,11 +517,14 @@ likely a category with only one transaction.
 
 | Framework | Approach | Pros | Cons | Best For |
 |-----------|----------|------|------|----------|
-| **MCP** (recommended) | Protocol-level tool integration | Works with any MCP client (Claude Desktop, Code, etc); strongly typed; standard protocol; resources + tools + prompts | Requires MCP-compatible client | Primary integration layer |
-| **Claude Tool Use** (Anthropic SDK) | Direct API with function calling | Full control over UX; custom streaming; works in any app | Must build custom UI; manage conversation state | Custom web/mobile chat app |
-| **Claude Agent SDK** | Multi-step autonomous agent | Complex multi-step workflows; built-in tool loop | Heavier runtime; less interactive | Batch operations, CI/CD |
-| **Vercel AI SDK** | React-based AI chat framework | Great for web UIs; built-in streaming; tool support | Tied to React/Next.js ecosystem | Web dashboard integration |
-| **LangChain/LangGraph** | Agent orchestration framework | Flexible; model-agnostic; graph-based workflows | Heavy abstraction; Python-centric | Complex agent pipelines |
+| **MCP** (recommended) | Protocol-level tool integration | Works with any MCP client; Linux Foundation standard; adopted by OpenAI, Google, Microsoft; resources + tools + prompts; JSON-RPC 2.0; OAuth 2.1 for remote | Requires MCP-compatible client; stateful protocol adds complexity | Primary integration layer |
+| **Claude Programmatic Tool Calling** | LLM writes code to orchestrate tools | Dramatically reduces tokens/latency; intermediate results stay out of context; ideal for large datasets | Requires Anthropic managed containers; not ZDR-eligible | Data-heavy analysis workflows |
+| **Claude Tool Use** (Anthropic SDK) | Direct API with function calling | Full UX control; `strict: true` guarantees schema compliance; tool runner automates loop | Must build custom UI; manage conversation state | Custom web/mobile chat app |
+| **Claude Agent SDK** (v0.2.71+) | Full agent runtime | Powers Claude Code in production; context compaction; subagents; MCP built-in; skills system | Heavy; pre-1.0; Anthropic-coupled | Complex multi-step workflows |
+| **Vercel AI SDK 6** | React-based AI chat framework | `ToolLoopAgent`; `useChat` hook; Generative UI; human-in-the-loop approval; provider-agnostic; 20M+ monthly downloads | TypeScript only; frontend-focused; rapid version churn | Web dashboard/chat UI |
+| **OpenAI Agents SDK** | Lightweight agent framework | Handoff pattern for multi-agent; automatic schema gen; built-in tracing; dual Python/TS | OpenAI ecosystem bias; less mature for long-running tasks | Multi-agent orchestration |
+| **LangChain/LangGraph** | Graph-based agent orchestration | Model-agnostic; cyclic graphs for retry/self-correction; built-in persistence; LangGraph Studio for debugging | Heavy abstraction; steep learning curve; Python-centric | Complex branching workflows |
+| **E2B** | Sandboxed code execution (Firecracker microVMs) | ~150ms startup; Apache-2.0; self-hostable; full filesystem + network | External dependency; cloud-hosted by default | Sandboxed ad-hoc execution |
 
 ## 10. Implementation Phases
 
@@ -514,9 +556,53 @@ likely a category with only one transaction.
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Primary protocol | MCP | Industry standard, works with existing Claude clients |
-| Ad-hoc code gen | TypeScript SDK generation (Approach A) | Best type safety, Claude is excellent at TypeScript |
-| Ad-hoc workspace | Dedicated scratch workspace | Safety: doesn't mutate production state |
+| Primary protocol | MCP | Linux Foundation standard; adopted by Anthropic, OpenAI, Google, Microsoft; works with existing Claude clients |
+| MCP transport | stdio (local) + Streamable HTTP (remote) | stdio for desktop tools; Streamable HTTP replaces older SSE transport in spec |
+| MCP auth (remote) | OAuth 2.1 | Mandated by MCP spec for remote HTTP servers |
+| Ad-hoc code gen | TypeScript SDK generation (Approach A) | Best type safety, Claude is excellent at TypeScript, uses existing `@elaraai/e3` SDK |
+| Ad-hoc workspace | Dedicated scratch workspace | Safety: doesn't mutate production state; input data copied by hash (cheap) |
 | BEAST2 handling | Decode to JSON in MCP tools | Claude can't read binary; present human-readable data |
-| Transport | stdio (local) + SSE (remote) | stdio for desktop tools, SSE for web |
 | Backend | e3-core (local) or e3-api-client (remote) | Flexibility for both local dev and team use |
+| Schema exposure | East types → JSON Schema (auto-generated) | East's structural types map naturally to JSON Schema; `strict: true` for validation |
+| Large dataset handling | Programmatic Tool Calling | Intermediate results don't enter context; Claude filters/aggregates in code |
+| Web UI (if needed) | Vercel AI SDK 6 `ToolLoopAgent` + `useChat` | Best-in-class for React chat UIs; Generative UI for inline rendering |
+| Sandboxing | e3's existing runner isolation + optional E2B | e3 already spawns isolated processes; E2B adds Firecracker microVMs if needed |
+
+## 12. East Type System → JSON Schema Mapping
+
+Auto-generating JSON Schema from East types is critical for giving Claude accurate type context. The mapping:
+
+| East Type | JSON Schema | Example |
+|-----------|-------------|---------|
+| `StringType` | `{ "type": "string" }` | |
+| `IntegerType` | `{ "type": "integer" }` | |
+| `FloatType` | `{ "type": "number" }` | |
+| `BooleanType` | `{ "type": "boolean" }` | |
+| `DateTimeType` | `{ "type": "string", "format": "date-time" }` | |
+| `ArrayType(T)` | `{ "type": "array", "items": <T> }` | `ArrayType(StringType)` → `{ "type": "array", "items": { "type": "string" } }` |
+| `StructType({...})` | `{ "type": "object", "properties": {...} }` | `StructType({ name: StringType, age: IntegerType })` |
+| `OptionType(T)` | `{ "oneOf": [<T>, { "type": "null" }] }` | |
+| `DictType(K, V)` | `{ "type": "object", "additionalProperties": <V> }` | |
+| `VariantType(...)` | `{ "oneOf": [...], "discriminator": "type" }` | |
+
+This mapping should be implemented in `packages/e3-mcp/src/util/types.ts` and used to:
+1. Generate MCP tool input schemas for `dataset_set`
+2. Generate MCP resource descriptions for workspace structure
+3. Provide Claude with the full typed context needed for ad-hoc code generation
+
+## 13. Best Practices from Research
+
+### Schema Context for Code Generation
+- Include **natural-language descriptions** alongside field names — models perform significantly better with semantic context, not just field names
+- Treat schema metadata as code: version-control it alongside the application
+- For tools called programmatically, provide detailed **output format descriptions** so Claude can process results in code
+
+### Streaming During Long-Running Operations
+- Do **not** stream tool call JSON (users can't parse it) — stream the final content generation
+- Use a "gather-generate" pattern: collect tool results silently, then stream the synthesis
+- Emit **custom progress events** during long-running tool executions (e.g., dataflow progress: "task 3/7 complete")
+
+### Sandboxed Execution
+- e3 already spawns isolated runner processes — extend this model for LLM-generated tasks
+- Apply principle of least privilege: ad-hoc tasks should have no network access by default
+- Container reuse across related requests reduces startup overhead
