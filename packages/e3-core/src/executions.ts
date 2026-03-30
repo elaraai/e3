@@ -303,7 +303,7 @@ export async function evaluateCommandIr(
 
     // Create EastIR wrapper and compile it (no platform functions needed)
     const eastIr = new EastIR<[string[], string], string[]>(ir);
-    const compiledFn = eastIr.compile([]);
+    const compiledFn = eastIr.compile(new Map(), new Map(), []);
 
     // Execute the compiled function with inputPaths and outputPath
     const result = compiledFn(inputPaths, outputPath);

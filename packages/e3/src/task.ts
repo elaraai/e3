@@ -11,8 +11,8 @@
  * - `.tasks.${name}.output` - The output dataset (public)
  */
 
-import type { AsyncFunctionExpr, BlockBuilder, CallableAsyncFunctionExpr, CallableFunctionExpr, EastType, ExprType, FunctionExpr, FunctionIR, AsyncFunctionIR } from '@elaraai/east';
-import { Expr, variant, ArrayType, StringType, East, IRType } from '@elaraai/east';
+import type { AsyncFunctionExpr, BlockBuilder, CallableAsyncFunctionExpr, CallableFunctionExpr, EastType, ExprType, FunctionExpr, FunctionIR, AsyncFunctionIR, IR, EastModule } from '@elaraai/east';
+import { Expr, variant, ArrayType, StringType, East, IRType, EastModuleType } from '@elaraai/east';
 import type { DatasetDef, DataTreeDef, TaskDef } from './types.js';
 
 /**
@@ -65,6 +65,34 @@ function createFunctionIRDataset(name: string, taskTree: DataTreeDef, ir: Functi
     path: [variant('field', 'tasks'), variant('field', name), variant('field', 'function_ir')],
     type: IRType,
     default: ir as any, // The IR value itself is the default
+    writable: false,
+    deps: new Set([...taskTree.deps, taskTree]),
+  };
+}
+
+/**
+ * Creates a module dataset for a task at `.tasks.${name}.module`.
+ *
+ * Stores the collected module symbols as an EastModuleType blob.
+ * Module datasets are treated like function_ir — private, immutable,
+ * and staged as an input to the runner command.
+ *
+ * @param name - Task name
+ * @param taskTree - The task's subtree
+ * @param symbols - Collected symbol IR definitions from module dependencies
+ * @returns A DatasetDef for the module (private)
+ */
+function createModuleDataset(name: string, taskTree: DataTreeDef, symbols: Map<string, IR>): DatasetDef {
+  const moduleValue: EastModule = {
+    symbols,
+    imports: new Map(),
+  };
+  return {
+    kind: 'dataset',
+    name: 'module',
+    path: [variant('field', 'tasks'), variant('field', name), variant('field', 'module')],
+    type: EastModuleType,
+    default: moduleValue as any,
     writable: false,
     deps: new Set([...taskTree.deps, taskTree]),
   };
@@ -183,7 +211,9 @@ export function task(
   fn: FunctionExpr<any, any> | AsyncFunctionExpr<any, any>,
   config?: { runner?: string[] },
 ): TaskDef {
-  const ir = fn.toIR().ir;
+  // Collect module symbols from the function's module dependencies
+  const symbols = new Map<string, IR>();
+  const ir = fn.toIR(symbols).ir;
   const outputType = Expr.type(fn as Expr<any>).output as EastType;
 
   // Create the task's subtree at .tasks.${name}
@@ -192,9 +222,17 @@ export function task(
   // Create the function_ir dataset (private, holds the IR)
   const functionIRDataset = createFunctionIRDataset(name, taskTree, ir);
 
-  // The first input is the FunctionIR to execute
+  // Create module dataset if the function depends on any modules
+  const moduleDatasets: DatasetDef[] = [];
+  if (symbols.size > 0) {
+    moduleDatasets.push(createModuleDataset(name, taskTree, symbols));
+  }
+  const numModules = moduleDatasets.length;
+
+  // Input layout: [function_ir, ...modules, ...userInputs]
   const input_datasets = [
     functionIRDataset,
+    ...moduleDatasets,
     ...inputs
   ];
 
@@ -208,8 +246,14 @@ export function task(
     ($, input_paths, output_path) => {
       const command = $.let(config?.runner ?? ['east-py', 'run', '-p', 'east-py-std', '-p', 'east-py-io', '-p', 'east-py-datascience'], ArrayType(StringType));
 
-      // Function argument paths
-      const i = $.let(1n);
+      // Link module files (indices 1..1+numModules)
+      for (let j = 0; j < numModules; j++) {
+        $(command.pushLast("-l"));
+        $(command.pushLast(input_paths.get(BigInt(1 + j))));
+      }
+
+      // Function argument paths (indices 1+numModules..)
+      const i = $.let(BigInt(1 + numModules));
       $.while(East.less(i, input_paths.size()), $ => {
         $(command.pushLast("-i"));
         $(command.pushLast(input_paths.get(i)));
