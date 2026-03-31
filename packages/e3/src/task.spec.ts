@@ -6,7 +6,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { East, StringType, IntegerType, FloatType, StructType, variant } from '@elaraai/east';
+import { East, StringType, IntegerType, FloatType, StructType, EastModuleType, EastIR, variant } from '@elaraai/east';
 import { task } from './task.js';
 import { input } from './input.js';
 
@@ -263,6 +263,134 @@ describe('task', () => {
 
       assert.strictEqual(greet.kind, 'task');
       // The runner is encoded in the command, we just verify the task was created
+    });
+  });
+
+  describe('module linking', () => {
+    it('task without modules has no module dataset', () => {
+      const name_input = input('name', StringType, 'World');
+
+      const greet = task(
+        'greet',
+        [name_input],
+        East.function(
+          [StringType],
+          StringType,
+          ($, name) => $.return(name)
+        )
+      );
+
+      // inputs: [function_ir, name_input] — no module dataset
+      assert.strictEqual(greet.inputs.length, 2);
+      assert.strictEqual(greet.inputs[0].name, 'function_ir');
+    });
+
+    it('task with module dependencies includes module dataset', () => {
+      const add = East.export("add",
+        East.function([IntegerType, IntegerType], IntegerType, ($, a, b) => a.add(b)));
+      const mathModule = East.module("math", add);
+
+      const x_input = input('x', IntegerType, 5n);
+
+      const compute = task(
+        'compute',
+        [x_input],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => mathModule.add(x, 1n)
+        )
+      );
+
+      // inputs: [function_ir, module, x_input]
+      assert.strictEqual(compute.inputs.length, 3);
+      assert.strictEqual(compute.inputs[0].name, 'function_ir');
+      assert.strictEqual(compute.inputs[1].name, 'module');
+      assert.strictEqual(compute.inputs[1].type, EastModuleType);
+    });
+
+    it('module dataset is at correct path', () => {
+      const pi = East.export("pi", 42n);
+      const mathModule = East.module("math", pi);
+
+      const x_input = input('x', IntegerType, 0n);
+
+      const compute = task(
+        'my_task',
+        [x_input],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          (_$, _x) => {
+            const externPi = East.extern("math", "pi", IntegerType);
+            return externPi;
+          }
+        )
+      );
+
+      // Task without module usage should have no module dataset
+      assert.strictEqual(compute.inputs.length, 2);
+
+      // Now create a task that actually uses the module via property access
+      const compute2 = task(
+        'my_task2',
+        [x_input],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.add(mathModule.pi)
+        )
+      );
+
+      // Module dataset should be present
+      assert.strictEqual(compute2.inputs[1].name, 'module');
+      assert.deepStrictEqual(compute2.inputs[1].path, [
+        variant('field', 'tasks'),
+        variant('field', 'my_task2'),
+        variant('field', 'module'),
+      ]);
+    });
+
+    it('command IR generates -l flag for module', () => {
+      const pi = East.export("pi", 42n);
+      const mathModule = East.module("math", pi);
+
+      const x_input = input('x', IntegerType, 5n);
+
+      const compute = task(
+        'compute',
+        [x_input],
+        East.function(
+          [IntegerType],
+          IntegerType,
+          ($, x) => x.add(mathModule.pi)
+        )
+      );
+
+      // Compile and evaluate the command IR with test paths
+      const commandIr = new EastIR(compute.command);
+      const commandFn = commandIr.compile(new Map(), new Map(), []);
+
+      // inputs: [function_ir_path, module_path, x_input_path]
+      const args = commandFn(
+        ['/tmp/input-0.beast2', '/tmp/input-1.beast2', '/tmp/input-2.beast2'],
+        '/tmp/output.beast2'
+      );
+
+      // Should include -l for module (input-1) and -i for user input (input-2)
+      assert.ok(Array.isArray(args));
+      const argsStr = args as string[];
+
+      const lIndex = argsStr.indexOf('-l');
+      assert.ok(lIndex >= 0, 'command should include -l flag');
+      assert.strictEqual(argsStr[lIndex + 1], '/tmp/input-1.beast2');
+
+      const iIndex = argsStr.indexOf('-i');
+      assert.ok(iIndex >= 0, 'command should include -i flag');
+      assert.strictEqual(argsStr[iIndex + 1], '/tmp/input-2.beast2');
+
+      // Function IR should be last positional arg
+      assert.strictEqual(argsStr[argsStr.length - 1], '/tmp/input-0.beast2');
     });
   });
 });
